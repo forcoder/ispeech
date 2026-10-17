@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用 -->
+    <string name="app_name">智语</string>
+    <string name="app_slogan">五笔输入 · 快捷短语 · 快速应用</string>
+
+    <!-- 通用按钮 -->
+    <string name="btn_confirm">确定</string>
+    <string name="btn_cancel">取消</string>
+    <string name="btn_save">保存</string>
+    <string name="btn_delete">删除</string>
+    <string name="btn_edit">编辑</string>
+    <string name="btn_add">新增</string>
+    <string name="btn_import">导入</string>
+    <string name="btn_export">导出</string>
+    <string name="btn_reset">恢复默认</string>
+    <string name="btn_retry">重试</string>
+    <string name="btn_close">关闭</string>
+    <string name="btn_copy">复制</string>
+    <string name="btn_apply">应用</string>
+
+    <!-- 设置首页 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_intro">在这里配置词典、快捷短语、账号同步与主题外观</string>
+    <string name="settings_dict_desc">管理五笔 86 词库，查看与导入自定义词典</string>
+    <string name="settings_quick_desc">维护触发词与回复内容，支持快捷应用规则</string>
+    <string name="settings_csbaby_desc">登录 csBaby 账号以启用云端规则同步</string>
+    <string name="settings_sync_desc">把云端关键词规则同步到本地快捷短语</string>
+    <string name="settings_theme_desc">选择浅色、深色或跟随系统</string>
+    <string name="settings_about_desc">版本信息与说明</string>
+
+    <!-- 五笔词典 -->
+    <string name="dict_title">五笔词典</string>
+    <string name="dict_search_hint">输入五笔编码，如 ggll</string>
+    <string name="dict_summary_title">词典概览</string>
+    <string name="dict_entry_count">词条总数：%1$d</string>
+    <string name="dict_code_count">编码总数：%1$d</string>
+    <string name="dict_single_count">单字：%1$d</string>
+    <string name="dict_phrase_count">词组：%1$d</string>
+    <string name="dict_sample_single">单字示例</string>
+    <string name="dict_sample_phrase">词组示例</string>
+    <string name="dict_not_found">未找到匹配的词条</string>
+    <string name="dict_import_hint">导入自定义词典文件，每行一个「编码 + 词条」</string>
+
+    <!-- 快捷短语 -->
+    <string name="quick_title">快捷短语</string>
+    <string name="quick_search_hint">搜索触发词或内容</string>
+    <string name="quick_add_rule">新增快捷短语</string>
+    <string name="quick_edit_rule">编辑快捷短语</string>
+    <string name="quick_trigger">触发词</string>
+    <string name="quick_label">名称</string>
+    <string name="quick_content">内容</string>
+    <string name="quick_match_mode">匹配方式</string>
+    <string name="quick_weight">权重</string>
+    <string name="quick_kind">类型</string>
+    <string name="quick_enabled">启用</string>
+    <string name="quick_empty">暂无快捷短语，点击右下角按钮新增</string>
+    <string name="quick_import_app">从快速应用导入</string>
+    <string name="quick_saved">已保存</string>
+    <string name="quick_user_file">本地文件：quick_phrases_user.txt</string>
+
+    <!-- 匹配方式 -->
+    <string name="quick_mode_exact">精确匹配</string>
+    <string name="quick_mode_prefix">前缀匹配</string>
+    <string name="quick_mode_contains">包含匹配</string>
+    <string name="quick_mode_regex">正则匹配</string>
+
+    <!-- 候选类型 -->
+    <string name="lookup_kind_wubi">五笔</string>
+    <string name="lookup_kind_wubi_phrase">词</string>
+    <string name="lookup_kind_pinyin">拼</string>
+    <string name="lookup_kind_phrase">短语</string>
+    <string name="lookup_kind_quickapply">应用</string>
+
+    <!-- csBaby 登录 -->
+    <string name="csbaby_login_title">csBaby 登录</string>
+    <string name="csbaby_identifier_hint">账号 / 手机号 / 邮箱</string>
+    <string name="csbaby_password_hint">密码</string>
+    <string name="csbaby_name_hint">昵称（可选）</string>
+    <string name="csbaby_login">登录</string>
+    <string name="csbaby_register">注册新账号</string>
+    <string name="csbaby_logout">退出登录</string>
+    <string name="csbaby_logged_in">已登录：%1$s</string>
+    <string name="csbaby_not_logged_in">未登录</string>
+    <string name="csbaby_login_failed">登录失败：%1$s</string>
+
+    <!-- 数据同步 -->
+    <string name="sync_title">数据同步</string>
+    <string name="sync_now">立即同步</string>
+    <string name="sync_never">尚未同步</string>
+    <string name="sync_last_time">上次同步：%1$s</string>
+    <string name="sync_success">同步成功，共 %1$d 条规则</string>
+    <string name="sync_failed">同步失败：%1$s</string>
+    <string name="sync_need_login">请先登录 csBaby 账号</string>
+
+    <!-- 主题 -->
+    <string name="theme_title">主题外观</string>
+    <string name="theme_follow_system">跟随系统</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_dark">深色</string>
+    <string name="theme_color_hint">品牌色：#5B6CFF</string>
+
+    <!-- 关于 -->
+    <string name="about_title">关于智语</string>
+    <string name="about_version">版本 %1$s</string>
+    <string name="about_desc">智语 iSpeech：搜狗五笔 86 复刻输入法，全功能软键盘 + 快捷短语 + 云端同步。</string>
+</resources>

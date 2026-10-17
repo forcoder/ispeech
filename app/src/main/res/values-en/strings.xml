@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">iSpeech</string>
+    <string name="app_slogan">Wubi typing · Quick phrases · Quick apps</string>
+
+    <!-- Common buttons -->
+    <string name="btn_confirm">OK</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_delete">Delete</string>
+    <string name="btn_edit">Edit</string>
+    <string name="btn_add">Add</string>
+    <string name="btn_import">Import</string>
+    <string name="btn_export">Export</string>
+    <string name="btn_reset">Reset</string>
+    <string name="btn_retry">Retry</string>
+    <string name="btn_close">Close</string>
+    <string name="btn_copy">Copy</string>
+    <string name="btn_apply">Apply</string>
+
+    <!-- Settings home -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_intro">Configure dictionary, quick phrases, account sync and appearance</string>
+    <string name="settings_dict_desc">Manage the Wubi 86 dictionary and custom word lists</string>
+    <string name="settings_quick_desc">Maintain triggers and reply templates, including quick app rules</string>
+    <string name="settings_csbaby_desc">Sign in to csBaby to enable cloud rule sync</string>
+    <string name="settings_sync_desc">Sync cloud keyword rules into local quick phrases</string>
+    <string name="settings_theme_desc">Choose light, dark or follow system</string>
+    <string name="settings_about_desc">Version and release notes</string>
+
+    <!-- Wubi dictionary -->
+    <string name="dict_title">Wubi Dictionary</string>
+    <string name="dict_search_hint">Type a Wubi code, e.g. ggll</string>
+    <string name="dict_summary_title">Dictionary Summary</string>
+    <string name="dict_entry_count">Total entries: %1$d</string>
+    <string name="dict_code_count">Total codes: %1$d</string>
+    <string name="dict_single_count">Single characters: %1$d</string>
+    <string name="dict_phrase_count">Phrases: %1$d</string>
+    <string name="dict_sample_single">Single character sample</string>
+    <string name="dict_sample_phrase">Phrase sample</string>
+    <string name="dict_not_found">No matching entries</string>
+    <string name="dict_import_hint">Import a custom dictionary file, one code and word per line</string>
+
+    <!-- Quick phrases -->
+    <string name="quick_title">Quick Phrases</string>
+    <string name="quick_search_hint">Search trigger or content</string>
+    <string name="quick_add_rule">Add Quick Phrase</string>
+    <string name="quick_edit_rule">Edit Quick Phrase</string>
+    <string name="quick_trigger">Trigger</string>
+    <string name="quick_label">Label</string>
+    <string name="quick_content">Content</string>
+    <string name="quick_match_mode">Match mode</string>
+    <string name="quick_weight">Weight</string>
+    <string name="quick_kind">Kind</string>
+    <string name="quick_enabled">Enabled</string>
+    <string name="quick_empty">No quick phrases yet. Tap the button to add one.</string>
+    <string name="quick_import_app">Import from Quick Apps</string>
+    <string name="quick_saved">Saved</string>
+    <string name="quick_user_file">Local file: quick_phrases_user.txt</string>
+
+    <!-- Match modes -->
+    <string name="quick_mode_exact">Exact</string>
+    <string name="quick_mode_prefix">Prefix</string>
+    <string name="quick_mode_contains">Contains</string>
+    <string name="quick_mode_regex">Regex</string>
+
+    <!-- Candidate kinds -->
+    <string name="lookup_kind_wubi">Wubi</string>
+    <string name="lookup_kind_wubi_phrase">Word</string>
+    <string name="lookup_kind_pinyin">Pinyin</string>
+    <string name="lookup_kind_phrase">Phrase</string>
+    <string name="lookup_kind_quickapply">App</string>
+
+    <!-- csBaby sign in -->
+    <string name="csbaby_login_title">csBaby Sign In</string>
+    <string name="csbaby_identifier_hint">Account / phone / email</string>
+    <string name="csbaby_password_hint">Password</string>
+    <string name="csbaby_name_hint">Nickname (optional)</string>
+    <string name="csbaby_login">Sign In</string>
+    <string name="csbaby_register">Register</string>
+    <string name="csbaby_logout">Sign Out</string>
+    <string name="csbaby_logged_in">Signed in: %1$s</string>
+    <string name="csbaby_not_logged_in">Not signed in</string>
+    <string name="csbaby_login_failed">Sign in failed: %1$s</string>
+
+    <!-- Sync -->
+    <string name="sync_title">Sync</string>
+    <string name="sync_now">Sync Now</string>
+    <string name="sync_never">Not synced yet</string>
+    <string name="sync_last_time">Last sync: %1$s</string>
+    <string name="sync_success">Synced %1$d rules</string>
+    <string name="sync_failed">Sync failed: %1$s</string>
+    <string name="sync_need_login">Please sign in to csBaby first</string>
+
+    <!-- Theme -->
+    <string name="theme_title">Theme</string>
+    <string name="theme_follow_system">Follow system</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_color_hint">Brand color: #5B6CFF</string>
+
+    <!-- About -->
+    <string name="about_title">About iSpeech</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_desc">iSpeech: a Sogou Wubi 86 style IME with quick phrases and cloud sync.</string>
+</resources>
