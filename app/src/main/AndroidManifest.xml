@@ -4,6 +4,16 @@
     <!-- csBaby 云端同步需要网络 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- 语音输入需要录音权限（系统 SpeechRecognizer） -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- targetSdk 34 下 SpeechRecognizer 需要声明语音识别服务的包可见性 -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:name=".IspeechApp"
         android:networkSecurityConfig="@xml/network_security_config"

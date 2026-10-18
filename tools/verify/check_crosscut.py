@@ -16,6 +16,8 @@
      首页卡片
   6. 短语使用记录 PhraseUsageStore：是否只从 AppContainer 单例获取、面板是否零 IO
   7. 口径一致性：版本号常量 vs build.gradle、注释 vs 枚举、校验脚本 vs 源码
+  8. 语音输入（VOICE / ASR）全链路：KeyDef -> 工具栏 -> 服务状态机 -> VoiceInputController
+     -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -62,6 +64,13 @@ APP_CONTAINER = JAVA / "di" / "AppContainer.kt"
 HAN_CONVERSION = JAVA / "data" / "HanConversion.kt"
 INPUT_STATS = JAVA / "data" / "InputStats.kt"
 PHRASE_USAGE = JAVA / "data" / "PhraseUsageStore.kt"
+
+VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
+SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
+ASR_SETTINGS = JAVA / "settings" / "store" / "AsrSettings.kt"
+ASR_SCREEN = JAVA / "settings" / "asr" / "AsrSettingsScreen.kt"
+ASR_VM = JAVA / "settings" / "asr" / "AsrSettingsViewModel.kt"
+MANIFEST = ROOT / "app" / "src" / "main" / "AndroidManifest.xml"
 
 STATS_SCREEN = JAVA / "settings" / "StatsScreen.kt"
 STATS_VM = JAVA / "settings" / "stats" / "StatsViewModel.kt"
@@ -783,6 +792,191 @@ def check_consistency() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
+# 8. 语音输入（VOICE / ASR）全链路
+# ═════════════════════════════════════════════════════════════
+
+def _named_strings(path: Path) -> set:
+    """取 strings.xml 全部 <string name="..."> 的名字；解析失败返回空集。"""
+    try:
+        root = ET.parse(path).getroot()
+    except Exception:  # noqa: BLE001
+        return set()
+    return {el.get("name") for el in root.findall("string") if el.get("name")}
+
+
+def check_voice_chain() -> None:
+    keydef = read(KEYDEF)
+    view = read(VIEW)
+    service = read(SERVICE)
+    controller = read(VOICE_CONTROLLER)
+    panel = read(SETTINGS_PANEL)
+    ime_xml = read(LAYOUT_XML)
+    manifest = read(MANIFEST)
+    asr = read(ASR_SETTINGS)
+    store = read(SETTINGS_STORE)
+    nav = read(NAV_GRAPH)
+    home = read(HOME_SCREEN)
+    activity = read(MAIN_ACTIVITY)
+
+    # 8.1 语音键：声明 -> 工具栏 -> 服务分支
+    check(
+        "VOICE" in (enum_members(keydef, "KeyAction") or []),
+        "KeyAction 声明了 VOICE",
+        f"{rel(KEYDEF)} 的 KeyAction 未声明 VOICE",
+    )
+    check(
+        "KeyAction.VOICE" in view and '"🎤"' in view,
+        "SoftKeyboardView 工具栏含 KeyAction.VOICE（「🎤」）",
+        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE「🎤」",
+    )
+    check(
+        "KeyAction.VOICE -> toggleVoiceInput()" in service,
+        "handleSoftKey 把 VOICE 接到 toggleVoiceInput()",
+        f"{rel(SERVICE)} handleSoftKey 未把 VOICE 接到 toggleVoiceInput()",
+    )
+
+    # 8.2 VoiceInputController：系统识别器的关键约束
+    controller_tokens = (
+        "class VoiceInputController",
+        ": RecognitionListener",
+        "SpeechRecognizer.isRecognitionAvailable",
+        "createSpeechRecognizer(context, component)",
+        "EXTRA_CALLING_PACKAGE",
+        "ERROR_RECOGNIZER_BUSY",
+        "recognizer?.destroy()",
+    )
+    missing = [t for t in controller_tokens if t not in controller]
+    check(
+        not missing,
+        "VoiceInputController 覆盖系统识别器 / 忙重试 / 释放麦克风 / 宿主包名 / 自定义组件",
+        f"{rel(VOICE_CONTROLLER)} 缺少关键实现：{missing}",
+    )
+
+    # 8.3 服务接线：创建 / 销毁 / 语音态上屏与取消
+    service_tokens = (
+        "VoiceInputController(applicationContext)",
+        "voiceController?.destroy()",
+        "voiceActive",
+        "private fun commitVoice()",
+        "private fun cancelVoice()",
+        'codeOverride = "语音"',
+    )
+    missing = [t for t in service_tokens if t not in service]
+    check(
+        not missing,
+        "服务接线完整：创建 / 销毁 Controller + 语音候选上屏 / 取消 + 编码区「语音」",
+        f"{rel(SERVICE)} 语音接线缺项：{missing}",
+    )
+
+    # 8.4 权限：Manifest 声明 + 包可见性 + 设置页代申请
+    check(
+        "android.permission.RECORD_AUDIO" in manifest
+        and "android.speech.RecognitionService" in manifest
+        and "<queries>" in manifest,
+        "Manifest 声明 RECORD_AUDIO 且 queries 暴露 RecognitionService（targetSdk 34 包可见性）",
+        f"{rel(MANIFEST)} 缺 RECORD_AUDIO 或 queries/RecognitionService",
+    )
+    check(
+        "REQUEST_MIC_EXTRA" in service and "requestMicPermission()" in service,
+        "输入法服务未授权时请求麦克风（requestMicPermission -> 设置页 extra）",
+        f"{rel(SERVICE)} 未实现麦克风代申请请求",
+    )
+    check(
+        "REQUEST_MIC_EXTRA" in activity
+        and "requestMicrophonePermissionIfNeeded" in activity
+        and "Manifest.permission.RECORD_AUDIO" in activity,
+        "设置页按 REQUEST_MIC_EXTRA 拉起系统麦克风授权（输入法无法自弹对话框）",
+        f"{rel(MAIN_ACTIVITY)} 未实现 REQUEST_MIC_EXTRA 代申请",
+    )
+
+    # 8.5 ASR 设置模型 + DataStore 读写
+    check(
+        {"SYSTEM", "CUSTOM"} <= set(enum_members(asr, "AsrEngine") or []),
+        "AsrEngine 含 SYSTEM / CUSTOM（系统识别器 / 指定服务组件）",
+        f"{rel(ASR_SETTINGS)} 的 AsrEngine 缺 SYSTEM / CUSTOM",
+    )
+    check(
+        "ASR_MODEL_EXTRA" in asr and "ZH_CN" in asr and '"zh-CN"' in asr,
+        "AsrSettings 含模型透传 extra 与 zh-CN 默认语言",
+        f"{rel(ASR_SETTINGS)} 缺 ASR_MODEL_EXTRA / zh-CN 语言取值",
+    )
+    store_tokens = (
+        "KEY_ASR_ENGINE",
+        "KEY_ASR_LANGUAGE",
+        "KEY_ASR_PARTIAL",
+        "asrSettingsFlow(",
+        "setAsrSettings(",
+    )
+    missing = [t for t in store_tokens if t not in store]
+    check(
+        not missing,
+        "SettingsStore 提供 ASR 持久化键与 asrSettingsFlow / setAsrSettings 读写",
+        f"{rel(SETTINGS_STORE)} 的 ASR 读写缺项：{missing}",
+    )
+
+    # 8.6 设置页闭环：导航路由 + 首页卡片 + 屏幕 / ViewModel
+    check(
+        'const val ASR = "asr"' in nav and "AsrSettingsScreen" in nav,
+        "设置导航注册 ASR 路由并挂载 AsrSettingsScreen",
+        f"{rel(NAV_GRAPH)} 未注册 ASR 路由",
+    )
+    check(
+        "onOpenAsr" in home and "R.string.asr_title" in home and "R.string.asr_description" in home,
+        "首页 ASR 卡片接 onOpenAsr 并显示 asr_title / asr_description",
+        f"{rel(HOME_SCREEN)} 未接入 ASR 入口卡片",
+    )
+    check(
+        "AsrSettingsViewModel" in read(ASR_SCREEN)
+        and "setAsrSettings" in read(ASR_VM),
+        "AsrSettingsScreen 经 ViewModel 保存（setAsrSettings）到 DataStore",
+        f"{rel(ASR_SCREEN)} / {rel(ASR_VM)} 未闭环到 setAsrSettings",
+    )
+
+    # 8.7 输入法内快捷面板：ASR 分项 + 服务绑定
+    panel_tokens = ("onAsrChange", "AsrEngine", "AsrLanguage", "AsrSettings")
+    missing = [t for t in panel_tokens if t not in panel]
+    check(
+        not missing,
+        "SettingsPanel 含 ASR 分项（引擎 / 语言 / 参数）并暴露 onAsrChange",
+        f"{rel(SETTINGS_PANEL)} 的 ASR 分项缺项：{missing}",
+    )
+    check(
+        "settings_panel" in xml_ids(LAYOUT_XML)
+        and "com.ispeech.input.SettingsPanel" in ime_xml,
+        "layout ime_input_view.xml 声明 @+id/settings_panel（SettingsPanel）",
+        f"{rel(LAYOUT_XML)} 缺 @+id/settings_panel 或 SettingsPanel 标签",
+    )
+    check(
+        "panelSettings.onAsrChange" in service and "applyAsrChange" in service,
+        "服务绑定 settingsPanel.onAsrChange -> applyAsrChange（设置即时生效）",
+        f"{rel(SERVICE)} 未把快捷面板 ASR 改动写回",
+    )
+
+    # 8.8 中英文案：语音 / ASR 键名齐全且一致
+    zh = _named_strings(STRINGS)
+    en = _named_strings(STRINGS_EN)
+    required = {
+        "voice_listening", "voice_need_permission", "voice_no_match",
+        "voice_error", "voice_cancel", "voice_unavailable",
+        "asr_title", "asr_description", "asr_engine_system", "asr_engine_custom",
+        "asr_partial_desc", "asr_offline_desc", "asr_saved", "asr_save_failed",
+    }
+    missing = sorted(k for k in required if k not in zh or k not in en)
+    check(
+        not missing,
+        f"语音 / ASR 文案中英各齐 {len(required)} 项",
+        f"中英 strings.xml 缺语音 / ASR 文案：{missing}",
+    )
+    zh_pairs = {s for s in zh if s.startswith(("voice_", "asr_"))}
+    en_pairs = {s for s in en if s.startswith(("voice_", "asr_"))}
+    check(
+        zh_pairs == en_pairs,
+        f"语音 / ASR 文案中英键名一致（{len(zh_pairs)} 项）",
+        f"中英键名不一致：仅中文 {sorted(zh_pairs - en_pairs)}，仅英文 {sorted(en_pairs - zh_pairs)}",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
 
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
@@ -800,6 +994,8 @@ def main() -> int:
     check_phrase_usage_singleton()
     print("-- 7. 口径一致性 --")
     check_consistency()
+    print("-- 8. 语音输入（VOICE / ASR）全链路 --")
+    check_voice_chain()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

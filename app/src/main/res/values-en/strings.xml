@@ -58,6 +58,8 @@
     <string name="quick_import_app">Import from Quick Apps</string>
     <string name="quick_saved">Saved</string>
     <string name="quick_user_file">Local file: quick_phrases_user.txt</string>
+    <string name="quick_panel_search_hint">Type to search phrases (initials ok)</string>
+    <string name="quick_panel_search_active">🔍 %1$s</string>
 
     <!-- Match modes -->
     <string name="quick_mode_exact">Exact</string>
@@ -92,6 +94,9 @@
     <string name="sync_success">Synced %1$d rules</string>
     <string name="sync_failed">Sync failed: %1$s</string>
     <string name="sync_need_login">Please sign in to csBaby first</string>
+    <string name="sync_upload_now">Upload Local</string>
+    <string name="sync_upload_desc">Upload local quick phrases to csBaby (de-duplicated by trigger)</string>
+    <string name="sync_upload_success">Uploaded %1$d rules</string>
 
     <!-- Theme -->
     <string name="theme_title">Theme</string>
@@ -104,4 +109,56 @@
     <string name="about_title">About iSpeech</string>
     <string name="about_version">Version %1$s</string>
     <string name="about_desc">iSpeech: a Sogou Wubi 86 style IME with quick phrases and cloud sync.</string>
+
+    <!-- Voice input -->
+    <string name="voice_listening">Listening…</string>
+    <string name="voice_need_permission">Please grant microphone permission first</string>
+    <string name="voice_no_match">Didn\'t catch that, please try again</string>
+    <string name="voice_error">Voice recognition failed</string>
+    <string name="voice_cancel">Voice input cancelled</string>
+    <string name="voice_unavailable">Voice input is not available on this device</string>
+
+    <!-- ASR model configuration -->
+    <string name="asr_title">ASR Model</string>
+    <string name="asr_description">Choose the speech recognition engine and parameters used by voice input</string>
+    <string name="asr_engine_label">Engine</string>
+    <string name="asr_engine_system">System recognizer</string>
+    <string name="asr_engine_system_desc">Use the built-in Android speech recognition service</string>
+    <string name="asr_engine_custom">Custom service</string>
+    <string name="asr_engine_custom_desc">Target an installed recognition service component</string>
+    <string name="asr_component_label">Service component</string>
+    <string name="asr_component_hint">package/class, e.g. com.example/.AsrService</string>
+    <string name="asr_model_label">Model name</string>
+    <string name="asr_model_hint">Model or variant passed to the service, may be empty</string>
+    <string name="asr_language_label">Language</string>
+    <string name="asr_options_label">Options</string>
+    <string name="asr_partial_label">Partial results</string>
+    <string name="asr_partial_desc">Stream interim results while speaking</string>
+    <string name="asr_offline_label">Prefer offline</string>
+    <string name="asr_offline_desc">Use on-device models when available</string>
+    <string name="asr_saved">Speech recognition settings saved</string>
+    <string name="asr_save_failed">Failed to save speech recognition settings: %1$s</string>
+
+    <!-- In-IME settings panel -->
+    <string name="settings_panel_title">Input settings</string>
+    <string name="settings_panel_more">More settings</string>
+    <string name="panel_toggle_chinese_punct">Chinese punctuation</string>
+    <string name="panel_toggle_full_width">Full-width output</string>
+    <string name="panel_toggle_association">Word association</string>
+    <string name="panel_toggle_learning">Frequency learning</string>
+    <string name="panel_toggle_pinyin_mixed">Mixed pinyin</string>
+    <string name="panel_toggle_fuzzy_pinyin">Fuzzy pinyin</string>
+    <string name="panel_toggle_traditional">Traditional output</string>
+    <string name="panel_toggle_vibrate">Key vibration</string>
+    <string name="quick_search_empty">No matching quick phrase. Try pinyin initials (fp → 发票).</string>
+    <string name="quick_search_count">%1$d matches · keyword %2$s</string>
+    <string name="quick_search_smart">Smart search: trigger / label / content / pinyin initials · %1$d total</string>
+    <string name="quick_tier_initials">Pinyin initials</string>
+    <string name="quick_save_sync">Save &amp; Sync</string>
+    <string name="quick_saved_local_only">Saved %1$d locally; not signed in to csBaby, cloud not synced</string>
+    <string name="quick_synced">Saved %1$d · cloud: created %2$d · updated %3$d · deleted %4$d</string>
+    <string name="quick_synced_partial">Saved locally · cloud applied: created %1$d · updated %2$d · deleted %3$d; %4$d not applied (backend rejects update / delete)</string>
+    <string name="quick_synced_none">Saved %1$d; nothing to sync to cloud</string>
+    <string name="quick_sync_failed">Saved locally; cloud sync failed: %1$s</string>
+    <string name="sync_upload_partial">Cloud applied: created %1$d · updated %2$d · deleted %3$d; %4$d not applied (backend rejects update / delete)</string>
 </resources>

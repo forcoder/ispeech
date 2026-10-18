@@ -31,7 +31,8 @@ private val Context.ispeechSettingsDataStore: DataStore<Preferences> by preferen
  *
  * - 词典页三个规则开关：启用快捷短语 / 启用远程规则 / 单字母不触发快捷规则；
  * - 主题模式（浅色 / 深色 / 跟随系统）；
- * - 键盘与输入：高度、每页候选数、震动、标点、全角、联想、词频学习。
+ * - 键盘与输入：高度、每页候选数、震动、标点、全角、联想、词频学习；
+ * - 语音识别（ASR）：引擎、服务组件、模型名、语言、部分结果、离线优先。
  */
 object SettingsStore {
 
@@ -51,6 +52,14 @@ object SettingsStore {
     private val KEY_PINYIN_MIXED = booleanPreferencesKey("pinyin_mixed")
     private val KEY_FUZZY_PINYIN = booleanPreferencesKey("fuzzy_pinyin")
     private val KEY_TRADITIONAL_OUTPUT = booleanPreferencesKey("traditional_output")
+
+    // —— 语音识别（ASR）——
+    private val KEY_ASR_ENGINE = stringPreferencesKey("asr_engine")
+    private val KEY_ASR_SERVICE_COMPONENT = stringPreferencesKey("asr_service_component")
+    private val KEY_ASR_MODEL = stringPreferencesKey("asr_model")
+    private val KEY_ASR_LANGUAGE = stringPreferencesKey("asr_language")
+    private val KEY_ASR_PARTIAL = booleanPreferencesKey("asr_partial_results")
+    private val KEY_ASR_PREFER_OFFLINE = booleanPreferencesKey("asr_prefer_offline")
 
     /** 读取时统一兜底，避免 IO 异常导致界面崩溃。 */
     private fun Context.safeData(): Flow<Preferences> =
@@ -157,4 +166,33 @@ object SettingsStore {
     /** 繁体输出开关（只影响上屏瞬间的转换，不需要重建引擎）。 */
     suspend fun setTraditionalOutput(context: Context, enabled: Boolean) =
         context.editSettings { it[KEY_TRADITIONAL_OUTPUT] = enabled }
+
+    // —— 语音识别（ASR）——
+
+    /** 语音识别设置（含默认值兜底），输入法服务与设置页共用。 */
+    fun asrSettingsFlow(context: Context): Flow<AsrSettings> =
+        context.safeData().map { prefs ->
+            AsrSettings(
+                engine = AsrEngine.parse(prefs[KEY_ASR_ENGINE]),
+                serviceComponent = prefs[KEY_ASR_SERVICE_COMPONENT] ?: "",
+                model = prefs[KEY_ASR_MODEL] ?: "",
+                language = AsrLanguage.parse(prefs[KEY_ASR_LANGUAGE]),
+                partialResults = prefs[KEY_ASR_PARTIAL] ?: true,
+                preferOffline = prefs[KEY_ASR_PREFER_OFFLINE] ?: false,
+            )
+        }
+
+    /** 阻塞读取一次，供输入法服务 onStartInputView 使用。 */
+    fun asrSettings(context: Context): AsrSettings =
+        runBlocking { asrSettingsFlow(context).first() }
+
+    /** 整体覆盖语音识别设置（字段做去空白处理，避免误存空格导致组件串解析失败）。 */
+    suspend fun setAsrSettings(context: Context, settings: AsrSettings) = context.editSettings {
+        it[KEY_ASR_ENGINE] = settings.engine.name
+        it[KEY_ASR_SERVICE_COMPONENT] = settings.serviceComponent.trim()
+        it[KEY_ASR_MODEL] = settings.model.trim()
+        it[KEY_ASR_LANGUAGE] = settings.language.tag
+        it[KEY_ASR_PARTIAL] = settings.partialResults
+        it[KEY_ASR_PREFER_OFFLINE] = settings.preferOffline
+    }
 }

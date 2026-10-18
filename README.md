@@ -2,8 +2,8 @@
 
 智语是一款基于五笔输入法的 Android 输入法（IME），集成 csBaby 后端实现快捷短语查找、快速应用与云端同步。
 
-**v1.5 主题：在 v1.4 全功能键盘的基础上补齐搜狗五笔的「输入方案 + 切换 + 统计」——
-拼音混输 / 模糊音、简繁输出、九宫格 T9、颜文字、输入统计，并加上 csBaby 快捷短语的收藏与最近使用。**
+**v1.5 主题：在 v1.4 全功能键盘的基础上补齐搜狗五笔的「输入方案 + 切换 + 统计 + 语音」——
+拼音混输 / 模糊音、简繁输出、九宫格 T9、颜文字、输入统计、语音输入，并加上 csBaby 快捷短语的收藏与最近使用。**
 
 ## 功能特性
 
@@ -11,7 +11,8 @@
 
 - **多页布局**：字母页（中 / 英两套）、数字页、符号页 8 页（常用 2 + 数学 / 箭头 / 货币 / 单位 / 希腊 / 线框）、
   表情页 8 类（每类一屏 emoji）、颜文字 7 类（103 条）、九宫格 T9 2 页（数字 + 标点）
-- **工具栏（8 键）**：输入法切换 · 中/英 · 符号 · 表情 · 快捷短语 · 剪贴板 · AI · 设置（窄屏自动横滑，单键 ≥40dp）
+- **工具栏（8 键）**：输入法切换 · 符号 · 表情 · 快捷短语 · 剪贴板 · AI · **语音** · 设置
+  （键序 `⌨ 符 ☺ 短语 剪贴 AI 🎤 ⚙`；「中/英」由字母页左下角 Shift 键承担；窄屏自动横滑，单键 ≥40dp）
 - **页码条**：多页布局显示「符号 1/2 点此翻页」，点按即可翻页
 - **九宫格 T9**：数字页底行「9键」进入；`1` 标点页、`*` 符号页、`#` 更多符号、`☺` 颜文字直达页
 - **快捷切换系统输入法**（v1.5 新增）：工具栏第 1 键弹出输入法列表（当前项置顶），
@@ -39,6 +40,10 @@
 - **字形过滤**（v1.5 新增）：候选展示前逐码点 `hasGlyph`，字体缺字形的生僻字（如 `wqiy` 的 `𠉎`）不再显示成豆腐块
 - **输入统计**（v1.5 新增）：`filesDir/input_stats.txt`，设置页「输入统计」看今日 / 累计字数、
   上屏次数、候选命中率与 Top 词（最多保留 400 天）
+- **语音输入**（v1.5 新增）：工具栏「🎤」→ 系统 `SpeechRecognizer`（默认普通话 zh-CN，支持实时中间结果），
+  识别文本进候选条，空格 / 点选上屏；未授权时拉起设置页弹系统授权框，取消失效即销毁识别器释放麦克风
+- **ASR 配置**（v1.5 新增）：设置页「ASR 模型配置」或输入法内置 ⌨ 面板可选引擎（系统 / 指定识别服务组件）、
+  识别语言（普通话 / 繁中 / 粤语 / English / 日本語）、实时部分结果、优先离线、模型名透传
 
 ### 快捷短语与 csBaby
 
@@ -96,6 +101,8 @@ app/src/main/java/com/ispeech/
 │   ├── QuickPhrasePanel.kt        # csBaby 快捷短语面板
 │   ├── ClipboardPanel.kt          # 剪贴板面板
 │   ├── InputMethodPanel.kt        # 切换系统输入法面板（v1.5）
+│   ├── VoiceInputController.kt    # 语音输入（系统 SpeechRecognizer 封装，v1.5）
+│   ├── SettingsPanel.kt           # 输入法内置设置面板（含 ASR 分项，v1.5）
 │   └── keyboard/                  # 键位定义与布局数据
 │       ├── KeyDef.kt              # KeyAction / KeyStyle / KeyDef / KeyboardPage
 │       ├── KeyboardLayouts.kt     # 字母 / 数字 / 符号 / 表情布局
@@ -107,8 +114,10 @@ app/src/main/java/com/ispeech/
     ├── MainActivity.kt / HomeScreen.kt / IspeechNavGraph.kt
     ├── KeyboardScreen.kt          # 键盘与输入设置
     ├── StatsScreen.kt / stats/StatsViewModel.kt  # 输入统计（v1.5）
+    ├── asr/AsrSettingsScreen.kt / AsrSettingsViewModel.kt  # ASR 模型配置（v1.5）
     ├── DictionaryScreen.kt / QuickPhrasesScreen.kt
     ├── SyncScreen.kt / CsBabyLoginScreen.kt / ThemeScreen.kt / AboutScreen.kt
+    ├── store/AsrSettings.kt        # 语音识别设置模型（引擎 / 语言 / 参数，v1.5）
     └── store/SettingsStore.kt     # DataStore 偏好项（含键盘设置）
 ```
 
@@ -118,17 +127,19 @@ app/src/main/java/com/ispeech/
 2. 等待 Gradle 同步完成（需 Android SDK 34+）
 3. 连接真机或模拟器，点击 Run
 
-命令行构建（本机已装 JDK 17 + Android SDK 时）：
+命令行构建（本机已装 JDK 17 + Android SDK 时；JDK 17 现已装在本机，见下文）：
 
 ```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 ./gradlew assembleDebug      # → app/build/outputs/apk/debug/app-debug.apk
 ./gradlew assembleRelease    # 检测到 keystore/keystore.properties 时自动签名
 ```
 
-### 远端构建机（开发机没有 JDK / Android SDK 时）
+### 远端构建机（本机缺 Android SDK 时）
 
-开发机（本项目日常使用的那台 Mac）**没有 JDK、没有 Android SDK**，所以编译 / 装机 / 冒烟测试都在远端构建机上做：
+开发机（本项目日常使用的那台 Mac）**已装 JDK 17（Temurin 17.0.20.1，2026-10-18 安装），但没有 Android SDK
+（`local.properties` 指向 `/opt/homebrew/share/android-commandlinetools`，本机无 brew）**，
+所以编译 / 装机 / 冒烟测试仍放在远端构建机上做：
 
 ```bash
 ./ispeech-remote.sh sync     # 本地源码 → 远端（排除 build/ .gradle/）
@@ -140,6 +151,10 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 ```
 
 远端：`cookie@43.136.44.72:10010`，JDK 17 + Android SDK + `emulator-5554`（Android 14）。
+
+> 本轮（v1.5 四项修复 + 图标复刻）的编译与真机验证证据、可复现命令、以及踩到的坑
+> （重装后必须先 `ime enable` 再 `ime set`；`ImageView` 没有 `minWidth/minHeight`）
+> 都记在 `docs/v1.5-verify-log.md`。
 脚本里的远端环境变量必须写成 `\$JAVA_HOME` 转义形式，否则本地 shell 会把 `$PATH` 展开进 ssh 命令导致失败。
 
 ## 安装测试（APK）
@@ -160,7 +175,9 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 10. **面板自测**：工具栏「短语」打开 csBaby 快捷短语面板（分类胶囊 + ★收藏 / 最近 + 硬件键盘打字筛选）；
     「剪贴」打开剪贴板历史
 11. **AI 回复自测**：输入框写一句话 → 点「AI」键 → 候选条出现「AI回复」→ 空格 / 点击候选上屏（自动替换原文），需先登录 csBaby
-12. **设置**：候选条右侧齿轮、键盘工具栏齿轮，或桌面「智语」图标
+12. **语音输入自测**：点工具栏「🎤」（未授权会拉起设置页弹麦克风授权，先授予）→ 候选条显示「语音识别中…」，
+    朗读一句后空格 / 点选候选上屏；识别中再点「🎤」= 取消（候选条「语音已取消」）
+13. **设置**：候选条右侧齿轮、键盘工具栏齿轮，或桌面「智语」图标
 
 ## v1.5 真机实测记录（远端构建机 emulator-5554 / Android 14）
 
@@ -174,6 +191,7 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 | 候选豆腐块过滤 | `wqiy` 候选不再出现 `𠉎`（非 BMP 无字形），只剩「你 / 仰泳(词)」 |
 | 拼音混输开关 A/B | 关闭后同一 `ze` 的「拼」标签候选消失（只剩五笔），重新打开后恢复 → 设置改动当场生效，无需重启输入法进程 |
 | 输入统计 | 今日字数 4 / 上屏 7 次 / 命中率 30.4%（查询 23 次），数值与本次实测操作一致 |
+| 语音输入 | 真机 Huawei：`phone8.png` 状态条「语音识别中...」+ logcat 绑定 `com.huawei.vassistant` 识别服务；模拟器复验：麦克风指示 + 5s 超时优雅收尾（`docs/v1.5-verify-log.md` ① / §5）；**真实转写准确率未验证**（未朗读话筒） |
 | release 打包 | `assembleRelease` 成功，`aapt2 dump badging` = `versionCode 5 / versionName 1.5`，`apksigner verify` 签名有效 |
 
 ## csBaby 后端对接
@@ -187,16 +205,18 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 
 ## 已知限制
 
-- **无双拼 / 手写 / 语音输入 / 五笔 98 / 云词库**（缺对应码表或识别能力）；皮肤仅主题色
+- **无双拼 / 手写 / 五笔 98 / 云词库**（缺对应码表或识别能力）；皮肤仅主题色
+- **语音输入依赖系统识别器**：走 Android `SpeechRecognizer`（零第三方 SDK），转写准确率 / 离线能力取决于设备上的识别服务；
+  与搜狗语音面板（波形、松手自动上屏）的行为差异见 `docs/voice-input.md`
 - **拼音 / 模糊音 / 九宫格的范围**：拼音是「五笔查不到时的兜底档位」，不替代五笔；模糊音只做 7 组常见归一化
 - **九宫格没有音节切分**：靠字母组合枚举（单次上限 192 组、数字串上限 9 位），>6 位数字时候选会变少
 - **简繁是字符级转换**：不做词汇消歧（「后台」不会变成「後臺」）
-- **输入统计不含 AI 回复上屏**（只统计五笔 / 拼音 / 标点 / 数字等常规上屏）
+- **输入统计不含 AI 回复上屏**（只统计五笔 / 拼音 / 标点 / 数字等常规上屏）；语音上屏按候选档计入字数
 - 用户自造词目前只做「词频学习」；长文本请用快捷短语规则管理
 - 快捷短语面板的文本筛选依赖硬件键盘（软键盘在面板打开时让位给列表）
 - 云端同步与 AI 回复需先在设置页登录 csBaby
 - 首次使用需手动启用输入法
-- **本机（这台 Mac）没有 JDK / Android SDK**：编译、装机、冒烟测试都在远端构建机执行（见上文）；
+- **本机（这台 Mac）没有 Android SDK**（JDK 17 已装）：编译、装机、冒烟测试仍在远端构建机执行（见上文）；
   本仓库里的 APK 与实测结论都产自远端环境
 
 ## 文档
@@ -205,6 +225,7 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 - `docs/t9-and-symbols.md` — 九宫格 T9、颜文字 / 更多符号、输入法切换（键位设计与服务侧接线）
 - `docs/stats-and-hanconversion.md` — 输入统计与简繁转换（数据来源、许可、接线）
 - `docs/quick-phrase-enhancement.md` — 快捷短语收藏 / 最近使用
+- `docs/voice-input.md` — 语音输入（搜狗对照 / 复刻义务清单 / 接线与已知差异）
 
 ## 校验脚本
 
@@ -217,7 +238,7 @@ done
 ```
 
 当前状态（v1.5）：`check_static 5/5`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
-`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 59/59`、`check_crosscut 61/61`。
+`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 59/59`、`check_crosscut 80/80`。
 另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）。
 
 ## 品牌设计
@@ -238,7 +259,12 @@ done
   （Docker + Web UI + GraphQL API，许可为上游 EULA）。注意：本项目**没有部署也没有运行 PentAGI**，
   只是借鉴它「多智能体分工 + 证据留痕」的编排思路。要做安全体检请先按上游文档部署。
 
-> 已安装到 `~/.codex/skills/`：`rea`、`reverse-engineer-anything`、`reverse-skill`、`pentagi`。
+**复刻任务统一入口**：`skills/replicate-software/SKILL.md`（复刻三件套路由器）——
+任何「复刻 / 克隆 / 对齐某产品」的活都按「REA 取证据 → reverse-skill 选工具 → PentAGI 编排与验收」执行，
+产物是行为矩阵 + 复刻义务清单 + 真机实测记录。安装：`sh skills/install-skills.sh`。
+
+> 已安装到 `~/.codex/skills/` 的复刻相关技能：`rea`、`reverse-engineer-anything`、`reverse-skill`、`pentagi`、
+> `replicate-software`（三件套路由器）。
 
 ### 词库与排序的证据链
 

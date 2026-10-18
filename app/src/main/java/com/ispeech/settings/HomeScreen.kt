@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
@@ -50,6 +51,7 @@ fun HomeScreen(
     onOpenAccount: (loggedIn: Boolean) -> Unit,
     onOpenTheme: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenAsr: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel()
     val state by viewModel.uiState.collectAsState()
@@ -126,6 +128,12 @@ fun HomeScreen(
                 title = stringResource(R.string.about_title),
                 subtitle = stringResource(R.string.settings_about_desc),
                 onClick = onOpenAbout,
+            )
+            SettingsEntryCard(
+                icon = Icons.Filled.Mic,
+                title = stringResource(R.string.asr_title),
+                subtitle = stringResource(R.string.asr_description),
+                onClick = onOpenAsr,
             )
         }
     }

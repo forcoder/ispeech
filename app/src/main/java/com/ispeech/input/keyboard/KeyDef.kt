@@ -76,6 +76,13 @@ enum class KeyAction {
      * 追加在枚举末尾：既有取值与 [Enum.ordinal] 全部不变。
      */
     SWITCH_IME,
+
+    /**
+     * 触发语音输入：拉起系统 [android.speech.SpeechRecognizer]，识别文本作为候选上屏。
+     *
+     * 追加在枚举末尾：既有取值与 [Enum.ordinal] 全部不变。
+     */
+    VOICE,
 }
 
 /** 按键视觉样式。 */
@@ -97,6 +104,13 @@ enum class KeyStyle {
 
     /** 危险操作（清空 / 收起） */
     DANGER,
+
+    /**
+     * 标点 / 符号键：键面字号比字母键小一号（搜狗习惯，全角标点不再显得过大）。
+     *
+     * 追加在枚举末尾：既有取值与 [Enum.ordinal] 全部不变。
+     */
+    PUNCT,
 }
 
 /**
@@ -120,6 +134,16 @@ data class KeyDef(
     val style: KeyStyle = KeyStyle.LETTER,
     val layout: KeyboardLayoutKind? = null,
     val pageOffset: Int = 0,
+    /** 键面顶部的数字 / 符号提示（仅字母键使用，搜狗风格）。 */
+    val hint: String = "",
+    /**
+     * 键面矢量图标（0 = 不用图标，按 [label] 文字渲染）。
+     *
+     * 只存 drawable 资源 id（不引 `R`），保持键位数据模型与资源包无耦合；
+     * 渲染在 [com.ispeech.input.SoftKeyboardView.createKey]。
+     * [label] 仍然保留：它同时充当无障碍朗读与长按/按下预览的文案。
+     */
+    val iconRes: Int = 0,
 ) {
     companion object {
         /** 字符键快捷构造。 */
@@ -129,6 +153,7 @@ data class KeyDef(
             alt: List<String> = emptyList(),
             weight: Float = 1f,
             style: KeyStyle = KeyStyle.LETTER,
+            hint: String = "",
         ): KeyDef = KeyDef(
             action = KeyAction.CHAR,
             label = label.ifEmpty { output },
@@ -136,9 +161,10 @@ data class KeyDef(
             weight = weight,
             alt = alt,
             style = style,
+            hint = hint,
         )
 
-        /** 标点键快捷构造（上屏时按标点设置转换）。 */
+        /** 标点键快捷构造（上屏时按标点设置转换；键面用 [KeyStyle.PUNCT]，字号比字母键小一号）。 */
         fun punct(
             output: String,
             label: String = "",
@@ -150,7 +176,7 @@ data class KeyDef(
             output = output,
             weight = weight,
             alt = alt,
-            style = KeyStyle.LETTER,
+            style = KeyStyle.PUNCT,
         )
 
         /** 功能键快捷构造。 */
@@ -161,6 +187,7 @@ data class KeyDef(
             style: KeyStyle = KeyStyle.SPECIAL,
             layout: KeyboardLayoutKind? = null,
             pageOffset: Int = 0,
+            iconRes: Int = 0,
         ): KeyDef = KeyDef(
             action = action,
             label = label,
@@ -168,6 +195,7 @@ data class KeyDef(
             style = style,
             layout = layout,
             pageOffset = pageOffset,
+            iconRes = iconRes,
         )
     }
 }
