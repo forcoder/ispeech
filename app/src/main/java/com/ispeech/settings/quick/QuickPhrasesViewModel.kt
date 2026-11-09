@@ -477,10 +477,14 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
             starredFlag = { id -> id in starredIds },
         )
         return copy(
+            // 管理页要能看到每一条规则：
+            // - 页头「共 N 条」直接取 matches.size，截断会把 224 条显示成 200 条；
+            // - 被截掉的规则用户既搜不到也删不掉。
+            // 输入法候选面板仍走 PhraseSearch.DEFAULT_LIMIT（200 条足够）。
             matches = search.search(
                 entries = merged.entries,
                 keyword = keyword,
-                limit = PhraseSearch.DEFAULT_LIMIT,
+                limit = Int.MAX_VALUE,
             ),
             remoteInfo = merged.infoById,
         )
