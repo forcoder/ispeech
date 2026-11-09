@@ -1,0 +1,15 @@
+<!--
+  Shift 键图标（英文态、大写锁定）：实心上箭头 + 下方横杠，表示 Caps Lock 锁定。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M12,3 L5,10 H9 V17 H15 V10 H19 Z"
+        android:fillColor="#FFFFFF" />
+    <path
+        android:pathData="M7,19.5 H17 V21.5 H7 Z"
+        android:fillColor="#FFFFFF" />
+</vector>

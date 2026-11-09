@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 品牌色 -->
+    <color name="ispeech_primary">#5B6CFF</color>
+    <color name="ispeech_primary_dark">#4657D6</color>
+    <color name="ispeech_secondary">#8A2BE2</color>
+    <color name="ispeech_on_primary">#FFFFFF</color>
+
+    <!-- 背景与表面 -->
+    <color name="ispeech_bg">#FFFFFF</color>
+    <color name="ispeech_bg_night">#121212</color>
+    <color name="ispeech_surface">#FFFFFF</color>
+    <color name="ispeech_surface_night">#1E1E1E</color>
+
+    <!-- 文本与分隔线 -->
+    <color name="ispeech_text_primary">#1A1A1A</color>
+    <color name="ispeech_text_secondary">#8A8A8A</color>
+    <color name="ispeech_text_night">#EDEDED</color>
+    <color name="ispeech_divider">#EEEEEE</color>
+
+    <!-- 图标背景 -->
+    <color name="ic_launcher_background">#5B6CFF</color>
+</resources>
