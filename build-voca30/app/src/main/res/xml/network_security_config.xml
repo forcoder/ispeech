@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- csBaby 后端目前使用 HTTP，需放开明文流量 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">api.agentai0.com</domain>
+        <!-- 离线语音模型托管站（nginx 静态目录），过渡期使用 HTTP -->
+        <domain includeSubdomains="true">cvm.agentai0.com</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
