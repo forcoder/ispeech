@@ -1,0 +1,3 @@
+interface:
+  display_name: "Rea Loop"
+  short_description: "Run large multi-agent work as a freeze-parallelize-verify loop"
