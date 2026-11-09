@@ -9,7 +9,7 @@
        R.id.*     -> 某个 layout XML 里定义了 @+id/同名
        R.layout.* -> res/layout/同名.xml
        R.string.* -> res/values*/strings.xml
-       R.color.*  -> res/values*/colors.xml
+       R.color.*  -> res/values*/colors.xml 或 res/color/<name>.xml
        R.style.*  -> res/values*/themes.xml
      （android.R.* 前缀的框架资源不计入项目资源）
   3. layout XML 里带包名的自定义 View（<com.ispeech.xxx.Yyy>）在 Kotlin 里有同名 class
@@ -123,6 +123,12 @@ def collect_resource_index():
             strings |= _value_names(d / "strings.xml", "string")
             colors |= _value_names(d / "colors.xml", "color")
             styles |= _value_names(d / "themes.xml", "style")
+
+    # res/color/<name>.xml：Android 的「一文件一资源」形式，资源名取自文件名
+    # （文件内容是 <selector>，没有 <color name="..."> 属性）——键面图标 tint 用它。
+    color_dir = RES / "color"
+    if color_dir.is_dir():
+        colors |= {p.stem for p in color_dir.glob("*.xml")}
 
     return {"layout": layouts, "id": ids, "string": strings, "color": colors, "style": styles}
 

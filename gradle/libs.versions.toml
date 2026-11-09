@@ -12,6 +12,8 @@ okhttp = "4.12.0"
 gson = "2.10.1"
 coroutines = "1.8.0"
 materialComponents = "1.11.0"
+sherpaOnnx = "6.25.21"
+commonsCompress = "1.21"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -37,6 +39,10 @@ gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 # 其他
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 material = { group = "com.google.android.material", name = "material", version.ref = "materialComponents" }
+# FunASR 离线识别（基于 sherpa-onnx 的第三方封装）
+sherpa-onnx = { group = "com.bihe0832.android", name = "lib-sherpa-onnx", version.ref = "sherpaOnnx" }
+# 解压 .tar.bz2 模型包（Android 无 tar 可执行文件，JDK 不支持 bzip2）
+commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

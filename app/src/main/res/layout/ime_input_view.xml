@@ -50,8 +50,21 @@
             android:layout_height="wrap_content"
             android:visibility="gone" />
 
+        <com.ispeech.input.AiReplyPanel
+            android:id="@+id/ai_reply_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
         <com.ispeech.input.SettingsPanel
             android:id="@+id/settings_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+
+        <com.ispeech.input.VoicePanelView
+            android:id="@+id/voice_panel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:visibility="gone" />

@@ -13,9 +13,11 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.ispeech.R
 
 /**
  * 剪贴板面板：标题行 + 操作行 + 历史列表。
@@ -113,7 +115,7 @@ class ClipboardPanel @JvmOverloads constructor(
         bottomMargin = dp(3)
     }
 
-    /** 单行：文本（单行省略，换行显示为「⏎」）+ 「×」删除 */
+    /** 单行：文本（单行省略，换行显示为「⏎」）+ 关闭图标删除 */
     private fun createRowView(entry: Entry): View {
         val label = TextView(context).apply {
             text = flatten(entry.text)
@@ -123,11 +125,10 @@ class ClipboardPanel @JvmOverloads constructor(
             setTextColor(textPrimary)
             setPadding(dp(10), dp(9), dp(6), dp(9))
         }
-        val delete = TextView(context).apply {
-            text = "×"
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setTextColor(textSecondary)
+        val delete = ImageView(context).apply {
+            setImageResource(R.drawable.ic_close)
+            scaleType = ImageView.ScaleType.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
             isClickable = true
             isFocusable = true
             background = keySelector(Color.TRANSPARENT, pressedBg)
@@ -206,11 +207,9 @@ class ClipboardPanel @JvmOverloads constructor(
     }
 
     private fun buildTitleRow(): View {
-        val back = TextView(context).apply {
-            text = "‹"
-            textSize = 22f
-            gravity = Gravity.CENTER
-            setTextColor(textPrimary)
+        val back = ImageView(context).apply {
+            setImageResource(R.drawable.ic_back)
+            scaleType = ImageView.ScaleType.CENTER
             isClickable = true
             isFocusable = true
             background = keySelector(rowBg, pressedBg)

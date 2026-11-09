@@ -11,9 +11,11 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.ispeech.R
 
 /**
  * 输入法切换面板：列出系统里已启用的输入法，点一下就切过去。
@@ -108,11 +110,9 @@ class InputMethodPanel @JvmOverloads constructor(
     }
 
     private fun buildTitleRow(): View {
-        val back = TextView(context).apply {
-            text = "‹"
-            textSize = 22f
-            gravity = Gravity.CENTER
-            setTextColor(textPrimary)
+        val back = ImageView(context).apply {
+            setImageResource(R.drawable.ic_back)
+            scaleType = ImageView.ScaleType.CENTER
             isClickable = true
             isFocusable = true
             background = keySelector(rowBg, pressedBg)

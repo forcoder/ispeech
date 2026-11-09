@@ -11,8 +11,8 @@
 
 - **多页布局**：字母页（中 / 英两套）、数字页、符号页 8 页（常用 2 + 数学 / 箭头 / 货币 / 单位 / 希腊 / 线框）、
   表情页 8 类（每类一屏 emoji）、颜文字 7 类（103 条）、九宫格 T9 2 页（数字 + 标点）
-- **工具栏（8 键）**：输入法切换 · 符号 · 表情 · 快捷短语 · 剪贴板 · AI · **语音** · 设置
-  （键序 `⌨ 符 ☺ 短语 剪贴 AI 🎤 ⚙`；「中/英」由字母页左下角 Shift 键承担；窄屏自动横滑，单键 ≥40dp）
+- **工具栏（9 键）**：输入法切换 · 中/英 · 符号 · 表情 · 快捷短语 · 剪贴板 · AI · **语音** · 设置
+  （键序 `⌨ 中/英 符 ☺ 短语 剪贴 AI 语音 ⚙`；字母页底行另有「中/英」键；窄屏自动横滑，单键 ≥40dp）
 - **页码条**：多页布局显示「符号 1/2 点此翻页」，点按即可翻页
 - **九宫格 T9**：数字页底行「9键」进入；`1` 标点页、`*` 符号页、`#` 更多符号、`☺` 颜文字直达页
 - **快捷切换系统输入法**（v1.5 新增）：工具栏第 1 键弹出输入法列表（当前项置顶），
@@ -31,7 +31,17 @@
 - **词语联想**：上屏后按设置给出联想候选（词库词组 + 快捷短语 + 用户词），候选条显示「联想」
 - **用户词频学习**：选过的词记入 `filesDir/user_dict.txt`（权重 `min(400, 120 + 10×次数)`），
   引擎侧统一加 10 万权重保证学到的词排在系统词前面；设置页可查看 / 删除 / 清空
-- **拼音混输**（v1.5 新增）：`assets/pinyin86.dict`（44684 行）+ `PinyinEngine`，全拼 / 简拼 / 前缀三层匹配，
+- **自造词**（v1.5 新增）：候选条**长按** → 「记住这个词」直接写入用户词库（显式动作，不受「词频学习」开关限制）
+- **用户词库分模式**（v1.5 新增）：`user_dict.txt` 第 4 列记 `wb`（五笔）/ `cn`（拼音），编码空间互不污染；
+  拼音态因此也能自造词与词频学习（对齐搜狗 `wb_dict_user` / `cn_dict_user`）
+- **词库导入 / 导出**（v1.5 新增）：词典页「用户词库导入 / 导出」，支持 `code<TAB>词条[<TAB>次数][<TAB>wb|cn]`
+  与「编码 词条」两段式，走系统文件选择器（SAF），不申请存储权限
+- **分类词库（细胞词库）**（v1.5 新增）：词典页「添加词库」安装本地文本词库到 `filesDir/cell_dicts/`，
+  逐库启用 / 停用 / 删除（对齐搜狗 `InitializeWithMode:CateDictArray:` + `pfnAddDict` / `pfnDelDict`）；
+  正文格式与用户词库一致，可加 `# category: 分类名` 头；启用后并入候选，
+  权重 8 万——排在用户学到的词之后、系统词库之前，五笔态取 wb 码、拼音态取 cn 码
+- **拼音混输**（v1.5 新增）：`assets/pinyin86.dict`（71097 行：单字 15511 行 / 词组 55575 行，其中 26413 条
+  由 jieba 高频词注音补全）+ `PinyinEngine`，全拼 / 简拼 / 前缀三层匹配，
   排在五笔之后做兜底（`nerf` 这类打不出五笔码的输入）；设置页开关
 - **模糊音**（v1.5 新增）：z=zh、c=ch、s=sh、n=l、an=ang、en=eng、in=ing；设置页开关
 - **简繁输出**（v1.5 新增）：`HanConversion` + `han_s2t.txt` / `han_t2s.txt`（字符级），设置页「繁体输出」开关
@@ -40,8 +50,9 @@
 - **字形过滤**（v1.5 新增）：候选展示前逐码点 `hasGlyph`，字体缺字形的生僻字（如 `wqiy` 的 `𠉎`）不再显示成豆腐块
 - **输入统计**（v1.5 新增）：`filesDir/input_stats.txt`，设置页「输入统计」看今日 / 累计字数、
   上屏次数、候选命中率与 Top 词（最多保留 400 天）
-- **语音输入**（v1.5 新增）：工具栏「🎤」→ 系统 `SpeechRecognizer`（默认普通话 zh-CN，支持实时中间结果），
-  识别文本进候选条，空格 / 点选上屏；未授权时拉起设置页弹系统授权框，取消失效即销毁识别器释放麦克风
+- **语音输入**（v1.5 新增）：工具栏语音键（`ic_voice`）→ **按住说话 → 语音面板（实时文字 + 音量波形）→ 松手自动上屏**，
+  上滑进取消区丢弃；两种引擎同形态（FunASR 离线 / 系统 `SpeechRecognizer`）；未授权时拉起设置页弹系统授权框，
+  取消即销毁识别器释放麦克风
 - **ASR 配置**（v1.5 新增）：设置页「ASR 模型配置」或输入法内置 ⌨ 面板可选引擎（系统 / 指定识别服务组件）、
   识别语言（普通话 / 繁中 / 粤语 / English / 日本語）、实时部分结果、优先离线、模型名透传
 
@@ -51,6 +62,10 @@
   点条目整段上屏；数据来自内置 `quick_phrases.txt`、csBaby 远端同步、用户自定义规则三处
 - **收藏与最近**（v1.5 新增）：面板顶部 ★ 收藏 / 最近胶囊（`filesDir/phrase_usage.txt`），
   条目右侧星标一键收藏，使用次数越多越靠前
+- **快捷字母**（自定义简写）：管理页新增 / 编辑短语时可指定 2–4 位小写字母（如 `ycsf` → 游泳池换水要收费的），
+  五笔态敲这串字母，该短语**直接排在候选第 1 位**，空格整段上屏；面板行内以角标显示快捷字母，保存后无需重启输入法
+- **远端短语可管**：csBaby 拉取的规则同样出现在列表里（角标「远端」），可查看内容并**给它设快捷字母**——
+  改动以「覆盖」形式写进本地用户规则（权重 +1000，排序必胜），随时「恢复默认」；远端文件本身不被修改，下次同步不会冲掉
 - **快速应用**：打字命中触发码时，候选条用「应用 / 短语」标签提示，选中后把详细内容整段上屏
 - **候选档位**：应用 < 短语 < 词库单字 < 词库词组 < 拼音；`wqiy` 首选是「你」、`trnt` 首选是「我」，
   词组（带「词」标签）用数字键选，符合五笔肌肉记忆
@@ -78,6 +93,7 @@ app/src/main/java/com/ispeech/
 │   ├── SyncRepository.kt          # 远端规则同步仓库
 │   ├── RemoteKeywordRule.kt       # 远端规则模型
 │   ├── UserDictStore.kt           # 用户词频 / 自造词存储
+│   ├── CellDictStore.kt           # 分类词库（细胞词库）安装 / 启停 / 索引（v1.5）
 │   ├── ClipboardHistory.kt        # 剪贴板历史
 │   ├── Punctuation.kt             # 中英标点映射 + 全角转换
 │   ├── PhraseUsageStore.kt        # 短语收藏 / 最近 / 使用计数（v1.5）
@@ -89,6 +105,7 @@ app/src/main/java/com/ispeech/
 │   ├── WubiEngine.kt              # 五笔引擎（含词语联想索引）
 │   ├── QuickPhraseEngine.kt       # 快捷短语引擎（含短语联想）
 │   ├── UserDictEngine.kt          # 用户词库引擎
+│   ├── CellDictEngine.kt          # 分类词库（细胞词库）引擎（v1.5）
 │   ├── PinyinEngine.kt            # 拼音引擎：全拼 / 简拼 / 前缀 / 模糊音（v1.5）
 │   ├── PinyinDictLoader.kt        # pinyin86.dict 加载与解析（v1.5）
 │   ├── CompositeEngine.kt         # 组合引擎（候选合并 + 联想合并）
@@ -175,8 +192,8 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 10. **面板自测**：工具栏「短语」打开 csBaby 快捷短语面板（分类胶囊 + ★收藏 / 最近 + 硬件键盘打字筛选）；
     「剪贴」打开剪贴板历史
 11. **AI 回复自测**：输入框写一句话 → 点「AI」键 → 候选条出现「AI回复」→ 空格 / 点击候选上屏（自动替换原文），需先登录 csBaby
-12. **语音输入自测**：点工具栏「🎤」（未授权会拉起设置页弹麦克风授权，先授予）→ 候选条显示「语音识别中…」，
-    朗读一句后空格 / 点选候选上屏；识别中再点「🎤」= 取消（候选条「语音已取消」）
+12. **语音输入自测**：**按住**工具栏语音键（未授权会拉起设置页弹麦克风授权，先授予）→ 语音面板出现「正在聆听」+ 波形，
+    朗读一句后**松手即上屏**；按住时上滑到取消区再松手 = 丢弃（面板提示「松开取消」）
 13. **设置**：候选条右侧齿轮、键盘工具栏齿轮，或桌面「智语」图标
 
 ## v1.5 真机实测记录（远端构建机 emulator-5554 / Android 14）
@@ -206,8 +223,8 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 ## 已知限制
 
 - **无双拼 / 手写 / 五笔 98 / 云词库**（缺对应码表或识别能力）；皮肤仅主题色
-- **语音输入依赖系统识别器**：走 Android `SpeechRecognizer`（零第三方 SDK），转写准确率 / 离线能力取决于设备上的识别服务；
-  与搜狗语音面板（波形、松手自动上屏）的行为差异见 `docs/voice-input.md`
+- **语音输入**：两种引擎统一为搜狗式「按住说话 + 语音面板 + 松手上屏」；面板放在键盘**上方**（不替换键盘区域），
+  因为被按住的语音键一旦 GONE，系统会补发 `ACTION_CANCEL`，`ACTION_UP` 丢失就会「松手不上屏」。详见 `docs/voice-input.md`
 - **拼音 / 模糊音 / 九宫格的范围**：拼音是「五笔查不到时的兜底档位」，不替代五笔；模糊音只做 7 组常见归一化
 - **九宫格没有音节切分**：靠字母组合枚举（单次上限 192 组、数字串上限 9 位），>6 位数字时候选会变少
 - **简繁是字符级转换**：不做词汇消歧（「后台」不会变成「後臺」）
@@ -232,14 +249,17 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 全部为纯 Python3 静态检查（无第三方依赖、不联网、不编译），改动后本地直接跑：
 
 ```bash
-for s in static input_logic t9 stats phrase_usage pinyin crosscut; do
+for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger; do
   python3 tools/verify/check_$s.py
 done
 ```
 
 当前状态（v1.5）：`check_static 5/5`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
-`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 59/59`、`check_crosscut 80/80`。
-另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）。
+`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 66/66`、`check_crosscut 138/138`、
+`check_quick_trigger 29/29(+1 known warn)`。**全部通过**；分类词库（细胞词库）第 10 节 24 项全绿。
+另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）；
+`tools/verify/check_quick_trigger.py` 校验快捷短语「简写（触发码）」规则 —— 尤其防止**单字母简写误用
+prefix 模式导致静默失效**（见 `docs/quick-phrase-enhancement.md` 的「简写」一节）。
 
 ## 品牌设计
 
@@ -275,6 +295,7 @@ done
 | 所以词组必须**单独占一档**，排在单字之后 | 否则 `trnt` 首选会从「我」变成「选择性」；回归测试见 `tools/verify/check_input_logic.py` 的 `check_candidate_rank_real_dict()` |
 | 候选档位：应用 < 短语 < 词库单字 < 词库词组 | `LookupCandidate.kt` 的 `LookupKind.order`，真机截图验证见 `docs/` |
 | `pinyin86.dict` 的词频来自真实上游三源（MIT，commit + sha256 固定） | `tools/pinyin/build_pinyin_dict.py` 头部逐文件记录上游与 sha256，构建校验失败即退出 |
+| `phrase-pinyin-data` 漏收的高频词（`jiudian` 的「酒店」）用注音补全，不是手写拼音 | jieba 词频 × pinyin-data 单字读音合成；多音字按语料证据定音（如 明 = ming/meng，语料只有 ming），佐证多个读音即跳过；回归见 `tools/verify/check_pinyin.py` 的「补全词」4 条 |
 | 简繁映射来自 OpenCC（Apache-2.0）并逐条记录来源 | `tools/gen/build_han_assets.py`、`docs/stats-and-hanconversion.md` 的上游 sha256 表 |
 | 颜文字 / 更多符号是数据表不是拍脑袋 | `KaomojiData.kt`，`tools/verify/check_t9.py` 断言分类数与全局去重 |
 

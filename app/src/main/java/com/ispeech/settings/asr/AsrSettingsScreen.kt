@@ -3,6 +3,7 @@ package com.ispeech.settings.asr
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import com.ispeech.settings.store.AsrEngine
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,7 +38,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ispeech.R
-import com.ispeech.settings.store.AsrEngine
 import com.ispeech.settings.store.AsrLanguage
 import com.ispeech.settings.store.AsrSettings
 
@@ -93,6 +93,12 @@ fun AsrSettingsScreen(onBack: () -> Unit) {
                     desc = stringResource(R.string.asr_engine_custom_desc),
                     selected = state.draft.engine == AsrEngine.CUSTOM,
                     onSelect = { viewModel.updateEngine(AsrEngine.CUSTOM) },
+                )
+                EngineOption(
+                    title = stringResource(R.string.asr_engine_funasr),
+                    desc = stringResource(R.string.asr_engine_funasr_desc),
+                    selected = state.draft.engine == AsrEngine.FUNASR,
+                    onSelect = { viewModel.updateEngine(AsrEngine.FUNASR) },
                 )
             }
 

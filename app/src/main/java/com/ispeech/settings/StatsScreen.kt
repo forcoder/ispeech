@@ -318,6 +318,7 @@ private fun typeLabel(type: CommitType): String = when (type) {
     CommitType.PUNCTUATION -> "标点 / 符号"
     CommitType.PHRASE -> "短语 / 长文本"
     CommitType.EMOJI -> "表情"
+    CommitType.VOICE -> "语音"
 }
 
 /** 命中率百分比（保留一位小数，不用 String.format 以免受系统区域设置影响）。 */

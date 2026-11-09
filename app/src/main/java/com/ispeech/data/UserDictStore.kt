@@ -5,13 +5,109 @@ import com.ispeech.engine.LookupCandidate
 import com.ispeech.engine.LookupKind
 import java.io.File
 
-/** 用户词典条目：code 为五笔编码，text 为上屏文本，count 为使用次数。 */
-data class UserDictEntry(val code: String, val text: String, val count: Int, val weight: Int)
+/**
+ * 用户词库的输入模式：对齐搜狗 mac 版的用户词库文件名（`wb_dict_user` / `cn_dict_user`）。
+ *
+ * 编码空间按模式隔离：五笔码写 [WUBI]、拼音串写 [PINYIN]。混在一个库里会互相污染——
+ * 拼音 `jiudian` 会被当成五笔码命中，五笔码也可能被拼音串撞上。
+ */
+enum class UserDictMode(val id: String, val label: String) {
+    WUBI("wb", "五笔"),
+    PINYIN("cn", "拼音");
 
-/** 用户词频 + 自造词存储：filesDir/user_dict.txt，格式 code<TAB>text<TAB>count，每行一条，支持 # 注释。 */
+    companion object {
+        /** 解析模式列；缺列 / 未知值一律当五笔，兼容只有五笔的历史数据。 */
+        fun parse(raw: String?): UserDictMode = when (raw?.trim()?.lowercase()) {
+            PINYIN.id -> PINYIN
+            else -> WUBI
+        }
+    }
+}
+
+/** 用户词典条目：code 为输入码（五笔码 / 拼音串），text 为上屏文本，count 为使用次数。 */
+data class UserDictEntry(
+    val code: String,
+    val text: String,
+    val count: Int,
+    val weight: Int,
+    val mode: UserDictMode = UserDictMode.WUBI,
+)
+
+/** 导入结果：新增 / 更新 / 跳过（解析失败或重复但未覆盖）的条数。 */
+data class UserDictImportResult(val added: Int, val updated: Int, val skipped: Int) {
+    /** 实际写库的条数（新增 + 更新）。 */
+    val total: Int get() = added + updated
+}
+
+/** 空白分隔：只在整行没有制表符时用于「编码 词条」这种两段式写法。 */
+private val BLANK_SEPARATOR = Regex("\\s+")
+
+/**
+ * 解析一行用户词库文本（读盘与导入共用同一套规则，避免两处规则漂移）。
+ *
+ * 支持三种写法，字段之间用 TAB 分隔：
+ *  * `code<TAB>text<TAB>count<TAB>mode` —— 当前磁盘格式
+ *  * `code<TAB>text<TAB>count` —— 历史格式，模式按 [defaultMode]
+ *  * `code<TAB>text` —— 导入用的简写，count 记 1
+ * 另外在整行没有 TAB 时接受 `编码 词条`（空白分隔）两段式。
+ *
+ * 模式列只在「末列是 wb / cn 且倒数第二列是计数」时才认——否则文本里未转义的 TAB
+ * 会被误判成模式列（历史数据里存在这种情况）。
+ */
+internal fun parseUserDictLine(line: String, defaultMode: UserDictMode = UserDictMode.WUBI): UserDictEntry? {
+    val trimmed = line.trim()
+    if (trimmed.isEmpty() || trimmed.startsWith("#")) return null
+    if (!trimmed.contains('\t')) {
+        val parts = trimmed.split(BLANK_SEPARATOR)
+        if (parts.size != 2) return null
+        return buildUserDictEntry(parts[0], parts[1], 1, defaultMode)
+    }
+    val fields = trimmed.split('\t')
+    if (fields.size < 2) return null
+    val modeCell = fields.last().trim().lowercase()
+    val hasModeColumn = fields.size >= 4 &&
+        (modeCell == UserDictMode.WUBI.id || modeCell == UserDictMode.PINYIN.id) &&
+        fields[fields.size - 2].trim().toIntOrNull() != null
+    val mode = if (hasModeColumn) UserDictMode.parse(fields.last()) else defaultMode
+    val textEnd: Int
+    val count: Int
+    when {
+        hasModeColumn -> {
+            textEnd = fields.size - 2
+            count = fields[textEnd].trim().toInt()
+        }
+        fields.size == 2 -> {
+            textEnd = 2
+            count = 1
+        }
+        fields.last().trim().toIntOrNull() != null -> {
+            textEnd = fields.size - 1
+            count = fields.last().trim().toInt()
+        }
+        else -> return null
+    }
+    val word = unescapeLineText(fields.subList(1, textEnd).joinToString("\t"))
+    return buildUserDictEntry(fields[0], word, count, mode)
+}
+
+/** 组装条目：编码统一成小写 ASCII 字母 / 数字（拼音串要去掉音节间的空格才对得上查询）。 */
+private fun buildUserDictEntry(code: String, word: String, count: Int, mode: UserDictMode): UserDictEntry? {
+    val normalized = unescapeLineText(code).lowercase().filter { ch ->
+        ch in 'a'..'z' || ch in '0'..'9'
+    }
+    val text = unescapeLineText(word)
+    if (normalized.isEmpty() || text.isEmpty()) return null
+    val safeCount = count.coerceAtLeast(0)
+    return UserDictEntry(normalized, text, safeCount, UserDictStore.weightOf(safeCount), mode)
+}
+
+/**
+ * 用户词频 + 自造词存储：filesDir/user_dict.txt，格式 `code<TAB>text<TAB>count<TAB>mode`，
+ * 每行一条，支持 # 注释。历史 3 列（无 mode 列）按 [UserDictMode.WUBI] 读入，不丢词。
+ */
 class UserDictStore private constructor(private val file: File) {
 
-    /** code + "\u0001" + text -> 条目；\u0001 保证 code / text 任意组合都唯一。 */
+    /** mode + "\u0001" + code + "\u0001" + text -> 条目；\u0001 保证任意组合都唯一。 */
     private val entries = LinkedHashMap<String, UserDictEntry>()
 
     /** 懒加载标记：保证首次访问才读盘。 */
@@ -50,14 +146,15 @@ class UserDictStore private constructor(private val file: File) {
             return store
         }
 
-        /** 权重公式：min(400, 120 + count * 10)。 */
-        private fun weightOf(count: Int): Int {
+        /** 权重公式：min(400, 120 + count * 10)；[parseUserDictLine] 导入时也要用。 */
+        internal fun weightOf(count: Int): Int {
             val safe = count.coerceAtLeast(0)
             val raw = BASE_WEIGHT + safe.toLong() * WEIGHT_PER_USE
             return raw.coerceAtMost(MAX_WEIGHT.toLong()).toInt()
         }
 
-        private fun keyOf(code: String, text: String): String = code + KEY_SEP + text
+        private fun keyOf(mode: UserDictMode, code: String, text: String): String =
+            mode.id + KEY_SEP + code + KEY_SEP + text
     }
 
     /** 全部条目（使用次数降序，其次文本升序）。 */
@@ -69,14 +166,14 @@ class UserDictStore private constructor(private val file: File) {
         return list
     }
 
-    /** 记录一次使用：存在则 count+1，返回最新条目。 */
+    /** 记录一次使用（自造词与词频学习共用）：存在则 count+1，返回最新条目。 */
     @Synchronized
-    fun record(code: String, text: String): UserDictEntry? {
+    fun record(code: String, text: String, mode: UserDictMode = UserDictMode.WUBI): UserDictEntry? {
         if (code.isEmpty() || text.isEmpty()) return null
         ensureLoaded()
-        val key = keyOf(code, text)
+        val key = keyOf(mode, code, text)
         val count = (entries[key]?.count ?: 0) + 1
-        val entry = UserDictEntry(code, text, count, weightOf(count))
+        val entry = UserDictEntry(code, text, count, weightOf(count), mode)
         entries[key] = entry
         persist()
         return entry
@@ -84,9 +181,9 @@ class UserDictStore private constructor(private val file: File) {
 
     /** 删除条目，返回是否删除成功。 */
     @Synchronized
-    fun remove(code: String, text: String): Boolean {
+    fun remove(code: String, text: String, mode: UserDictMode = UserDictMode.WUBI): Boolean {
         ensureLoaded()
-        val removed = entries.remove(keyOf(code, text)) != null
+        val removed = entries.remove(keyOf(mode, code, text)) != null
         if (removed) persist()
         return removed
     }
@@ -99,15 +196,66 @@ class UserDictStore private constructor(private val file: File) {
         persist()
     }
 
-    /** 查询候选：编码精确匹配优先，其次以输入为前缀的编码；按权重降序。 */
+    /** 导出为文本：与磁盘格式一致（`code<TAB>text<TAB>count<TAB>mode`），可再次导入或手工编辑。 */
     @Synchronized
-    fun lookupCandidates(input: String, limit: Int): List<LookupCandidate> {
+    fun exportText(): String {
+        ensureLoaded()
+        val sb = StringBuilder()
+        sb.append(HEADER).append('\n')
+        for (entry in entries.values) {
+            sb.append(escapeLineText(entry.code)).append('\t')
+                .append(escapeLineText(entry.text)).append('\t')
+                .append(entry.count).append('\t')
+                .append(entry.mode.id).append('\n')
+        }
+        return sb.toString()
+    }
+
+    /**
+     * 导入文本：逐行按 [parseUserDictLine] 解析，按 `mode + code + text` 合并——
+     * 新条目直接写入，已存在的取较大 count（不会把学到的词频降下去）。行内自带模式列时
+     * 以行为准，否则用 [defaultMode]（界面上选「导入到五笔 / 拼音」）。
+     */
+    @Synchronized
+    fun importText(text: String, defaultMode: UserDictMode = UserDictMode.WUBI): UserDictImportResult {
+        ensureLoaded()
+        var added = 0
+        var updated = 0
+        var skipped = 0
+        for (rawLine in text.split('\n')) {
+            val parsed = parseUserDictLine(rawLine, defaultMode)
+            if (parsed == null) {
+                if (rawLine.isNotBlank() && !rawLine.trim().startsWith("#")) skipped++
+                continue
+            }
+            val key = keyOf(parsed.mode, parsed.code, parsed.text)
+            val existing = entries[key]
+            when {
+                existing == null -> {
+                    entries[key] = parsed
+                    added++
+                }
+                parsed.count > existing.count -> {
+                    entries[key] = parsed
+                    updated++
+                }
+                else -> skipped++
+            }
+        }
+        if (added > 0 || updated > 0) persist()
+        return UserDictImportResult(added, updated, skipped)
+    }
+
+    /** 查询候选：只看 [mode] 对应模式的条目；编码精确匹配优先，其次前缀；按权重降序。 */
+    @Synchronized
+    fun lookupCandidates(input: String, limit: Int, mode: UserDictMode = UserDictMode.WUBI): List<LookupCandidate> {
         if (input.isEmpty() || limit <= 0) return emptyList()
         ensureLoaded()
         val needle = input.lowercase()
         val exact = ArrayList<UserDictEntry>()
         val prefixed = ArrayList<UserDictEntry>()
         for (entry in entries.values) {
+            if (entry.mode != mode) continue
             val code = entry.code.lowercase()
             when {
                 code == needle -> exact.add(entry)
@@ -132,9 +280,9 @@ class UserDictStore private constructor(private val file: File) {
         return out
     }
 
-    /** 联想：文本包含 input 的条目，按权重降序。 */
+    /** 联想：只看 [mode] 对应模式的条目，文本包含 input 的按权重降序。 */
     @Synchronized
-    fun related(text: String, limit: Int): List<LookupCandidate> {
+    fun related(text: String, limit: Int, mode: UserDictMode = UserDictMode.WUBI): List<LookupCandidate> {
         if (limit <= 0) return emptyList()
         val needle = text.trim()
         if (needle.isEmpty()) return emptyList()
@@ -143,6 +291,7 @@ class UserDictStore private constructor(private val file: File) {
 
         val pool = ArrayList<UserDictEntry>()
         for (entry in entries.values) {
+            if (entry.mode != mode) continue
             val word = entry.text
             if (word.isEmpty() || word == needle) continue
             val hit = word.contains(needle) ||
@@ -164,17 +313,8 @@ class UserDictStore private constructor(private val file: File) {
         runCatching {
             if (!file.exists()) return
             for (rawLine in file.readText(Charsets.UTF_8).split('\n')) {
-                val line = rawLine.trim()
-                if (line.isEmpty() || line.startsWith("#")) continue
-                val fields = line.split('\t')
-                if (fields.size < 3) continue
-                val code = unescapeLineText(fields[0])
-                val count = fields.last().trim().toIntOrNull() ?: continue
-                // 文本里的制表符已转义，取中间整段以兼容历史未转义数据。
-                val word = unescapeLineText(fields.subList(1, fields.size - 1).joinToString("\t"))
-                if (code.isEmpty() || word.isEmpty()) continue
-                val safeCount = count.coerceAtLeast(0)
-                entries[keyOf(code, word)] = UserDictEntry(code, word, safeCount, weightOf(safeCount))
+                val entry = parseUserDictLine(rawLine, UserDictMode.WUBI) ?: continue
+                entries[keyOf(entry.mode, entry.code, entry.text)] = entry
             }
         }.onFailure { Log.w(TAG, "读取用户词典失败: ${file.path}", it) }
     }
@@ -188,7 +328,8 @@ class UserDictStore private constructor(private val file: File) {
             for (entry in entries.values) {
                 sb.append(escapeLineText(entry.code)).append('\t')
                     .append(escapeLineText(entry.text)).append('\t')
-                    .append(entry.count).append('\n')
+                    .append(entry.count).append('\t')
+                    .append(entry.mode.id).append('\n')
             }
             file.writeText(sb.toString(), Charsets.UTF_8)
         }.onFailure { Log.w(TAG, "写入用户词典失败: ${file.path}", it) }
@@ -208,13 +349,19 @@ private val COUNT_RANK: Comparator<UserDictEntry> = Comparator { a, b ->
     if (byCount != 0) byCount else a.text.compareTo(b.text)
 }
 
-/** 条目 → 统一候选：单字走五笔候选，多字走短语候选。 */
+/**
+ * 条目 → 统一候选：五笔模式单选字走五笔、多字走词组档；拼音模式一律走拼音档，
+ * 与拼音词表的候选同档竞争，靠 +10 万权重排到前面。
+ */
 private fun UserDictEntry.toCandidate(): LookupCandidate = LookupCandidate(
     code = code,
     display = text,
     insertText = text,
     weight = weight,
-    kind = if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE
+    kind = when (mode) {
+        UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE
+        UserDictMode.PINYIN -> LookupKind.PINYIN
+    },
 )
 
 /** 单行文本转义：换行 / 回车 / 制表符 / 反斜杠写成字面量，保证一条记录占一行。 */

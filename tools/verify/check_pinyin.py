@@ -416,6 +416,11 @@ def main() -> int:
     report.check("全拼 `chang` 命中 长", "长" in texts(plain, "chang"), f"实际 {texts(plain, 'chang')[:5]}")
     report.check("全拼 `zhang` 命中 长（多音字两读都可检）", "长" in texts(plain, "zhang"), f"实际 {texts(plain, 'zhang')[:5]}")
 
+    # --- 词表缺口回归：只含 phrase-pinyin-data 时，jiudian / mingtian / shouji 这类常用词
+    #     整词缺失，只能逐字输入；注音补全后必须能整词命中 ---
+    for code, word in (("jiudian", "酒店"), ("jintian", "今天"), ("mingtian", "明天"), ("shouji", "手机")):
+        report.check(f"补全词 `{code}` 命中 {word}", word in texts(plain, code, 20), f"实际 {texts(plain, code, 8)}")
+
     # --- 简拼命中 ---
     report.check("简拼 `nh` 命中 你好", "你好" in texts(plain, "nh"), f"实际 {texts(plain, 'nh')[:5]}")
     report.check("简拼 `zg` 命中 中国", "中国" in texts(plain, "zg"), f"实际 {texts(plain, 'zg')[:5]}")
@@ -459,7 +464,18 @@ def main() -> int:
     report.check("模糊音开：`zhongguo` 仍命中 中国", "中国" in texts(fuzzy, "zhongguo"), f"实际 {texts(fuzzy, 'zhongguo')[:5]}")
 
     report.check("模糊音关：`lh` 不命中 你好", "你好" not in texts(plain, "lh", 40), f"实际 {texts(plain, 'lh', 8)}")
-    report.check("模糊音开：`lh` 命中 你好（n = l）", "你好" in texts(fuzzy, "lh", 40), f"实际 {texts(fuzzy, 'lh')[:8]}")
+    # 模糊开时 `lh` 合并两批：原样简拼 l+h（tier3）与 n→l 后的简拼（tier4）。
+    # 原样简拼的词数随词表增长，`你好` 只能落在 tier4 且排在其后，故断言「能检出 +
+    # 落在模糊简拼层」，不写固定的前 N 名（那种断言会随词表变化失效）。
+    lh_fuzzy = fuzzy.lookup("lh", 10000, with_tier=True)
+    lh_texts = [row[0] for row in lh_fuzzy]
+    report.check("模糊音开：`lh` 命中 你好（n = l）", "你好" in lh_texts, f"实际候选 {len(lh_texts)} 条，命中={('你好' in lh_texts)}")
+    lh_tier = next((row[1] for row in lh_fuzzy if row[0] == "你好"), None)
+    report.check(
+        "模糊音开：`lh` 里的 你好 落在模糊简拼层（经 n→l）",
+        lh_tier == TIER_INITIALS_FUZZY,
+        f"实际层={lh_tier}（期望 {TIER_INITIALS_FUZZY}）",
+    )
     report.check("模糊音开：`nh` 仍命中 你好", "你好" in texts(fuzzy, "nh"), f"实际 {texts(fuzzy, 'nh')[:5]}")
 
     zang_fuzzy = fuzzy.lookup("zang", 24, with_tier=True)
@@ -501,6 +517,21 @@ def main() -> int:
     report.check("limit 生效（`ni` 取 3 条）", len(plain.lookup("ni", 3)) == 3, f"实际 {len(plain.lookup('ni', 3))}")
     report.check("空词典不抛异常", PinyinEngine([], fuzzy=True).lookup("ni", 9) == [])
     report.check("超长输入返回空（> 32 字母）", plain.lookup("a" * 40, 9) == [])
+
+    # --- 防回归断言：高频长词必须可简拼联想 ---
+    jcss = plain.lookup("jcss", 12, with_tier=True)
+    report.check(
+        "高频长词『基础设施』必须可简拼联想（jcss）",
+        len(jcss) > 0 and jcss[0][0] == "基础设施",
+        f"实际 {jcss[:3]}",
+    )
+
+    rgzn = plain.lookup("rgzn", 12, with_tier=True)
+    report.check(
+        "高频长词『人工智能』必须可简拼联想（rgzn）",
+        len(rgzn) > 0 and rgzn[0][0] == "人工智能",
+        f"实际 {rgzn[:3]}",
+    )
 
     print(f"SUMMARY: passed={report.passed} failed={report.failed} warned={report.warned}")
     return 1 if report.failed else 0

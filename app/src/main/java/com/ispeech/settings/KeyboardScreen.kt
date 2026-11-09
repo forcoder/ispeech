@@ -38,6 +38,7 @@ import com.ispeech.data.UserDictEntry
 import com.ispeech.settings.keyboard.KeyboardViewModel
 import com.ispeech.settings.store.KeyboardSettings
 import com.ispeech.settings.store.KeyboardSize
+import com.ispeech.settings.store.SettingsStore
 
 /** 用户词库列表最多展示的条数，避免长列表拖慢页面。 */
 private const val MAX_VISIBLE_USER_WORDS = 50
@@ -143,6 +144,16 @@ fun KeyboardScreen(onBack: () -> Unit) {
                         subtitle = "上屏前把简体转成繁体（字符级转换，简繁词汇不消歧）",
                         checked = settings.traditionalOutput,
                     ) { viewModel.setTraditionalOutput(it) }
+                    HorizontalDivider()
+                    SpaceLongPressRow(
+                        currentMs = viewModel.spaceLongPressMs.collectAsState().value,
+                        onSelect = { viewModel.setSpaceLongPressMs(it) },
+                    )
+                    HorizontalDivider()
+                    KeyboardMethodModeRow(
+                        currentMode = viewModel.inputMethodMode.collectAsState().value,
+                        onSelect = { viewModel.setInputMethodMode(it) },
+                    )
                 }
             }
 
@@ -202,7 +213,7 @@ private fun UserDictCard(
         Column(modifier = Modifier.padding(vertical = 4.dp)) {
             KeyboardCardTitle("用户词库")
             Text(
-                text = "输入法自动记住你选择过的词，用得越多越靠前",
+                text = "输入法自动记住你选择过的词，用得越多越靠前；候选条长按可手动记住这个词（自造词）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -256,7 +267,7 @@ private fun UserWordRow(entry: UserDictEntry, onRemove: () -> Unit) {
             Text(text = entry.text, style = MaterialTheme.typography.bodyLarge)
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "${entry.code} → ${entry.text} ×${entry.count}",
+                text = "${entry.mode.label}｜${entry.code} → ${entry.text} ×${entry.count}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -333,5 +344,82 @@ private fun KeyboardSwitchRow(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/** 空格长按进入语音的阈值选择：0.5 秒 / 1 秒。 */
+@Composable
+private fun SpaceLongPressRow(
+    currentMs: Int,
+    onSelect: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(
+            text = "空格长按进入语音",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "按住空格键超过所选时长即开始语音输入，短按仍是上屏空格",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        listOf(500 to "0.5 秒", 1000 to "1 秒").forEach { (ms, label) ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(ms) }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = currentMs == ms, onClick = { onSelect(ms) })
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = label, style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+    }
+}
+
+/** 输入法模式选择行：拼音 / 五笔，默认拼音。 */
+@Composable
+private fun KeyboardMethodModeRow(
+    currentMode: SettingsStore.InputMethodMode,
+    onSelect: (SettingsStore.InputMethodMode) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(
+            text = "输入法模式",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "中文场景下，默认使用拼音输入；可切换为五笔输入（五笔模式下不加载任何词库）",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        SettingsStore.InputMethodMode.entries.forEach { mode ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(mode) }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(
+                    selected = currentMode == mode,
+                    onClick = { onSelect(mode) },
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = when (mode) {
+                        SettingsStore.InputMethodMode.PINYIN -> "拼音"
+                        SettingsStore.InputMethodMode.WUBI -> "五笔"
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+        }
     }
 }

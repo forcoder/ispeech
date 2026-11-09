@@ -1,0 +1,97 @@
+version: 1
+
+# iSpeech Agency Agents Configuration
+# 基于 msitarzewski/agency-agents 最佳实践
+
+agents:
+  # Plan Agent: 架构设计专家
+  plan:
+    type: "Plan"
+    display_name: "iSpeech 架构师"
+    description: "专注于输入法架构设计、性能优化和安全设计的专家"
+    model: "opus"
+    personality: "严谨、系统化、注重质量"
+    expertise: ["Android IME", "架构设计", "性能优化", "安全设计"]
+
+  # Explore Agent: 代码探索专家
+  explore:
+    type: "Explore"
+    display_name: "iSpeech 代码侦探"
+    description: "专注于 Android 输入法代码库深度搜索和模式识别的专家"
+    model: "sonnet"
+    personality: "好奇、细致、善于发现隐藏模式"
+    expertise: ["代码搜索", "依赖分析", "模式识别", "Android Kotlin"]
+
+  # IME Expert Agent: 输入法领域专家
+  ime-expert:
+    type: "general-purpose"
+    display_name: "iSpeech IME 专家"
+    description: "专注于 IME 生命周期、候选词排序、键盘布局等核心功能的领域专家"
+    model: "opus"
+    personality: "务实、经验丰富、解决实际问题"
+    expertise: ["IME 生命周期", "候选词排序", "键盘布局", "Android IME API"]
+
+  # Testing Expert Agent: 测试专家
+  testing-expert:
+    type: "general-purpose"
+    display_name: "iSpeech 测试专家"
+    description: "专注于输入法测试策略、验收用例和性能基准的专家"
+    model: "sonnet"
+    personality: "严谨、全面、注重细节"
+    expertise: ["测试策略", "验收用例", "性能基准", "Android 测试"]
+
+  # Localization Expert Agent: 本地化专家
+  localization-expert:
+    type: "general-purpose"
+    display_name: "iSpeech 本地化专家"
+    description: "专注于多语言支持、拼音/五笔混合输入和文化适配的专家"
+    model: "haiku"
+    personality: "文化敏感、细致、注重用户体验"
+    expertise: ["多语言支持", "拼音混输", "方言适配", "文化适配"]
+
+# 智能体路由规则
+routing:
+  # 按关键词路由
+  keywords:
+    - pattern: "设计|架构|review|plan|评审|方案"
+      agent: "plan"
+      confidence: 0.95
+    - pattern: "搜索|查找|探索|search|explore|find|locate|分析|analyze"
+      agent: "explore"
+      confidence: 0.90
+    - pattern: "候选|IME|生命周期|onStartInput|onFinishInput|键盘|layout|view"
+      agent: "ime-expert"
+      confidence: 0.98
+    - pattern: "测试|验收|benchmark|performance|test|verify|验证"
+      agent: "testing-expert"
+      confidence: 0.92
+    - pattern: "拼音|五笔|混输|简繁|方言|locale|language|多语言"
+      agent: "localization-expert"
+      confidence: 0.96
+
+  # 按任务类型路由
+  task_types:
+    - type: "architecture-design"
+      agent: "plan"
+    - type: "code-exploration"
+      agent: "explore"
+    - type: "ime-implementation"
+      agent: "ime-expert"
+    - type: "testing-strategy"
+      agent: "testing-expert"
+    - type: "localization-implementation"
+      agent: "localization-expert"
+
+# 智能体协作配置
+collaboration:
+  # 复杂任务自动分解和协作
+  multi-agent-tasks:
+    - name: "民宿词库集成"
+      agents: ["plan", "ime-expert", "testing-expert"]
+      description: "集成民宿词库到输入法系统"
+    - name: "IME 性能优化"
+      agents: ["plan", "ime-expert", "testing-expert"]
+      description: "优化输入法性能和响应时间"
+    - name: "多语言支持扩展"
+      agents: ["localization-expert", "ime-expert"]
+      description: "扩展拼音/五笔混合输入支持"

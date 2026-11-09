@@ -155,19 +155,38 @@ class PhraseSearch(
                 return Hit(PhraseMatchTier.PREFIX, field.field, field.bonus, spansOf(field.text, needle))
             }
         }
-        // 3) 包含匹配。
+        // 3) 包含匹配。中文关键词在「正文」位置走独立的字面包含分支（见 [matchContentLiteral]），
+        //    其它字段与 ASCII 关键词保持原有顺序不变。
+        val asciiKeyword = isAsciiKeyword(needle)
         for (field in fields) {
+            if (!asciiKeyword && field.field == PhraseHitField.CONTENT) {
+                matchContentLiteral(entry, needle)?.let { return it }
+                continue
+            }
             val spans = spansOf(field.text, needle)
             if (spans.isNotEmpty()) return Hit(PhraseMatchTier.CONTAINS, field.field, field.bonus, spans)
         }
         // 4) 拼音首字母缩写（仅 ASCII 关键词，长度 >= 2）。
-        if (isAsciiKeyword(needle)) {
+        if (asciiKeyword) {
             for (field in fields) {
                 val spans = PhrasePinyin.matchSpans(field.text, needle)
                 if (spans.isNotEmpty()) return Hit(PhraseMatchTier.INITIALS, field.field, 0, spans)
             }
         }
         return null
+    }
+
+    /**
+     * 中文关键词的「正文包含」分支：关键词含非 ASCII 字符时按短语正文做大小写不敏感的字面包含。
+     *
+     * ASCII 关键词不进入本方法，继续保留完全 / 前缀 / 包含 / 拼音首字母的原有逻辑；
+     * 命中后使用 [PhraseMatchTier.CONTAINS] 档位与正文加成，使用次数 / 收藏加权的排序规则不变。
+     */
+    private fun matchContentLiteral(entry: QuickEntry, needle: String): Hit? {
+        if (needle.all { it.code < 0x80 }) return null
+        val spans = spansOf(entry.content, needle)
+        if (spans.isEmpty()) return null
+        return Hit(PhraseMatchTier.CONTAINS, PhraseHitField.CONTENT, SCORE_FIELD_CONTENT, spans)
     }
 
     /** 分类过滤：来源分组（内置 / 远端 / 用户）与类型（短语 / 应用）都算「分类」。 */

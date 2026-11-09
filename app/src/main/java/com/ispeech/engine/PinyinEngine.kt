@@ -7,7 +7,7 @@ package com.ispeech.engine
  * 与 AppContainer.invalidateEngine() 的既有做法一致。
  */
 data class PinyinSettings(
-    /** 模糊音开关：z=zh、c=ch、s=sh、n=l、an=ang、en=eng、in=ing。 */
+    /** 模糊音开关：z=zh、c=ch、s=sh、n=l、l=r、h=f、an=ang、en=eng、in=ing、ian=iang、uan=uang。 */
     val fuzzy: Boolean = false,
     /** 简拼（首字母缩写，如 `nh` → 你好）开关。 */
     val initials: Boolean = true,
@@ -244,7 +244,7 @@ class PinyinEngine(
         /** 简拼精确匹配。 */
         const val TIER_INITIALS = 3
 
-        /** 简拼经模糊音（n=l）归一化后匹配。 */
+        /** 简拼经模糊音（n/r→l、h→f）归一化后匹配。 */
         const val TIER_INITIALS_FUZZY = 4
 
         /** 短于该长度的输入不做全拼前缀扫描。 */
@@ -300,16 +300,20 @@ private val ENTRY_RANK: Comparator<PinyinEntry> = Comparator { a, b ->
 }
 
 /**
- * 模糊音归一化单音节：
- * 声母 z/zh、c/ch、s/sh 合并（去掉 h），n/l 合并（n → l），
- * 韵母 an/ang、en/eng、in/ing 合并（去掉词尾 g）。
+ * 模糊音归一化单音节（对齐搜狗拼音 `Fuzzy.dat` 的 `[Gray]` 预置）：
+ * 声母 z/zh、c/ch、s/sh 合并（去掉 h），n/l/r 三向合并（n、r → l），h/f 合并（h → f），
+ * 韵母 an/ang、en/eng、in/ing、iang/ian、uang/uan 合并（去掉词尾 g）。
  */
 private fun fuzzySyllable(syllable: String): String {
     val normalized = when {
         syllable.startsWith("zh") -> "z" + syllable.substring(2)
         syllable.startsWith("ch") -> "c" + syllable.substring(2)
         syllable.startsWith("sh") -> "s" + syllable.substring(2)
+        // Fuzzy.dat: n=l 与 l=r 同时开启 ⇒ n/l/r 等价类，统一归一到 l
         syllable.startsWith("n") -> "l" + syllable.substring(1)
+        syllable.startsWith("r") -> "l" + syllable.substring(1)
+        // Fuzzy.dat: h=f
+        syllable.startsWith("h") -> "f" + syllable.substring(1)
         else -> syllable
     }
     return when {
@@ -330,14 +334,23 @@ private fun fuzzySyllables(code: String): String = buildString(code.length) {
 }
 
 /**
- * 简拼的模糊音归一化：只需逐字母把 n 换成 l。
+ * 简拼的模糊音归一化：逐字母做与 [fuzzySyllable] 一致的声母合并
+ * （n/r → l，h → f）。
  *
  * 简拼是「每个音节的首字母」拼接，而声母归一化只影响首字母（z/zh、c/ch、s/sh 的首字母
  * 本来就是 z/c/s，韵母规则也不影响首字母），所以逐字母替换与原音节归一化等价，
  * 同时避免了把 `ang`（爱-那-国 的简拼）误当成韵母去尾。
  */
 private fun fuzzyInitials(initials: String): String = buildString(initials.length) {
-    for (ch in initials) append(if (ch == 'n') 'l' else ch)
+    for (ch in initials) {
+        append(
+            when (ch) {
+                'n', 'r' -> 'l'
+                'h' -> 'f'
+                else -> ch
+            }
+        )
+    }
 }
 
 /**

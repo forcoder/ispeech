@@ -1,9 +1,18 @@
 package com.ispeech.engine
 
 import com.ispeech.data.UserDictStore
+import com.ispeech.data.UserDictMode
 
-/** 用户词典引擎：把用户词频/自造词并入候选排序，并提供联想。 */
-class UserDictEngine(private val store: UserDictStore) : LookupEngine, AssociationSource {
+/**
+ * 用户词典引擎：把用户词频/自造词并入候选排序，并提供联想。
+ *
+ * [mode] 决定读用户词库的哪一半：五笔态读 `wb`（编码是五笔码），拼音态读 `cn`
+ * （编码是拼音串）。对齐搜狗 mac 版把用户词库拆成 `wb_dict_user` / `cn_dict_user` 的做法。
+ */
+class UserDictEngine(
+    private val store: UserDictStore,
+    private val mode: UserDictMode = UserDictMode.WUBI,
+) : LookupEngine, AssociationSource {
 
     override val displayName: String = "user"
 
@@ -17,10 +26,10 @@ class UserDictEngine(private val store: UserDictStore) : LookupEngine, Associati
     private val boost: Int = USER_BOOST
 
     override fun lookup(input: String, limit: Int): List<LookupCandidate> =
-        store.lookupCandidates(input, limit).map { it.copy(weight = it.weight + boost) }
+        store.lookupCandidates(input, limit, mode).map { it.copy(weight = it.weight + boost) }
 
     override fun related(text: String, limit: Int): List<LookupCandidate> =
-        store.related(text, limit).map { it.copy(weight = it.weight + boost) }
+        store.related(text, limit, mode).map { it.copy(weight = it.weight + boost) }
 
     private companion object {
         /** 系统词库最大权重为 65535，这里取 10 万保证用户词稳定压过系统词。 */

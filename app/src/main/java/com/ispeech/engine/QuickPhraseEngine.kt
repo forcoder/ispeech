@@ -1,5 +1,7 @@
 package com.ispeech.engine
 
+import com.ispeech.data.unescapeLineText
+
 /**
  * 快捷短语 / 快速应用引擎。
  *
@@ -28,8 +30,13 @@ class QuickPhraseEngine(
         if (needle.isEmpty() || limit <= 0) return emptyList()
 
         val out = ArrayList<LookupCandidate>()
+        val scanCap = maxOf(limit, 64)
         for (entry in entries) {
             if (!matches(entry, needle)) continue
+            // 精确命中的条目必须参与排序：扫描上限只约束模糊命中，
+            // 否则规则表很大时，排在后面的精确简写会被提前截断，拿不到候选首位。
+            val exact = entry.trigger.equals(needle, ignoreCase = true)
+            if (!exact && out.size >= scanCap) continue
             out.add(
                 LookupCandidate(
                     code = entry.trigger,
@@ -39,7 +46,6 @@ class QuickPhraseEngine(
                     kind = entry.kind
                 )
             )
-            if (out.size >= maxOf(limit, 64)) break
         }
         if (out.isEmpty()) return emptyList()
         out.sortWith(CandidateRanking.comparator(input))
@@ -108,7 +114,8 @@ class QuickPhraseEngine(
                 if (fields.size < 3) continue
                 val trigger = fields[0]
                 val label = fields[1]
-                val content = fields[2]
+                // 写入侧（SyncRepository / QuickPhraseCodec）把换行 / 制表符写成字面量 \n \t，这里还原
+                val content = unescapeLineText(fields[2])
                 if (trigger.isEmpty() || content.isEmpty()) continue
                 val mode = if (fields.size > 3) QuickMatchMode.parse(fields[3]) else QuickMatchMode.PREFIX
                 val weight = if (fields.size > 4) fields[4].toIntOrNull() ?: 100 else 100

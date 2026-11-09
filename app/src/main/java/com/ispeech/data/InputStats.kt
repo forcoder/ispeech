@@ -20,7 +20,10 @@ enum class CommitType {
     PHRASE,
 
     /** emoji 上屏。 */
-    EMOJI;
+    EMOJI,
+
+    /** 语音识别结果上屏。 */
+    VOICE;
 
     companion object {
         /** 解析持久化文本中的类型名；未知类型返回 null（读取时跳过该行）。 */

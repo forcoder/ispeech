@@ -1,0 +1,61 @@
+version: 1
+
+# iSpeech 项目专用智能体配置
+
+agents:
+  # Plan agent：用于架构设计和复杂问题分解
+  plan:
+    type: "Plan"
+    description: "软件架构智能体，用于设计实现策略、识别关键文件、考虑架构权衡"
+    model: "opus"
+
+  # Explore agent：用于广泛的代码搜索和探索
+  explore:
+    type: "Explore"
+    description: "只读搜索智能体，用于广泛的代码搜索、目录或命名约定探索"
+    model: "sonnet"
+
+  # general-purpose agent：用于研究复杂问题和执行多步骤任务
+  general-purpose:
+    type: "general-purpose"
+    description: "通用智能体，用于研究复杂问题、搜索代码、执行多步骤任务"
+    model: "opus"
+
+  # claude-code-guide agent：用于 Claude Code 相关问题
+  claude-code-guide:
+    type: "claude-code-guide"
+    description: "Claude Code CLI 工具相关问题的智能体"
+    model: "sonnet"
+
+  # statusline-setup agent：用于状态行配置
+  statusline-setup:
+    type: "statusline-setup"
+    description: "配置用户 Claude Code 状态行设置的智能体"
+    model: "haiku"
+
+# 按需调用配置
+on-demand:
+  # 当需要架构设计时自动调用 Plan agent
+  architecture-design:
+    agent: "plan"
+    trigger: ["设计", "架构", "plan", "review"]
+
+  # 当需要代码探索时自动调用 Explore agent
+  code-exploration:
+    agent: "explore"
+    trigger: ["搜索", "查找", "探索", "search", "explore"]
+
+  # 当需要通用任务处理时自动调用 general-purpose agent
+  general-task:
+    agent: "general-purpose"
+    trigger: ["研究", "分析", "执行", "research", "analyze", "execute"]
+
+  # 当需要 Claude Code 相关帮助时自动调用 claude-code-guide agent
+  claude-help:
+    agent: "claude-code-guide"
+    trigger: ["claude", "code", "cli", "command"]
+
+  # 当需要状态行配置时自动调用 statusline-setup agent
+  statusline-config:
+    agent: "statusline-setup"
+    trigger: ["状态行", "statusline", "配置"]

@@ -18,6 +18,11 @@
   7. 口径一致性：版本号常量 vs build.gradle、注释 vs 枚举、校验脚本 vs 源码
   8. 语音输入（VOICE / ASR）全链路：KeyDef -> 工具栏 -> 服务状态机 -> VoiceInputController
      -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
+ 9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
+     过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
+10. 分类词库（细胞词库）：CellDictStore 目录 / 索引 / 正文解析复用用户词库 -> 稳定 id +
+     分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
+     词典页 SAF 安装 + 启停 / 删除 + 中英文案
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -53,17 +58,23 @@ LOOKUP_ENGINE = JAVA / "engine" / "LookupEngine.kt"
 COMPOSITE_ENGINE = JAVA / "engine" / "CompositeEngine.kt"
 QUICK_LOCATOR = JAVA / "engine" / "QuickLocator.kt"
 PYINYIN_ENGINE = JAVA / "engine" / "PinyinEngine.kt"
+CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
 
 QUICK_SCREEN = JAVA / "settings" / "QuickPhrasesScreen.kt"
 SETTINGS_STORE = JAVA / "settings" / "store" / "SettingsStore.kt"
 KEYBOARD_SETTINGS = JAVA / "settings" / "store" / "KeyboardSettings.kt"
 KEYBOARD_VM = JAVA / "settings" / "keyboard" / "KeyboardViewModel.kt"
 KEYBOARD_SCREEN = JAVA / "settings" / "KeyboardScreen.kt"
+DICTIONARY_SCREEN = JAVA / "settings" / "DictionaryScreen.kt"
+DICTIONARY_VM = JAVA / "settings" / "dictionary" / "DictionaryViewModel.kt"
 
 APP_CONTAINER = JAVA / "di" / "AppContainer.kt"
 HAN_CONVERSION = JAVA / "data" / "HanConversion.kt"
 INPUT_STATS = JAVA / "data" / "InputStats.kt"
 PHRASE_USAGE = JAVA / "data" / "PhraseUsageStore.kt"
+USER_DICT_STORE = JAVA / "data" / "UserDictStore.kt"
+USER_DICT_ENGINE = JAVA / "engine" / "UserDictEngine.kt"
+CELL_DICT_STORE = JAVA / "data" / "CellDictStore.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
@@ -825,14 +836,33 @@ def check_voice_chain() -> None:
         f"{rel(KEYDEF)} 的 KeyAction 未声明 VOICE",
     )
     check(
-        "KeyAction.VOICE" in view and '"🎤"' in view,
-        "SoftKeyboardView 工具栏含 KeyAction.VOICE（「🎤」）",
-        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE「🎤」",
+        "KeyAction.VOICE" in view and "ic_voice" in view,
+        "SoftKeyboardView 工具栏含 KeyAction.VOICE（图标 ic_voice）",
+        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE（ic_voice）",
     )
     check(
         "KeyAction.VOICE -> toggleVoiceInput()" in service,
         "handleSoftKey 把 VOICE 接到 toggleVoiceInput()",
         f"{rel(SERVICE)} handleSoftKey 未把 VOICE 接到 toggleVoiceInput()",
+    )
+
+    # 8.1b 按住说话：两种引擎都要接线（系统引擎曾因早退直接失效）
+    gesture_tokens = (
+        "private fun onVoicePressDown()",
+        "private fun onVoicePressUp()",
+        "startFunAsrListening()",
+        "voiceController?.finish()",
+    )
+    missing = [t for t in gesture_tokens if t not in service]
+    check(
+        not missing,
+        "按住说话对两种引擎都接线：按下开始收音、抬起收尾上屏",
+        f"{rel(SERVICE)} 按住说话接线缺项：{missing}",
+    )
+    check(
+        "fun finish()" in controller and "stopListening()" in controller,
+        "VoiceInputController 提供 finish()：松手收尾但保留回调（结果仍要上屏）",
+        f"{rel(VOICE_CONTROLLER)} 缺少 finish()：系统引擎按松手无法收尾上屏",
     )
 
     # 8.2 VoiceInputController：系统识别器的关键约束
@@ -957,7 +987,7 @@ def check_voice_chain() -> None:
     en = _named_strings(STRINGS_EN)
     required = {
         "voice_listening", "voice_need_permission", "voice_no_match",
-        "voice_error", "voice_cancel", "voice_unavailable",
+        "voice_error_code", "voice_cancel", "voice_unavailable",
         "asr_title", "asr_description", "asr_engine_system", "asr_engine_custom",
         "asr_partial_desc", "asr_offline_desc", "asr_saved", "asr_save_failed",
     }
@@ -973,6 +1003,571 @@ def check_voice_chain() -> None:
         zh_pairs == en_pairs,
         f"语音 / ASR 文案中英键名一致（{len(zh_pairs)} 项）",
         f"中英键名不一致：仅中文 {sorted(zh_pairs - en_pairs)}，仅英文 {sorted(en_pairs - zh_pairs)}",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
+# 9. 用户词库（模式维度 / 自造词 / 拼音态）
+# ═════════════════════════════════════════════════════════════
+
+
+def _user_dict_unescape(text: str) -> str:
+    """复刻 UserDictStore.unescapeLineText（\\n / \\r / \\t / \\\\）。"""
+    if "\\" not in text:
+        return text
+    out: list = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else None
+        if ch == "\\" and nxt is not None:
+            if nxt == "n":
+                out.append("\n")
+                i += 2
+                continue
+            if nxt == "r":
+                out.append("\r")
+                i += 2
+                continue
+            if nxt == "t":
+                out.append("\t")
+                i += 2
+                continue
+            if nxt == "\\":
+                out.append("\\")
+                i += 2
+                continue
+            out.append(ch)
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _build_user_dict_entry(code: str, word: str, count: int, mode: str):
+    """复刻 buildUserDictEntry：编码归一成小写 ASCII 字母 / 数字，空码空词丢弃。"""
+    normalized = "".join(
+        ch for ch in _user_dict_unescape(code).lower() if ch.isascii() and ch.isalnum()
+    )
+    text = _user_dict_unescape(word)
+    if not normalized or not text:
+        return None
+    return mode, normalized, text, max(0, count)
+
+
+def _parse_user_dict_line(line: str, default_mode: str = "wb"):
+    """复刻 UserDictStore.parseUserDictLine → (mode, code, text, count) 或 None。"""
+    trimmed = line.strip()
+    if not trimmed or trimmed.startswith("#"):
+        return None
+    if "\t" not in trimmed:
+        parts = trimmed.split()
+        if len(parts) != 2:
+            return None
+        return _build_user_dict_entry(parts[0], parts[1], 1, default_mode)
+    fields = trimmed.split("\t")
+    if len(fields) < 2:
+        return None
+    mode_cell = fields[-1].strip().lower()
+    has_mode = (
+        len(fields) >= 4
+        and mode_cell in ("wb", "cn")
+        and fields[-2].strip().isdigit()
+    )
+    mode = mode_cell if has_mode else default_mode
+    if has_mode:
+        text_end = len(fields) - 2
+        count = int(fields[text_end].strip())
+    elif len(fields) == 2:
+        text_end = 2
+        count = 1
+    elif fields[-1].strip().isdigit():
+        text_end = len(fields) - 1
+        count = int(fields[-1].strip())
+    else:
+        return None
+    return _build_user_dict_entry(fields[0], "\t".join(fields[1:text_end]), count, mode)
+
+
+def check_user_dict_chain() -> None:
+    store = read(USER_DICT_STORE)
+    engine = read(USER_DICT_ENGINE)
+    service = read(SERVICE)
+    view = read(CANDIDATE_VIEW)
+    container = read(APP_CONTAINER)
+    locator = read(QUICK_LOCATOR)
+    keyboard_vm = read(KEYBOARD_VM)
+
+    # 9.1 模式枚举：wb / cn，命名对齐搜狗 wb_dict_user / cn_dict_user
+    check(
+        "enum class UserDictMode" in store and 'WUBI("wb"' in store and 'PINYIN("cn"' in store,
+        "UserDictMode 声明 WUBI(wb) / PINYIN(cn)（对齐搜狗 wb_dict_user / cn_dict_user）",
+        f"{rel(USER_DICT_STORE)} 未声明 UserDictMode(wb/cn)",
+    )
+    check(
+        "fun parse(raw: String?)" in store and "else -> WUBI" in store,
+        "UserDictMode.parse 缺列 / 未知值兜底五笔",
+        f"{rel(USER_DICT_STORE)} 缺少 UserDictMode.parse 兜底",
+    )
+
+    # 9.2 文件格式：写入 mode 列；历史 3 列仍按五笔读入（用真实解析复刻断言）
+    check(
+        ".append(entry.mode.id)" in store,
+        "persist 写出第 4 列 mode",
+        f"{rel(USER_DICT_STORE)} persist 未写出 mode 列",
+    )
+    legacy = _parse_user_dict_line("ggll\t你\t3")
+    four = _parse_user_dict_line("jiudian\t酒店\t5\tcn")
+    tabbed = _parse_user_dict_line("ggll\ta\tb\t3")
+    bad = _parse_user_dict_line("ggll\t你\tabc\tcn")
+    check(
+        legacy == ("wb", "ggll", "你", 3),
+        "历史 3 列行仍解析为 wb（不丢老数据）",
+        f"3 列解析错误：{legacy}",
+    )
+    check(
+        four == ("cn", "jiudian", "酒店", 5),
+        "4 列行解析出 cn 模式",
+        f"4 列解析错误：{four}",
+    )
+    check(
+        tabbed is not None and tabbed[0] == "wb" and tabbed[2] == "a\tb",
+        "文本含未转义制表符的老数据仍按 3 列解析（mode 列不会被误判）",
+        f"含制表符老数据解析错误：{tabbed}",
+    )
+    check(
+        bad is None,
+        "计数非法时整行跳过（4 列亦然）",
+        f"非法计数未被跳过：{bad}",
+    )
+    shorthand = _parse_user_dict_line("jiudian\t酒店")
+    spaced = _parse_user_dict_line("ggll 你")
+    normalized = _parse_user_dict_line("Jiu Dian\t酒店\t2\tcn")
+    targeted = _parse_user_dict_line("nihao\t你好", "cn")
+    check(
+        shorthand == ("wb", "jiudian", "酒店", 1),
+        "2 列简写按次数 1 导入（导入格式）",
+        f"2 列简写解析错误：{shorthand}",
+    )
+    check(
+        spaced == ("wb", "ggll", "你", 1),
+        "「编码 词条」空白分隔两段式可导入",
+        f"空白分隔解析错误：{spaced}",
+    )
+    check(
+        normalized == ("cn", "jiudian", "酒店", 2),
+        "编码归一：大小写 / 音节间空格被清成拼音串（jiudian）",
+        f"编码归一错误：{normalized}",
+    )
+    check(
+        targeted == ("cn", "nihao", "你好", 1),
+        "无模式列的行落到导入时选的词库（cn）",
+        f"默认模式未生效：{targeted}",
+    )
+    check(
+        store.count("internal fun parseUserDictLine") == 1
+        and "parseUserDictLine(rawLine, UserDictMode.WUBI)" in store
+        and "parseUserDictLine(rawLine, defaultMode)" in store,
+        "读盘与导入共用同一套行解析（只有一处实现）",
+        f"{rel(USER_DICT_STORE)} 存在第二套解析规则（读盘 / 导入会漂移）",
+    )
+
+    # 9.3 引擎按模式过滤
+    check(
+        "private val mode: UserDictMode = UserDictMode.WUBI" in engine,
+        "UserDictEngine 持有 mode（默认五笔）",
+        f"{rel(USER_DICT_ENGINE)} 未按模式读用户词库",
+    )
+    check(
+        "store.lookupCandidates(input, limit, mode)" in engine
+        and "store.related(text, limit, mode)" in engine,
+        "UserDictEngine 把 mode 透传给 store 的查询与联想",
+        f"{rel(USER_DICT_ENGINE)} 查询 / 联想未透传 mode",
+    )
+
+    # 9.4 拼音态查询含用户词库 cn
+    check(
+        "fun pinyinLookupEngine(context: Context): CompositeEngine" in container
+        and "UserDictEngine(userDict(appCtx), UserDictMode.PINYIN)" in container,
+        "AppContainer.pinyinLookupEngine = 用户词库 cn + 拼音词表",
+        f"{rel(APP_CONTAINER)} 未提供 pinyinLookupEngine（用户词库 cn）",
+    )
+    check(
+        "AppContainer.pinyinLookupEngine(this)" in service,
+        "拼音态 lookupSource 走 pinyinLookupEngine",
+        f"{rel(SERVICE)} 拼音态未接入用户词库 cn",
+    )
+    check(
+        "pinyinLookupCache = null" in container,
+        "invalidateEngine 同时丢弃 pinyinLookupEngine 缓存",
+        f"{rel(APP_CONTAINER)} invalidateEngine 未清 pinyinLookupCache",
+    )
+
+    # 9.5 自造词：长按 -> 服务记词（mode 由候选来源决定）
+    check(
+        "onCandidateLongPressed" in view and "setOnLongClickListener" in view,
+        "CandidateView 暴露长按回调（自造词入口）",
+        f"{rel(CANDIDATE_VIEW)} 缺少长按回调",
+    )
+    check(
+        "bar.onCandidateLongPressed = { index -> rememberCandidate(index) }" in service,
+        "服务把长按接到 rememberCandidate（自造词）",
+        f"{rel(SERVICE)} 未接线 rememberCandidate",
+    )
+    check(
+        "store.record(code, candidate.insertText, dictMode)" in service,
+        "rememberCandidate 按 dictMode 写入用户词库",
+        f"{rel(SERVICE)} rememberCandidate 未按模式写入",
+    )
+
+    # 9.6 学习分流：拼音不再整体禁用；短语 / 应用不写词库
+    learn_region = function_region(service, r"private fun learn\(candidate: LookupCandidate\)")
+    check(
+        "mode == Mode.PINYIN) return" not in learn_region,
+        "learn 不再整体禁用拼音态（改为按候选来源分流）",
+        f"{rel(SERVICE)} learn 仍整体禁用拼音学习",
+    )
+    check(
+        "dictModeOf(candidate.kind)" in learn_region,
+        "learn 用 dictModeOf 分流模式",
+        f"{rel(SERVICE)} learn 未用 dictModeOf",
+    )
+    mode_region = function_region(service, r"private fun dictModeOf\(kind: LookupKind\)")
+    check(
+        all(
+            f"LookupKind.{name} ->" in mode_region
+            for name in ("WUBI", "WUBIPHRASE", "PINYIN", "PHRASE", "QUICKAPPLY")
+        ),
+        "dictModeOf 覆盖全部 LookupKind（短语 / 应用 -> null）",
+        f"{rel(SERVICE)} dictModeOf 分支不全",
+    )
+    check(
+        mode_region.count("-> null") == 2,
+        "dictModeOf 只让 PHRASE / QUICKAPPLY 落到 null（不写词库）",
+        f"dictModeOf 返回 null 的分支数不是 2：{mode_region.count('-> null')}",
+    )
+
+    # 9.7 设置页删除带模式；快捷定位器可指定模式
+    check(
+        "store.remove(entry.code, entry.text, entry.mode)" in keyboard_vm,
+        "设置页删除用户词条时带上模式",
+        f"{rel(KEYBOARD_VM)} 删除未传 entry.mode（拼音词会删不掉）",
+    )
+    check(
+        "userDictMode: UserDictMode = UserDictMode.WUBI" in locator,
+        "QuickLocator.buildComposite 支持指定用户词库模式",
+        f"{rel(QUICK_LOCATOR)} 未支持 userDictMode",
+    )
+
+    # 9.8 导入 / 导出（S2）：store -> ViewModel -> SAF 选择器 -> 文案
+    dictionary_vm = read(DICTIONARY_VM)
+    dictionary_screen = read(DICTIONARY_SCREEN)
+    check(
+        "fun exportText(): String" in store
+        and "fun importText(text: String, defaultMode: UserDictMode = UserDictMode.WUBI)" in store,
+        "UserDictStore 提供 exportText / importText",
+        f"{rel(USER_DICT_STORE)} 缺少导入 / 导出接口",
+    )
+    check(
+        "existing == null ->" in store and "parsed.count > existing.count ->" in store,
+        "导入按 mode+code+text 合并，已存在取较大 count",
+        f"{rel(USER_DICT_STORE)} 导入合并规则缺失",
+    )
+    check(
+        "contentResolver.openInputStream(uri)" in dictionary_vm
+        and "contentResolver.openOutputStream(uri)" in dictionary_vm
+        and "importText(text, mode)" in dictionary_vm
+        and "exportText()" in dictionary_vm,
+        "DictionaryViewModel 走 contentResolver 读 / 写并调用 store",
+        f"{rel(DICTIONARY_VM)} 未接线导入 / 导出",
+    )
+    check(
+        "ActivityResultContracts.OpenDocument()" in dictionary_screen
+        and 'CreateDocument("text/plain")' in dictionary_screen
+        and "viewModel.importUserWords(it, importMode)" in dictionary_screen
+        and "viewModel.exportUserWords(it)" in dictionary_screen,
+        "词典页接上 SAF 文件选择器（导入 / 导出）",
+        f"{rel(DICTIONARY_SCREEN)} 未接文件选择器",
+    )
+    check(
+        "R.string.dict_import_hint" in dictionary_screen,
+        "词典页把孤儿字符串 dict_import_hint 接上（不再悬空）",
+        f"{rel(DICTIONARY_SCREEN)} 未使用 dict_import_hint",
+    )
+    zh = _named_strings(STRINGS)
+    en = _named_strings(STRINGS_EN)
+    dict_keys = (
+        "dict_user_title",
+        "dict_user_count",
+        "dict_import_wubi",
+        "dict_import_pinyin",
+        "dict_export",
+        "dict_import_result",
+        "dict_import_failed",
+        "dict_export_failed",
+        "dict_import_hint",
+    )
+    missing_dict = sorted(k for k in dict_keys if k not in zh or k not in en)
+    check(
+        not missing_dict,
+        f"用户词库导入 / 导出文案中英各齐 {len(dict_keys)} 项",
+        f"中英 strings.xml 缺词库文案：{missing_dict}",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
+# 10. 分类词库（细胞词库）
+# ═════════════════════════════════════════════════════════════
+
+
+def _fnv1a64(text: str) -> str:
+    """复刻 CellDictStore.fnv1a64（FNV-1a 64 位，UTF-8 字节序，16 位小写十六进制）。"""
+    h = 0xCBF29CE484222325
+    for b in text.encode("utf-8"):
+        h ^= b
+        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return format(h, "016x")
+
+
+def _cell_dict_id(name: str, content: str) -> str:
+    """复刻 CellDictStore.cellDictId：`c1-` + FNV-1a64(显示名 + \\u0001 + 正文)。"""
+    return "c1-" + _fnv1a64(name + "\u0001" + content)
+
+
+def _parse_cell_index_line(line: str):
+    """复刻 CellDictStore.parseCellDictIndexLine → (id, name, category, enabled) 或 None。"""
+    trimmed = line.strip()
+    if not trimmed or trimmed.startswith("#"):
+        return None
+    fields = trimmed.split("\t")
+    if len(fields) < 4:
+        return None
+    cid = fields[0].strip()
+    if not cid:
+        return None
+    flag = fields[3].strip()
+    if flag not in ("0", "1"):
+        return None
+    return (
+        cid,
+        _user_dict_unescape(fields[1]).strip(),
+        _user_dict_unescape(fields[2]).strip(),
+        flag == "1",
+    )
+
+
+def _parse_cell_category(text: str):
+    """复刻 CellDictStore.parseCellDictCategory → 分类名或 None（认 `# category: X`）。"""
+    for line in text.split("\n"):
+        trimmed = line.strip()
+        if not trimmed.startswith("#"):
+            continue
+        body = trimmed[1:].strip()
+        if not body.lower().startswith("category"):
+            continue
+        rest = body[len("category"):].strip().lstrip(":：").strip()
+        if not rest:
+            continue
+        return rest[:32]
+    return None
+
+
+def check_cell_dict_chain() -> None:
+    cell_store = read(CELL_DICT_STORE)
+    cell_engine = read(CELL_DICT_ENGINE)
+    locator = read(QUICK_LOCATOR)
+    container = read(APP_CONTAINER)
+    dictionary_vm = read(DICTIONARY_VM)
+    dictionary_screen = read(DICTIONARY_SCREEN)
+
+    # 10.1 存储：目录 / 索引文件 / 正文解析复用用户词库（不做第二套解析）
+    check(
+        "class CellDictStore private constructor" in cell_store
+        and 'INDEX_FILE_NAME = "index.txt"' in cell_store,
+        "CellDictStore 以 cell_dicts/index.txt 为唯一索引",
+        f"{rel(CELL_DICT_STORE)} 缺少索引文件声明",
+    )
+    check(
+        "parseUserDictLine(rawLine, UserDictMode.WUBI)" in cell_store
+        and "internal fun parseUserDictLine" not in cell_store,
+        "分类词库正文复用用户词库行解析（无第二套规则）",
+        f"{rel(CELL_DICT_STORE)} 未复用 parseUserDictLine（解析规则会漂移）",
+    )
+    check(
+        all(
+            marker in cell_store
+            for marker in (
+                "fun list(): List<CellDictInfo>",
+                "fun entries(enabledOnly: Boolean = true)",
+                "fun add(name: String, content: String)",
+                "fun remove(id: String): Boolean",
+                "fun setEnabled(id: String, enabled: Boolean): Boolean",
+            )
+        ),
+        "CellDictStore 提供 列表 / 取词条 / 安装 / 删除 / 启停",
+        f"{rel(CELL_DICT_STORE)} 缺少安装 / 启停 / 删除接口",
+    )
+
+    # 10.2 索引行解析：合法 4 列可读；注释 / 列数不足 / 启用位非法一律跳过（复刻断言）
+    good = _parse_cell_index_line("c1-0123456789abcdef\t医学词库\t医学\t1")
+    disabled = _parse_cell_index_line("c1-0123456789abcdef\t医学词库\t医学\t0")
+    commented = _parse_cell_index_line("# 分类词库（细胞词库）索引")
+    short = _parse_cell_index_line("c1-abcdef\t医学词库\t医学")
+    bad_flag = _parse_cell_index_line("c1-abcdef\t医学词库\t医学\t2")
+    blank_id = _parse_cell_index_line("\t医学词库\t医学\t1")
+    check(
+        good == ("c1-0123456789abcdef", "医学词库", "医学", True),
+        "索引行解析出 id / 显示名 / 分类 / 启用",
+        f"索引行解析错误：{good}",
+    )
+    check(
+        disabled is not None and disabled[3] is False,
+        "启用位 0 解析为停用",
+        f"启用位 0 解析错误：{disabled}",
+    )
+    check(
+        commented is None and short is None and bad_flag is None and blank_id is None,
+        "注释 / 缺列 / 非法启用位 / 空 id 的索引行全部跳过（孤儿行不炸）",
+        f"坏索引行未被跳过：{commented}, {short}, {bad_flag}, {blank_id}",
+    )
+
+    # 10.3 稳定 id：同名同正文重复安装命中同 id，正文不同则不同 id
+    same_a = _cell_dict_id("医学词库", "xie\t血\twb\n")
+    same_b = _cell_dict_id("医学词库", "xie\t血\twb\n")
+    other = _cell_dict_id("医学词库", "xue\t血\tcn\n")
+    check(
+        same_a == same_b and same_a.startswith("c1-") and len(same_a) == 19 and same_a != other,
+        "词库 id = c1- + FNV-1a64(名 + \\u0001 + 正文)（重复安装幂等，不同正文不撞号）",
+        f"id 计算错误：{same_a} / {same_b} / {other}",
+    )
+    check(
+        '"c1-" + fnv1a64(name + "\\u0001" + content)' in cell_store
+        and "internal fun cellDictId(name: String, content: String)" in cell_store,
+        "id 生成只有一处实现（cellDictId）",
+        f"{rel(CELL_DICT_STORE)} 缺少 cellDictId 单一实现",
+    )
+
+    # 10.4 分类头：`# category: 医学` 可读，读不到回落界面文案
+    check(
+        _parse_cell_category("# category: 医学\nxie\t血") == "医学"
+        and _parse_cell_category("xie\t血") is None
+        and 'CATEGORY_KEY = "category"' in cell_store,
+        "分类头 `# category: X` 解析一致（读不到返回 null）",
+        "分类头解析与实现不一致",
+    )
+    check(
+        "if (enabledOnly && !meta.enabled) continue" in cell_store,
+        "entries(enabledOnly) 真的过滤掉停用词库",
+        f"{rel(CELL_DICT_STORE)} 未按启用位过滤词条",
+    )
+
+    # 10.5 引擎：LookupEngine + AssociationSource，按模式过滤，权重固定 8 万
+    check(
+        "class CellDictEngine(" in cell_engine
+        and ": LookupEngine, AssociationSource" in cell_engine,
+        "CellDictEngine 实现 LookupEngine + AssociationSource",
+        f"{rel(CELL_DICT_ENGINE)} 未实现查询 / 联想接口",
+    )
+    check(
+        cell_engine.count("if (entry.mode != mode) continue") == 2,
+        "CellDictEngine 查询与联想都按模式过滤（wb / cn 编码空间隔离）",
+        f"{rel(CELL_DICT_ENGINE)} 未按模式过滤（查到 {cell_engine.count('if (entry.mode != mode) continue')} 处）",
+    )
+    check(
+        "internal const val CELL_DICT_WEIGHT = 80_000" in cell_engine
+        and "UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE" in cell_engine
+        and "UserDictMode.PINYIN -> LookupKind.PINYIN" in cell_engine,
+        "权重 8 万（让位用户词 / 压过系统词），档位与用户词库一致",
+        f"{rel(CELL_DICT_ENGINE)} 权重或档位映射缺失",
+    )
+    check(
+        100_000 > 80_000 > 65_535 > 9_999,
+        "权重关系自洽：用户词(10万) > 分类词库(8万) > 系统五笔词(65535) > 拼音词(9999)",
+        "权重关系不自洽",
+    )
+
+    # 10.6 接线：QuickLocator 组装 + AppContainer 单例与引擎重建
+    check(
+        "includeCellDicts: Boolean = true" in locator
+        and "cellDict: CellDictStore? = null" in locator
+        and "CellDictEngine(cells, userDictMode)" in locator,
+        "QuickLocator.buildComposite 并入已启用的分类词库",
+        f"{rel(QUICK_LOCATOR)} 未组装分类词库引擎",
+    )
+    check(
+        'CELL_DICT_DIR_NAME = "cell_dicts"' in container
+        and "fun cellDict(context: Context): CellDictStore" in container
+        and "fun invalidateCellDict()" in container,
+        "AppContainer 提供 cellDict 单例与 invalidateCellDict",
+        f"{rel(APP_CONTAINER)} 缺少分类词库单例",
+    )
+    check(
+        "cellDict = cellDict(ctx)" in container
+        and "CellDictEngine(cells, UserDictMode.PINYIN)" in container,
+        "五笔态（buildEngineFromSettings）与拼音态（pinyinLookupEngine）都接上分类词库",
+        f"{rel(APP_CONTAINER)} 分类词库未接入引擎构建",
+    )
+    check(
+        "invalidateEngine()" in function_region(container, r"fun invalidateCellDict\(\)"),
+        "invalidateCellDict 同时让查询引擎重建（装了词库立刻生效）",
+        f"{rel(APP_CONTAINER)} invalidateCellDict 未失效引擎缓存",
+    )
+
+    # 10.7 词典页：SAF 安装 + 启停 / 删除 + 引擎重建
+    check(
+        "fun addCellDict(uri: Uri)" in dictionary_vm
+        and "fun removeCellDict(id: String)" in dictionary_vm
+        and "fun setCellDictEnabled(id: String, enabled: Boolean)" in dictionary_vm,
+        "DictionaryViewModel 提供 安装 / 删除 / 启停",
+        f"{rel(DICTIONARY_VM)} 缺少分类词库操作",
+    )
+    check(
+        "AppContainer.cellDict(app).add(cellDictName(uri), text)" in dictionary_vm
+        and "contentResolver.openInputStream(uri)" in dictionary_vm
+        and "AppContainer.invalidateCellDict()" in dictionary_vm,
+        "词典页走 contentResolver 读文件并落库 + 失效缓存",
+        f"{rel(DICTIONARY_VM)} 未接线分类词库安装",
+    )
+    check(
+        "cellAddLauncher" in dictionary_screen
+        and "viewModel.addCellDict(it)" in dictionary_screen
+        and "viewModel.setCellDictEnabled(info.id, it)" in dictionary_screen
+        and "viewModel.removeCellDict(info.id)" in dictionary_screen,
+        "词典页接上 SAF 安装入口与每库开关 / 删除",
+        f"{rel(DICTIONARY_SCREEN)} 未接分类词库 UI",
+    )
+    check(
+        "private fun CellDictRow(" in dictionary_screen
+        and "R.string.dict_cell_add" in dictionary_screen,
+        "词典页新增分类词库行（名称 / 分类 / 词条数 + 开关）",
+        f"{rel(DICTIONARY_SCREEN)} 缺少分类词库行",
+    )
+    zh = _named_strings(STRINGS)
+    en = _named_strings(STRINGS_EN)
+    cell_keys = (
+        "dict_cell_title",
+        "dict_cell_hint",
+        "dict_cell_add",
+        "dict_cell_empty",
+        "dict_cell_entry_count",
+        "dict_cell_category_unknown",
+        "dict_cell_added",
+        "dict_cell_updated",
+        "dict_cell_add_failed",
+        "dict_cell_remove",
+    )
+    missing_cell = sorted(k for k in cell_keys if k not in zh or k not in en)
+    check(
+        not missing_cell,
+        f"分类词库文案中英各齐 {len(cell_keys)} 项",
+        f"中英 strings.xml 缺分类词库文案：{missing_cell}",
+    )
+    unused_cell = sorted(k for k in cell_keys if f"R.string.{k}" not in dictionary_screen)
+    check(
+        not unused_cell,
+        f"分类词库文案全部接线（{len(cell_keys)} 项无孤儿）",
+        f"分类词库文案定义了但没人用：{unused_cell}",
     )
 
 
@@ -996,6 +1591,10 @@ def main() -> int:
     check_consistency()
     print("-- 8. 语音输入（VOICE / ASR）全链路 --")
     check_voice_chain()
+    print("-- 9. 用户词库（模式 / 自造词 / 拼音态）--")
+    check_user_dict_chain()
+    print("-- 10. 分类词库（细胞词库）--")
+    check_cell_dict_chain()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

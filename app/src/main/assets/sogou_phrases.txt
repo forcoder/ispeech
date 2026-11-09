@@ -1,0 +1,28 @@
+# 搜狗拼音内置常用语（由 tools/import/import_sogou_quick_phrases.py 生成）
+# 证据: sgim_phrases.bin（v6.25.3.12004）; 触发码: 搜狗原码 5 条, 派生 20 条
+# 字段: trigger <TAB> label <TAB> content <TAB> mode <TAB> weight <TAB> p
+chrdw	锄禾日当午	锄禾日当午	prefix	90	p
+gdhxd	汗滴禾下土	汗滴禾下土	prefix	90	p
+szpzc	谁知盘中餐	谁知盘中餐	prefix	90	p
+lljxg	粒粒皆辛苦	粒粒皆辛苦	prefix	90	p
+cqmyg	床前明月光	床前明月光	prefix	90	p
+ysdss	疑是地上霜	疑是地上霜	prefix	90	p
+jtwmr	举头望明月	举头望明月	prefix	90	p
+dtsgx	低头思故乡	低头思故乡	prefix	90	p
+hbm	好呆槑	好呆槑	exact	90	p
+hdrbz	好多人仌众	好多人仌众	prefix	90	p
+hesj	好二亖井	好二亖井	exact	90	p
+llysc	离离原上草	离离原上草	prefix	90	p
+ysygr	一岁一枯荣	一岁一枯荣	prefix	90	p
+shsbj	野火烧不尽	野火烧不尽	prefix	90	p
+cfcys	春风吹又生	春风吹又生	prefix	90	p
+yfqgd	远芳侵古道	远芳侵古道	prefix	90	p
+qcjhc	晴翠接荒城	晴翠接荒城	prefix	90	p
+ysysq	又送王孙去	又送王孙去	prefix	90	p
+qqmbq	萋萋满别情	萋萋满别情	prefix	90	p
+nl	农历	农历	exact	90	p
+tesjl	太二亖井了	太二亖井了	prefix	90	p
+xq	星期	星期	exact	90	p
+zbm	真呆槑	真呆槑	exact	90	p
+zesj	真二亖井	真二亖井	exact	90	p
+zt	智能	智能	exact	90	p

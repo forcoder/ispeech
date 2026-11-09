@@ -60,6 +60,14 @@ object SettingsStore {
     private val KEY_ASR_LANGUAGE = stringPreferencesKey("asr_language")
     private val KEY_ASR_PARTIAL = booleanPreferencesKey("asr_partial_results")
     private val KEY_ASR_PREFER_OFFLINE = booleanPreferencesKey("asr_prefer_offline")
+    private val KEY_VOICE_SPACE_LONG_PRESS_MS = intPreferencesKey("voice_space_long_press_ms")
+
+    // —— 建议回复（大模型）——
+    private val KEY_AI_PROVIDER = stringPreferencesKey("ai_provider")
+    private val KEY_AI_BASE_URL = stringPreferencesKey("ai_base_url")
+    private val KEY_AI_MODEL = stringPreferencesKey("ai_model")
+    private val KEY_AI_API_KEY = stringPreferencesKey("ai_api_key")
+    private val KEY_AI_LEARNING = booleanPreferencesKey("ai_learning")
 
     /** 读取时统一兜底，避免 IO 异常导致界面崩溃。 */
     private fun Context.safeData(): Flow<Preferences> =
@@ -195,4 +203,60 @@ object SettingsStore {
         it[KEY_ASR_PARTIAL] = settings.partialResults
         it[KEY_ASR_PREFER_OFFLINE] = settings.preferOffline
     }
+
+    /** 空格长按语音触发时长（毫秒），默认 500ms。 */
+    fun voiceSpaceLongPressMsFlow(context: Context): Flow<Int> =
+        context.safeData().map { it[KEY_VOICE_SPACE_LONG_PRESS_MS] ?: 500 }
+
+    suspend fun setVoiceSpaceLongPressMs(context: Context, ms: Int) =
+        context.editSettings { it[KEY_VOICE_SPACE_LONG_PRESS_MS] = ms }
+
+    // —— 建议回复（大模型）——
+
+    /** AI 建议回复配置（模型来源 / Base URL / 模型名 / Key / 学习开关）。 */
+    fun aiSettingsFlow(context: Context): Flow<AiSettings> =
+        context.safeData().map { prefs ->
+            AiSettings(
+                provider = AiProvider.parse(prefs[KEY_AI_PROVIDER]),
+                baseUrl = prefs[KEY_AI_BASE_URL] ?: "",
+                model = prefs[KEY_AI_MODEL] ?: "",
+                apiKey = prefs[KEY_AI_API_KEY] ?: "",
+                learning = prefs[KEY_AI_LEARNING] ?: true,
+            )
+        }
+
+    /** 阻塞读取一次，供输入法服务点击 AI 键时使用。 */
+    fun aiSettings(context: Context): AiSettings =
+        runBlocking { aiSettingsFlow(context).first() }
+
+    /** 整体覆盖 AI 设置（Key 与 URL 去首尾空白，避免复制粘贴带换行导致鉴权失败）。 */
+    suspend fun setAiSettings(context: Context, settings: AiSettings) = context.editSettings {
+        it[KEY_AI_PROVIDER] = settings.provider.name
+        it[KEY_AI_BASE_URL] = settings.baseUrl.trim()
+        it[KEY_AI_MODEL] = settings.model.trim()
+        it[KEY_AI_API_KEY] = settings.apiKey.trim()
+        it[KEY_AI_LEARNING] = settings.learning
+    }
+
+    /** 输入法模式：拼音 / 五笔，默认拼音。 */
+    enum class InputMethodMode {
+        PINYIN,
+        WUBI,
+    }
+
+    private val KEY_INPUT_METHOD_MODE = stringPreferencesKey("input_method_mode")
+
+    /** 输入法模式（默认拼音）。 */
+    fun inputMethodModeFlow(context: Context): Flow<InputMethodMode> =
+        context.safeData().map { prefs ->
+            val raw = prefs[KEY_INPUT_METHOD_MODE] ?: InputMethodMode.PINYIN.name
+            runCatching { InputMethodMode.valueOf(raw) }.getOrDefault(InputMethodMode.PINYIN)
+        }
+
+    suspend fun setInputMethodMode(context: Context, mode: InputMethodMode) =
+        context.editSettings { it[KEY_INPUT_METHOD_MODE] = mode.name }
+
+    /** 阻塞读取一次，供输入法服务 onStartInputView 推给键盘。 */
+    fun voiceSpaceLongPressMs(context: Context): Int =
+        runBlocking { voiceSpaceLongPressMsFlow(context).first() }
 }

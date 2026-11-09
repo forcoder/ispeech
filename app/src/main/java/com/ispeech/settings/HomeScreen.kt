@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +53,7 @@ fun HomeScreen(
     onOpenTheme: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenAsr: () -> Unit,
+    onOpenAi: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel()
     val state by viewModel.uiState.collectAsState()
@@ -134,6 +136,12 @@ fun HomeScreen(
                 title = stringResource(R.string.asr_title),
                 subtitle = stringResource(R.string.asr_description),
                 onClick = onOpenAsr,
+            )
+            SettingsEntryCard(
+                icon = Icons.Filled.Star,
+                title = "AI 建议",
+                subtitle = "大模型来源、Base URL / 模型 / Key，学习采纳率",
+                onClick = onOpenAi,
             )
         }
     }

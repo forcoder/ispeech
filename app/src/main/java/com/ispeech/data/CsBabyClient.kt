@@ -10,7 +10,10 @@ import com.ispeech.data.remote.LoginRequest
 import com.ispeech.data.remote.LoginResponse
 import com.ispeech.data.remote.RefreshTokenRequest
 import com.ispeech.data.remote.RegisterRequest
+import com.ispeech.data.remote.RuleUpsertRequest
 import com.ispeech.data.remote.SyncApiService
+import com.ispeech.data.remote.SyncPushRequest
+import com.ispeech.data.remote.SyncPushResult
 import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickMatchMode
@@ -81,6 +84,18 @@ class CsBabyClient(@Suppress("UNUSED_PARAMETER") context: Context) {
         }
         return data.keywordRules.orEmpty()
     }
+
+    /** 列出全部远端关键词规则（含 id，用于上传去重）。 */
+    suspend fun listRules(auth: CsBabyAuthState): List<RemoteKeywordRule> =
+        call { syncApi.listRules("Bearer ${auth.token}") }
+
+    /** 创建一条远端关键词规则。 */
+    suspend fun createRule(auth: CsBabyAuthState, request: RuleUpsertRequest): RemoteKeywordRule =
+        call { syncApi.createRule(request, "Bearer ${auth.token}") }
+
+    /** 批量推送本地变更（新增 / 修改 / 删除）；响应体不含统计字段时返回 null。 */
+    suspend fun pushSync(auth: CsBabyAuthState, request: SyncPushRequest): SyncPushResult? =
+        call { syncApi.pushSync(request, "Bearer ${auth.token}") }.data
 
     /** AI 生成回复：优先命中关键词规则，未命中时调用用户配置的 LLM。 */
     suspend fun generateReply(auth: CsBabyAuthState, message: String): AiReply {

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Replicate Software"
+  short_description: "Replication work always runs through REA + reverse-skill + PentAGI"

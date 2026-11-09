@@ -144,6 +144,13 @@ data class KeyDef(
      * [label] 仍然保留：它同时充当无障碍朗读与长按/按下预览的文案。
      */
     val iconRes: Int = 0,
+    /**
+     * 键面显示「当前输入态」（拼 / EN / 五）。
+     *
+     * 仅工具栏第 4 键使用：同样的 [KeyAction.MODE_SWITCH] 在字母页底行要以「中/英」分色渲染，
+     * 这里换成单色状态字，避免两个位置共用一个渲染分支。
+     */
+    val statusLabel: Boolean = false,
 ) {
     companion object {
         /** 字符键快捷构造。 */
@@ -188,6 +195,7 @@ data class KeyDef(
             layout: KeyboardLayoutKind? = null,
             pageOffset: Int = 0,
             iconRes: Int = 0,
+            statusLabel: Boolean = false,
         ): KeyDef = KeyDef(
             action = action,
             label = label,
@@ -196,6 +204,7 @@ data class KeyDef(
             layout = layout,
             pageOffset = pageOffset,
             iconRes = iconRes,
+            statusLabel = statusLabel,
         )
     }
 }

@@ -30,6 +30,12 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             SettingsStore.keyboardSettingsFlow(app).collect { _settings.value = it }
         }
+        viewModelScope.launch {
+            SettingsStore.inputMethodModeFlow(app).collect { _inputMethodMode.value = it }
+        }
+        viewModelScope.launch {
+            SettingsStore.voiceSpaceLongPressMsFlow(app).collect { _spaceLongPressMs.value = it }
+        }
         refreshUserWords()
     }
 
@@ -92,6 +98,22 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { SettingsStore.setTraditionalOutput(app, enabled) }
     }
 
+    private val _inputMethodMode = MutableStateFlow(SettingsStore.InputMethodMode.PINYIN)
+    val inputMethodMode: StateFlow<SettingsStore.InputMethodMode> = _inputMethodMode.asStateFlow()
+
+    private val _spaceLongPressMs = MutableStateFlow(500)
+    val spaceLongPressMs: StateFlow<Int> = _spaceLongPressMs.asStateFlow()
+
+    fun setInputMethodMode(mode: SettingsStore.InputMethodMode) {
+        _inputMethodMode.value = mode
+        viewModelScope.launch { SettingsStore.setInputMethodMode(app, mode) }
+    }
+
+    fun setSpaceLongPressMs(ms: Int) {
+        _spaceLongPressMs.value = ms
+        viewModelScope.launch { SettingsStore.setVoiceSpaceLongPressMs(app, ms) }
+    }
+
     // —— 用户词库 ——
 
     /** 重新读取用户学习到的词条（IO 线程）。 */
@@ -107,7 +129,7 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val store = AppContainer.userDict(app)
-                store.remove(entry.code, entry.text)
+                store.remove(entry.code, entry.text, entry.mode)
                 AppContainer.invalidateUserDict()
                 store.all()
             }.onSuccess { _userWords.value = it }

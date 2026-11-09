@@ -1,6 +1,7 @@
 package com.ispeech
 
 import android.app.Application
+import com.ispeech.data.BundledCellDicts
 import com.ispeech.di.AppContainer
 
 /**
@@ -13,5 +14,12 @@ class IspeechApp : Application() {
         super.onCreate()
         // 初始化统一依赖入口
         AppContainer.init(this)
+        // 内置分类词库（搜狗细胞词库搬迁）在后台装配：读 assets + 解析 + 落盘，不能占主线程
+        Thread({
+            runCatching {
+                BundledCellDicts.install(this, AppContainer.cellDict(this))
+                AppContainer.invalidateEngine()
+            }
+        }, "ispeech-bundled-cell-dicts").apply { isDaemon = true }.start()
     }
 }

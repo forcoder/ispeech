@@ -15,6 +15,7 @@ import com.ispeech.settings.SyncScreen
 import com.ispeech.settings.ThemeScreen
 import com.ispeech.settings.StatsScreen
 import com.ispeech.settings.asr.AsrSettingsScreen
+import com.ispeech.settings.ai.AiSettingsScreen
 
 /** 设置模块路由表。 */
 object IspeechRoutes {
@@ -28,6 +29,7 @@ object IspeechRoutes {
     const val ABOUT = "about"
     const val STATS = "stats"
     const val ASR = "asr"
+    const val AI = "ai"
 }
 
 /**
@@ -55,6 +57,7 @@ fun IspeechNavGraph(navController: NavHostController = rememberNavController()) 
                 onOpenTheme = { navController.navigate(IspeechRoutes.THEME) },
                 onOpenAbout = { navController.navigate(IspeechRoutes.ABOUT) },
                 onOpenAsr = { navController.navigate(IspeechRoutes.ASR) },
+                onOpenAi = { navController.navigate(IspeechRoutes.AI) },
             )
         }
         composable(IspeechRoutes.DICTIONARY) {
@@ -93,6 +96,9 @@ fun IspeechNavGraph(navController: NavHostController = rememberNavController()) 
         }
         composable(IspeechRoutes.ASR) {
             AsrSettingsScreen(onBack = { navController.popBackStack() })
+        }
+        composable(IspeechRoutes.AI) {
+            AiSettingsScreen(onBack = { navController.popBackStack() })
         }
     }
 }

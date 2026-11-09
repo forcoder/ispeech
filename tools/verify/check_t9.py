@@ -54,19 +54,19 @@ EXPECTED_DIGIT_GRID = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#
 EXPECTED_KAOMOJI_CATEGORIES = ["开心", "无奈", "生气", "惊讶", "害羞", "动物", "鼓励"]
 EXPECTED_SYMBOL_CATEGORIES = ["数学", "箭头", "货币", "单位", "希腊", "线框"]
 
-# 接线基线：KeyAction 只允许 SWITCH_IME 这一个新增（用户追加需求），其余一律不许变
+# 接线基线：KeyAction 只允许 SWITCH_IME（切换系统输入法）与 VOICE（系统语音输入）这两个新增，其余一律不许变
 EXPECTED_KEY_ACTIONS = [
     "CHAR", "PUNCTUATE", "SHIFT", "BACKSPACE", "SPACE", "ENTER", "TAB",
     "MOVE_LEFT", "MOVE_RIGHT", "MODE_SWITCH", "LAYOUT", "PAGE_PREV", "PAGE_NEXT",
     "PANEL_QUICK_PHRASE", "PANEL_CLIPBOARD", "AI", "SETTINGS", "HIDE_KEYBOARD", "CLEAR",
     "SELECT_ALL", "COPY", "PASTE", "UNDO_COMMIT", "TOGGLE_PUNCT", "TOGGLE_FULL_WIDTH",
-    "SWITCH_IME",
+    "SWITCH_IME", "VOICE",
 ]
 
 EXPECTED_LAYOUT_KINDS = ["LETTER", "NUMBER", "SYMBOL", "EMOJI", "T9"]
 
-# 工具栏最终键序（8 键，用户指定的顺序）
-EXPECTED_TOOLBAR_LABELS = ["⌨输入法", "中/英", "符", "☺", "短语", "剪贴", "AI", "⚙"]
+# 工具栏最终键序（8 键：中英切换已改由字母页 Shift 键承担，新增语音键 🎤）
+EXPECTED_TOOLBAR_LABELS = ["短语", "AI", "输", "中/英", "符", "☺", "剪贴", "语音", "⚙"]
 
 
 def report(level: str, message: str) -> None:
@@ -690,17 +690,19 @@ def check_wiring() -> None:
         ) is not None,
         "kaomojiFirstPage() = 表情总页数 - 颜文字页数（追加后仍指向首页）",
     )
-    sym_literal = len(re.findall(r'KeyboardPage\(\s*title = "符号', layouts))
+    # 符号页已按搜狗面板改成 6 个分类页（常用/中文/英文/网络/数学/角标），
+    # 标题由 symbolPage("符号N", ...) 传入，所以按这个调用形态计数。
+    sym_literal = len(re.findall(r'symbolPage\("符号', layouts))
     # 注意：不能用 "EmojiCategory(" 计数，会把 data class EmojiCategory( 也算进去
     emoji_cats = len(parse_categories(read(EMOJI_KT), "EmojiCategory"))
     kao_cats = len(parse_categories(read(KAOMOJI_KT), "KaomojiCategory"))
     check(
-        sym_literal == 2 and emoji_cats == 8 and kao_cats == 7,
-        f"页码算术原料：符号1/2 = {sym_literal} 页，EmojiData 分类 = {emoji_cats} 个，颜文字分类 = {kao_cats} 个",
+        sym_literal == 6 and emoji_cats == 8 and kao_cats == 7,
+        f"页码算术原料：符号页 = {sym_literal} 页（搜狗 6 分类），EmojiData 分类 = {emoji_cats} 个，颜文字分类 = {kao_cats} 个",
     )
     check(
-        sym_literal == 2 and emoji_cats == 8,
-        f"跳页下标实际值：moreSymbolFirstPage() = {sym_literal}（切到「数学」页），"
+        sym_literal == 6 and emoji_cats == 8,
+        f"跳页下标实际值：moreSymbolFirstPage() = {sym_literal}（切到追加的首个符号页），"
         f"kaomojiFirstPage() = {emoji_cats}（切到「颜·开心」页）",
     )
 
@@ -715,12 +717,35 @@ def check_wiring() -> None:
     toolbar = body_after(view, r"private fun toolbarKeys\(\)\s*:\s*List<KeyDef>\s*=\s*listOf\(")
     check(bool(toolbar), "找到 toolbarKeys()")
     count = toolbar.count("KeyDef.fn(")
-    check(count == 8, f"工具栏共 8 个按键（实际 {count}）")
+    check(count == 9, f"工具栏共 9 个按键（实际 {count}）")
     labels = re.findall(r'"([^"]+)"', toolbar)
     check(labels == EXPECTED_TOOLBAR_LABELS, f"工具栏键序：{labels}（期望 {EXPECTED_TOOLBAR_LABELS}）")
     check(
-        'KeyAction.SWITCH_IME' in toolbar.split("KeyDef.fn(", 1)[1].split("KeyDef.fn(")[0],
-        "工具栏第 1 键「⌨输入法」= KeyAction.SWITCH_IME（切换系统其它输入法）",
+        'KeyAction.PANEL_QUICK_PHRASE' in toolbar.split("KeyDef.fn(", 1)[1].split("KeyDef.fn(")[0],
+        "工具栏第 1 键 = KeyAction.PANEL_QUICK_PHRASE（快捷短语）",
+    )
+    switch_ime = [seg for seg in toolbar.split("KeyDef.fn(") if "KeyAction.SWITCH_IME" in seg]
+    check(
+        bool(switch_ime) and '"输"' in switch_ime[0] and "imeSwitchLabel()" not in switch_ime[0],
+        "第 3 键 = 切换系统输入法，键面固定「输」",
+    )
+    status_key = [
+        seg for seg in toolbar.split("KeyDef.fn(")
+        if "KeyAction.MODE_SWITCH" in seg
+    ]
+    check(
+        bool(status_key) and "statusLabel = true" in status_key[0],
+        "第 4 键 = 输入态状态键（statusLabel = true，键面走 imeSwitchLabel）",
+    )
+    check(
+        "effectiveKey.statusLabel" in view and "imeSwitchLabel()" in view,
+        "createKey 对 statusLabel 键渲染 imeSwitchLabel()（拼 / EN / 五）",
+    )
+    keydef = read(ROOT / "app/src/main/java/com/ispeech/input/keyboard/KeyDef.kt")
+    fn_body = keydef.split("fun fn(", 1)[1].split("): KeyDef = KeyDef(", 1)[1]
+    check(
+        "statusLabel = statusLabel" in fn_body,
+        "KeyDef.fn() 把 statusLabel 透传给 KeyDef（漏传会退回「中/英」）",
     )
     check(
         '"9键"' not in toolbar and "KeyboardLayoutKind.T9" not in toolbar,
@@ -746,7 +771,7 @@ def check_wiring() -> None:
         "工具栏外层 HorizontalScrollView(isFillViewport = true)：放不下就横滑，不换行不加第二行",
     )
     weights = [float(w) for w in re.findall(r"weight = ([0-9.]+)f", toolbar)]
-    check(len(weights) == 8, f"工具栏 8 键权重：{weights}（合计 {round(sum(weights), 2)}）")
+    check(len(weights) == 9, f"工具栏 9 键权重：{weights}（合计 {round(sum(weights), 2)}）")
     check("const val TOOLBAR_TEXT_SIZE = 12f" in view, "工具栏字号 12f（TOOLBAR_TEXT_SIZE = 12f）")
 
     # 九宫格入口：数字页（123）底行

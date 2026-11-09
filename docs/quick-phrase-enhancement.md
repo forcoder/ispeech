@@ -527,3 +527,100 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 - 拼音首字母表未与权威拼音表逐字比对（仅对已知用例与内置规则文案做断言）；
 - `renameTo` 的原子性依赖文件系统（Android 上 `filesDir` 位于 ext4/f2fs，同目录 rename 是原子的），
   已实现「失败则退化覆盖写」的兜底，但未做掉电注入测试。
+
+## 12. 搜索栏与云端增删改同步（2026-10-17 追加）
+
+### 12.1 设置页搜索栏 + 智能联想
+
+`settings/QuickPhrasesScreen.kt` 列表顶部新增搜索栏（`QuickSearchBar`），`settings/quick/QuickPhrasesViewModel.kt`
+在 `load()` 里一次性读入使用记录（`PhraseUsageStore.countOf` / `isStarred`）后，关键词过滤完全由
+`data/PhraseSearch.kt` 承担：
+
+- 档位：完全 > 前缀 > 包含 > 拼音首字母（`fp` → 「发票」），同档按 使用次数（+2/次，上限 20 次）→ 收藏（+30）→ weight 排序；
+- 空关键词时列表按同一评分排序（用频次高的自然靠前）；
+- 命中区间以 `secondaryContainer` 底色高亮，只对「正在渲染的那个字段」生效；拼音首字母命中额外标「拼音首字母」档位角标。
+
+输入时只做纯计算：使用记录在 `load()` 时读盘一次，之后 `setKeyword` 不在主线程碰任何文件。
+
+### 12.2 IME 面板的智能联想
+
+`input/QuickPhrasePanel.kt` 的关键词过滤从「三字段 `contains`」改为 `PhraseSearch`（由服务经
+`submitUsage(starredIds, recentIds, usageCounts)` 灌入使用次数），因此面板内打字同样支持拼音首字母联想与
+使用频率加权。**无关键词时保持规则文件原始顺序**，避免「开面板条序变了」。面板仍零磁盘 IO、零 `AppContainer`
+（`tools/verify/check_crosscut.py` 有断言）。
+
+### 12.3 云端增删改同步
+
+后端（`api.agentai0.com`）实测**只有** `POST api/rules`（创建）与 `POST sync/push`（批量），
+`PUT / DELETE /api/rules/{id}` 全部 404（curl 复核 2026-10-17）。因此：
+
+| 操作 | 实现 |
+|---|---|
+| 新增 | `POST api/rules`，取返回的规则 id 记入映射表 |
+| 修改 / 删除 | 汇总成一次 `POST sync/push`：`{rules:[{id,keyword,reply_template,match_type,priority,enabled}], deletedIds:[id]}` |
+
+删除同步的前提是「本地删掉的那条对应远端哪个 id」，本地文件里没有这个信息，故新增映射文件
+`filesDir/quick_phrases_remote_map.txt`：`trigger \t id \t fingerprint`，`fingerprint` 是远端可见字段
+（触发词 / 正文 / match_type / weight / 类型）的哈希 —— 指纹变了才重推，避免每次保存都全量上传。
+
+**不做「假装成功」**：`sync/push` 的生效范围未经确认，推送后重新拉取一次远端规则列表复核，
+只有远端确实变了才计入 `applied` 并更新映射表；未生效的条数作为 `pending` 上报到设置页与同步页文案
+（`quick_synced_partial` / `sync_upload_partial`）。
+
+`match_type` 归一化：`PREFIX` 与 `CONTAINS` 都写 `CONTAINS`（后端只认 EXACT / CONTAINS / REGEX，
+否则会「推上去又变回来」导致每次保存反复重推）。
+
+### 12.4 快捷字母（自定义简写，命中即候选首位）
+
+搜狗「常用语」支持给短语配一串自定义简写，敲简写就直接出这条短语。本实现的对应能力：
+
+| 关注点 | 位置 / 规则 |
+| --- | --- |
+| 数据 | `QuickEntry.trigger` 就是快捷字母；用户规则文件 `filesDir/quick_phrases_user.txt` 第一列 |
+| 录入 | 设置页「快捷短语」新增 / 编辑弹窗（本地规则与云端简写两处同一套校验）：只保留小写字母，2–4 位 |
+| 为什么限 4 位 | 五笔态组合缓冲上限 `MAX_CODE_LENGTH = 4`，第 5 个字母会先把当前首选上屏再重新起码，更长的简写永远打不全 |
+| 排序 | `CandidateRanking`：精确码优先 → `LookupKind.order`（应用 0 < 短语 1 < 词库 2 …）；`QuickPhraseEngine.lookup` 保证**精确命中不受扫描上限截断**，规则表再大也排第一 |
+| 生效时机 | 保存即 `AppContainer.invalidateEngine()`，输入法无需重启 |
+| 可见性 | 输入法内「短语」面板每行右侧以角标显示快捷字母，用户不必回设置页查 |
+
+验收：五笔态敲 `ycsf` → 候选第 1 位是「游泳池换水要收费的」→ 空格整段上屏。
+`tools/verify/check_quick_trigger.py` 对上面每一条都有断言（含「精确命中不被截断」与 `ycsf` 排序模拟）。
+
+### 12.5 远端规则的查看与快捷字母覆盖
+
+设置页「快捷短语」列表现在同时展示两个来源：
+
+| 来源 | 文件 | 可做的操作 |
+| --- | --- | --- |
+| 用户 | `filesDir/quick_phrases_user.txt` | 查看 / 新增 / 编辑 / 删除 / 设置快捷字母 |
+| 远端 | `filesDir/quick_phrases_remote.txt`（`SyncRepository.pullAndWriteRemoteRules` 的拉取产物） | 查看 / 设置快捷字母 / 恢复默认；内容与远端文件只读 |
+
+数据落点与识别规则：
+
+- 给远端规则设置快捷字母时**不改远端文件**，而是往用户文件追加一条覆盖条目：
+  `trigger = 快捷字母`、`label / content / kind` 复制远端规则、`mode = prefix`、
+  `weight = 远端 weight + 1000`（`QuickPhrasesViewModel.REMOTE_OVERRIDE_WEIGHT_BONUS`）。
+- 用户文件里 `label + content` 与某条远端规则相同的条目，即视为该规则的覆盖条目
+  （`QuickOverride.matches`）；设置页把它折叠到远端卡片上显示「已覆盖为 xxx」，
+  不再单独显示成一条用户规则。普通用户规则仍显示来源「用户」。
+- 远端条目先按原文件展示；覆盖后卡片上的快捷字母、匹配方式切换为覆盖条目的值，
+  原本的 `label / content / 权重` 保持远端口径。
+
+排序为什么能胜出：
+
+- `CandidateRanking` 的顺序是「精确码 → `LookupKind.order` → weight 降序 → display」；
+  覆盖条目是用户选择的完整快捷字母，输入完整字母时命中精确码，权重又比原远端高 1000。
+- `CompositeEngine` 先把所有引擎的候选合并、全局排序，再按 `display` 去重；覆盖条目排得更前，
+  先入者胜，原远端条目被去重。因此**不需要**调整 `QuickLocator.buildComposite` 的引擎顺序。
+
+恢复默认：
+
+- 卡片上的「恢复默认」调用 `QuickPhrasesViewModel.removeRemoteOverride`，从用户文件删除该覆盖条目；
+  下次渲染时远端卡片回到原快捷字母。点击「保存并同步」后写盘并 `invalidateEngine()`，输入法立即生效。
+- 远端文件下次同步被整体覆盖也不会影响用户设置：覆盖条目始终只存在用户文件中。
+
+同步边界：
+
+- 覆盖条目是本地别名，`SyncRepository.pushLocalRules` 会读取远端文件并跳过
+  `label + content` 能匹配上的用户条目（`QuickOverride.matchesAny`），避免在 csBaby 上
+  生成同内容的第二条远端规则。

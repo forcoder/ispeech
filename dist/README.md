@@ -53,7 +53,7 @@
 
 ## 构建与实测环境
 
-本工程开发机没有 JDK / Android SDK，编译与真机冒烟都在远端构建机（`cookie@43.136.44.72:10010`，
+本工程开发机已装 JDK 17（Temurin 17.0.20.1）但没有 Android SDK，编译与真机冒烟都在远端构建机（`cookie@43.136.44.72:10010`，
 JDK 17 + Android SDK 34 + emulator-5554 / Android 14）执行，命令见仓库根 `README.md` 的
 「远端构建机」与「v1.5 真机实测记录」两节。
 

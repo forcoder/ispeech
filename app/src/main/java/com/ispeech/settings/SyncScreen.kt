@@ -181,6 +181,45 @@ fun SyncScreen(onBack: () -> Unit, onOpenLogin: () -> Unit) {
                         }
                     }
 
+                    // 上传本地短语到远端（双向同步 push）
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.sync_upload_now),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                text = stringResource(R.string.sync_upload_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Button(
+                                onClick = { viewModel.pushNow() },
+                                enabled = !state.pushing,
+                            ) {
+                                if (state.pushing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                Text(stringResource(R.string.sync_upload_now))
+                            }
+                            state.pushedCount?.let { count ->
+                                Text(
+                                    text = stringResource(R.string.sync_upload_success, count),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+
                     // 登出：清空本地登录凭证
                     OutlinedButton(
                         onClick = { viewModel.logout() },

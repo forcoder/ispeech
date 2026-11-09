@@ -456,7 +456,7 @@ def check_keyboard_structure() -> None:
     if len(pages) < 4:
         report("FAIL", f"只解析到 {len(pages)} 个静态页（期望 >= 4：字母 / 数字 / 符号1 / 符号2）")
     letter = pages[0] if pages else ("?", [])
-    expected = [10, 9, 9, 5]
+    expected = [10, 9, 9, 7]
     if letter[1] == expected:
         report("PASS", f"字母页结构：4 行，键数 {letter[1]}（期望 {expected}）")
     else:

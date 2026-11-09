@@ -13,7 +13,7 @@ import java.lang.reflect.Type
  * enabled / deleted 可能是 true/false、1/0 或 "1"/"0"，做统一容错。
  */
 data class RemoteKeywordRule(
-    @SerializedName("id") val id: Long = 0L,
+    @SerializedName("id") val id: String = "",
     @SerializedName("keyword") val keyword: String = "",
     @SerializedName("match_type") val matchType: String = "",
     @SerializedName("reply_template") val replyTemplate: String = "",

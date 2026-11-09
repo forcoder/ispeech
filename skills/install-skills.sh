@@ -13,7 +13,7 @@ dest_root="${CODEX_HOME:-$HOME/.codex}/skills"
 
 mkdir -p "$dest_root"
 
-for name in reverse-skill pentagi rea-loop; do
+for name in reverse-skill pentagi rea-loop replicate-software; do
   src="$src_dir/$name"
   dest="$dest_root/$name"
   if [ ! -d "$src" ]; then

@@ -23,3 +23,21 @@ object QuickSource {
     /** 面板分类筛选用到的全部来源，顺序即展示顺序。 */
     val all: List<String> = listOf(BUILT_IN, REMOTE, USER)
 }
+
+/**
+ * 远端规则的「快捷字母覆盖」判定。
+ *
+ * 远端文件是同步拉取产物，用户设置的快捷字母不能写回去；约定用户文件里
+ * `label + content` 与某条远端规则相同的条目就是该规则的覆盖条目。覆盖条目仍按普通
+ * 用户规则写盘 / 生效，但不应再被当成新规则推送到 csBaby，否则云端会出现同内容的重复规则。
+ */
+object QuickOverride {
+
+    /** 用户条目 [user] 是否是远端规则 [remote] 的快捷字母覆盖。 */
+    fun matches(user: QuickEntry, remote: QuickEntry): Boolean =
+        user.label == remote.label && user.content == remote.content
+
+    /** 用户条目 [user] 是否覆盖了 [remote] 中的任意一条规则。 */
+    fun matchesAny(user: QuickEntry, remote: List<QuickEntry>): Boolean =
+        remote.any { matches(user, it) }
+}

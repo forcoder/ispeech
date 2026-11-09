@@ -313,7 +313,7 @@ object T9Layouts {
                 enterKey(),
             ),
         ),
-    )
+    ).punctStyled()
 
     /** 九宫格两页：[digitPage] + [punctuationPage]（顺序与页码常量一致）。 */
     fun pages(): List<KeyboardPage> = listOf(digitPage(), punctuationPage())

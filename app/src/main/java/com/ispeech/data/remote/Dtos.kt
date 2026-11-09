@@ -67,6 +67,57 @@ data class SyncAllData(
     @SerializedName("serverTime") val serverTime: Long = 0L
 )
 
+/**
+ * 创建关键词规则请求体：POST api/rules。
+ * 必填 keyword；其余字段为 null 时 Gson 不下发，由后端取默认值
+ * （match_type 默认 CONTAINS）。
+ */
+data class RuleUpsertRequest(
+    @SerializedName("keyword") val keyword: String,
+    @SerializedName("reply_template") val replyTemplate: String,
+    @SerializedName("match_type") val matchType: String? = null,
+    @SerializedName("category") val category: String? = null,
+    @SerializedName("priority") val priority: Int? = null,
+    @SerializedName("enabled") val enabled: Boolean? = null,
+)
+
+/** 推送的单条规则：id 为空表示新增，非空表示按 id 覆盖远端已有规则。 */
+data class SyncPushRule(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("keyword") val keyword: String,
+    @SerializedName("reply_template") val replyTemplate: String,
+    @SerializedName("match_type") val matchType: String? = null,
+    @SerializedName("category") val category: String? = null,
+    @SerializedName("priority") val priority: Int? = null,
+    @SerializedName("enabled") val enabled: Boolean? = null
+)
+
+/**
+ * 批量推送请求体：POST sync/push。
+ * rules 承载新增 / 修改，deletedIds 承载删除（与 GET sync/changes 的响应字段同名对称）。
+ */
+data class SyncPushRequest(
+    @SerializedName("rules") val rules: List<SyncPushRule> = emptyList(),
+    @SerializedName("deletedIds") val deletedIds: List<String> = emptyList()
+)
+
+/** 推送统计：accepted 为后端收下的条数，applied 为真正落库的条数。 */
+data class SyncPushResult(
+    @SerializedName("accepted") val accepted: Int = 0,
+    @SerializedName("applied") val applied: Int = 0,
+    @SerializedName("newServerVersion") val newServerVersion: Long = 0L,
+    @SerializedName("serverTime") val serverTime: Long = 0L
+)
+
+/**
+ * 推送响应外壳：后端返回 {code,data:{...}}，data 也可能缺失（两端版本不一致时）。
+ * 生效条数一律以推送后重新拉取远端列表的复核结果为准，见 SyncRepository.pushLocalRules。
+ */
+data class SyncPushEnvelope(
+    @SerializedName("code") val code: Int = 0,
+    @SerializedName("data") val data: SyncPushResult? = null
+)
+
 /** AI 生成请求体：POST api/ai/generate */
 data class GenerateRequest(
     @SerializedName("message") val message: String,
