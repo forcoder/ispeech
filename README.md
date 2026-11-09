@@ -243,6 +243,7 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 - `docs/stats-and-hanconversion.md` — 输入统计与简繁转换（数据来源、许可、接线）
 - `docs/quick-phrase-enhancement.md` — 快捷短语收藏 / 最近使用
 - `docs/voice-input.md` — 语音输入（搜狗对照 / 复刻义务清单 / 接线与已知差异）
+- `docs/ux-optimization-plan.md` — VOCA-37 键盘使用体验优化的交付计划（实测差距、里程碑、风险登记册）
 
 ## 校验脚本
 

@@ -53,6 +53,20 @@ python3 tools/verify/check_input_logic.py
 - **资源引用检查只覆盖 `R.` 前缀的直接引用**，覆盖不到反射 / 字符串拼装的资源名。
 - 脚本**不修改任何 Kotlin / XML 源码**，只读取与报告。
 
+## measure_ime_inset.py —— 键盘占屏高度对照测量
+
+需要**已连接的真机 / 模拟器**（与其他脚本不同，它要跑 `adb`）。读 `dumpsys window displays`
+里的 `InsetsSource type=ITYPE_IME` —— 系统合成器给出的最终窗口矩形，比截图取色可靠
+（候选条与键盘底色同为 `#F2F3F5`，截图分不出边界）。
+
+```bash
+python3 tools/verify/measure_ime_inset.py --compare   # 依次切 iSpeech / 搜狗 各测一次并打印差值
+python3 tools/verify/measure_ime_inset.py             # 只测当前输入法
+```
+
+前置：目标输入法已启用、屏幕上已有获得焦点的输入框且键盘已弹出。不满足时报错退出，
+不出假数据。`--compare` 会自动 `ime set` 切换并校验切换是否真的生效。
+
 ## 当前基线
 
 最近一次运行（见上层汇报）：
