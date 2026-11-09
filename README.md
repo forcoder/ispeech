@@ -243,6 +243,7 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 - `docs/stats-and-hanconversion.md` — 输入统计与简繁转换（数据来源、许可、接线）
 - `docs/quick-phrase-enhancement.md` — 快捷短语收藏 / 最近使用
 - `docs/voice-input.md` — 语音输入（搜狗对照 / 复刻义务清单 / 接线与已知差异）
+- `docs/model-host-runbook.md` — 离线模型托管源：可用性探测、换源 SOP、告警分级与回滚
 
 ## 校验脚本
 
@@ -254,12 +255,22 @@ for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger;
 done
 ```
 
-当前状态（v1.5）：`check_static 5/5`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
+当前状态（v1.5）：`check_static 6/6`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
 `check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 66/66`、`check_crosscut 138/138`、
 `check_quick_trigger 29/29(+1 known warn)`。**全部通过**；分类词库（细胞词库）第 10 节 24 项全绿。
 另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）；
 `tools/verify/check_quick_trigger.py` 校验快捷短语「简写（触发码）」规则 —— 尤其防止**单字母简写误用
 prefix 模式导致静默失效**（见 `docs/quick-phrase-enhancement.md` 的「简写」一节）。
+
+模型托管源探测（**需联网**，退出码非 0 = 源不可用，可接 CI / 定时任务）：
+
+```bash
+python3 tools/verify/check_model_host.py                 # 探测 build.gradle.kts 的默认源
+python3 tools/verify/check_model_host.py <url> --sha256  # 换源验收：整包下载 + 摘要校验
+python3 tools/verify/check_model_host.py --self-test     # 不联网验证判定逻辑
+```
+
+处置流程与换源方案见 `docs/model-host-runbook.md`。
 
 ## 品牌设计
 
