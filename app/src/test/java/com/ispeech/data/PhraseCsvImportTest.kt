@@ -161,8 +161,8 @@ class PhraseCsvImportTest {
     fun `短名取首行并在重名时追加序号`() {
         val text = csv(
             header,
-            "u1,泳池,1,\"关于泳池说明：\r\n第一版\",s1,2,0,1,1,0",
-            "u2,泳池,1,\"关于泳池说明：\r\n第二版\",s2,2,0,1,1,0",
+            "u1,泳池,1,\"关于泳池说明：\r\n第一版\",yc,2,0,1,1,0",
+            "u2,泳池,1,\"关于泳池说明：\r\n第二版\",ys,2,0,1,1,0",
         )
 
         val parsed = PhraseCsvImport.parse(text)
