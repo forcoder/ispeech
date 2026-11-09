@@ -624,3 +624,70 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 - 覆盖条目是本地别名，`SyncRepository.pushLocalRules` 会读取远端文件并跳过
   `label + content` 能匹配上的用户条目（`QuickOverride.matchesAny`），避免在 csBaby 上
   生成同内容的第二条远端规则。
+
+## 13. 导入「通用短语.csv」（2026-11-09 追加）
+
+来源：产品给的搜狗 / csBaby 导出文件 `通用短语.csv`（235 行、GBK、61 KB）。目标是「导进常用语，
+敲快捷字母就出对应候选」，不再一条条手录。仓库内留了这份文件作基线（`tools/verify/fixtures/general_phrases.csv`），
+`tools/verify/check_phrase_csv_import.py` 直接读它做回归。
+
+### 13.1 入口
+
+设置 → 快捷短语 → 「导入 CSV」→ 系统文件选择器（`ActivityResultContracts.OpenDocument`，
+不申请存储权限）。MIME 白名单枚举了 `text/plain`、`text/csv`、`text/comma-separated-values`、`text/x-csv`、
+`application/csv`、`application/vnd.ms-excel`、`application/octet-stream`——网盘 / 微信 / Excel 报的 MIME 各不相同，漏一个用户就选不到刚下载的文件。
+
+选完只进内存列表并提示「已导入 N 条」，点「保存并同步」才落盘 + 上传：沿用 `upsert` 的同一套
+契约（`dirty = true` → `save()`），中途退出不会留下半份数据。
+
+### 13.2 文件格式
+
+GBK（Excel 另存）或 UTF-8（含 BOM 也行），首行表头，逗号分隔，RFC 4180 引号字段
+（字段内可含换行、逗号、`""` 转义）：
+
+| 列 | 用途 |
+| --- | --- |
+| `CONTENT` | 上屏文本，可含换行（真实文件 224 条中 108 条是多行） |
+| `INPUT_CODE` | 快捷字母，落成 `trigger` |
+| `GROUP_NAME` | 分组名，仅当内容全为空时兜底当短名 |
+| `IS_DELETE` | 非 0 视为已删除，跳过 |
+| `UUID` / 时间戳 / `SYNC_STATUS` | 忽略 |
+
+表头按别名识别、顺序无关（`input_code` / `code` / `简写` / `编码`，`content` / `内容`……），
+换一家导出的文件不用改代码。
+
+### 13.3 映射口径
+
+| 字段 | 规则 | 为什么 |
+| --- | --- | --- |
+| `trigger` | 去空白 → 转小写，须为 1–12 位 `[a-z]` | 引擎按小写比对；`MAX_CODE_LENGTH = 4` 只是五笔输入上限 |
+| `mode` | 1 位 → `exact`，其余 → `prefix` | `QuickPhraseEngine` 的 prefix / contains 在输入短于 2 位时被 `minTriggerLength` 拦下，1 位码用 prefix 等于永远打不出来 |
+| 长码 > 4 位 | 照常导入为 prefix | 五笔态最多打 4 码，prefix 让「打前 4 位」也能命中；本文件 60 条 |
+| `label` | 内容首个非空行，码点截断 20 位 + `…`；重名追加 `·2` / `·3` | `CompositeEngine` 按 display 去重，短名重复会吞掉候选；本文件 13 条重名 |
+| `content` | CRLF / 孤立 CR → `\n`，逐行去行尾空白，连续空行压成一行，首行去前导空白 | 源文件有 `\r\r\n` 混排；这些空白在落盘 `trim` 后会丢，先规范化才能保证回读逐字一致 |
+| `weight` | 100 | 与手录规则一致 |
+| `kind` | `PHRASE`（落盘 `p`） | 走短语档位，`CandidateRanking` 里排在五笔 / 拼音候选之前 |
+
+### 13.4 跳过规则与提示
+
+提示里逐项报数，不静默吞行：
+
+| 情况 | 条数 | 处理 |
+| --- | --- | --- |
+| 无 `INPUT_CODE` | 1 | 跳过 |
+| 同码重复 | 10 | 保留先出现的，其余计入「同码合并」 |
+| 1 位字母 | 1（`j`） | 照常导入，`exact`；提示说明它会抢五笔一级简码 |
+| 超 4 位 | 60 | 照常导入，提示「五笔态打前 4 位即可命中」 |
+| 已删除 / 空内容 | 0 | — |
+| **合计导入** | **224** | 235 行 − 1 无码 − 10 重复 |
+
+同 `trigger` 的已有用户规则被导入条目覆盖，其余规则原样保留，所以重复导入同一份文件是幂等的；
+`replaced > 0` 时会提示覆盖了几条。
+
+### 13.5 验证
+
+```bash
+python3 tools/verify/check_phrase_csv_import.py   # 44 项：解析 / 映射 / 候选 / 落盘回读 / 接线
+```
+
+`app/src/test/java/com/ispeech/data/PhraseCsvImportTest.kt` 覆盖同样边界（有 JDK 的环境跑 JUnit）。
