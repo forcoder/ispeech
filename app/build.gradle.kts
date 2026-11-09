@@ -15,10 +15,11 @@ val keystoreProps = Properties().apply {
     }
 }
 
-// 离线语音模型下载地址（配置项）：默认走自有服务器的 nginx 静态目录，
-// 打包时可用 -PasrModelUrl=https://... 覆盖（例如切到 OSS），无需改业务代码。
+// 离线语音模型下载地址（配置项）：默认走阿里云 OSS 公共读对象（HTTPS + Range，
+// 默认域名免 ICP 备案，baseline 见 docs/model-host-runbook.md）。
+// 打包时可用 -PasrModelUrl=https://... 覆盖（例如切到备用源），无需改业务代码。
 val asrModelUrl: String = (project.findProperty("asrModelUrl") as String?)
-    ?: "http://cvm.agentai0.com/funasr/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
+    ?: "https://delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
 
 android {
     namespace = "com.ispeech"

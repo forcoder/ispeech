@@ -56,8 +56,10 @@ EXPECTED_SHA256 = "da92b3db5218c5be53aad53e57d1b6e63e7fc98a0e054fbdd6dbe18e9c6b1
 MAGIC = b"BZh"  # bzip2 文件头 "BZh9"
 
 # 构建配置里的默认源（build.gradle.kts 解析失败时的兜底，仅用于提示）
+# 必须与 app/build.gradle.kts 的默认值保持一致，否则换源后会拿旧源误判。
 FALLBACK_URL = (
-    "http://cvm.agentai0.com/funasr/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
+    "https://delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/"
+    "sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
 )
 
 # 腾讯云「未备案」拦截页特征
