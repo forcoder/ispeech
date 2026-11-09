@@ -1,0 +1,31 @@
+# iSpeech 智能体系统 (Agency-Agent)
+
+iSpeech 集成了智能体系统，支持按需调用不同类型的 sub-agent 来快速解决问题：
+
+- **Plan Agent**: 用于架构设计、复杂问题分解和关键文件识别
+- **Explore Agent**: 用于代码探索、搜索和广泛的知识发现
+- **General-Purpose Agent**: 用于研究复杂问题、执行多步骤任务
+- **Claude-Code-Guide Agent**: 用于 Claude Code CLI 工具相关问题
+- **Statusline-Setup Agent**: 用于状态行配置
+
+## 智能体调用机制
+
+系统会根据任务描述中的关键词自动选择合适的智能体：
+
+| 关键词类型 | 触发的智能体 | 示例 |
+|------------|--------------|------|
+| 设计、架构、plan、review | Plan Agent | "设计输入法架构"、"架构评审" |
+| 搜索、查找、探索、search、explore | Explore Agent | "搜索候选词代码"、"探索键盘布局" |
+| 研究、分析、执行、research、analyze | General-Purpose Agent | "研究性能优化方案"、"分析内存泄漏" |
+| claude、code、cli、command、help | Claude-Code-Guide Agent | "claude 命令帮助"、"code cli usage" |
+| 状态行、statusline、配置、setup | Statusline-Setup Agent | "状态行配置"、"configure status line" |
+
+## 使用方法
+
+在开发过程中，可以通过以下方式使用智能体系统：
+
+1. 在代码中使用 `AgentDispatcher.dispatch("任务描述")` 调用智能体
+2. 在命令行中运行 `.agents/agent-call.sh "任务描述"` 进行智能体调度
+3. 查看 `.agents/agents.yaml` 配置文件了解智能体配置
+
+智能体系统旨在提高开发效率，让开发者能够专注于问题本身，而将解决方案的探索和执行交给合适的智能体。
