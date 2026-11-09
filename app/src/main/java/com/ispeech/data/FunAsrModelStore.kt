@@ -54,13 +54,6 @@ object FunAsrModelStore {
     /** 压缩包文件名（与 [modelDir] 同级，落在 filesDir/funasr 下）。 */
     private const val ARCHIVE_NAME = "model.tar.bz2"
 
-    /** 官方 Release 的权威元数据（本机实测），用于响应校验与摘要校验。 */
-    internal const val EXPECTED_BYTES = AsrDownloadPolicy.EXPECTED_BYTES
-    internal const val EXPECTED_SHA256 = AsrDownloadPolicy.EXPECTED_SHA256
-
-    /** 整个模型压缩包的最小合理字节数：仅在**没有摘要**时作为回落判据。 */
-    private const val MIN_ARCHIVE_BYTES = AsrDownloadPolicy.MIN_ARCHIVE_BYTES
-
     /** 单次下载的最大尝试次数（含首次）。 */
     private const val MAX_ATTEMPTS = 3
 
