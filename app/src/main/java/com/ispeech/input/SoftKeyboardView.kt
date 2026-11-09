@@ -155,14 +155,14 @@ class SoftKeyboardView @JvmOverloads constructor(
         }
     }
 
-    /** 拼音 / 五笔切换：影响「中/英」键面文案与工具栏「输入法切换」键面（EN / 拼 / 五）。 */
+    /** 当前中文输入法状态：影响「中/英」键面文案与工具栏状态键面（EN / 拼 / 五）。 */
     fun setPinyinMode(pinyin: Boolean) {
         if (pinyin == pinyinMode) return
         pinyinMode = pinyin
         rebuild()
     }
 
-    /** 「输入法切换」键面：英文态 EN，中文态按拼音 / 五笔分别是「拼」/「五」。 */
+    /** 工具栏状态键面：英文态 EN，中文态按拼音 / 五笔分别是「拼」/「五」。 */
     private fun imeSwitchLabel(): String = when {
         englishMode -> "EN"
         pinyinMode -> "拼"
@@ -313,7 +313,7 @@ class SoftKeyboardView @JvmOverloads constructor(
             weight = 1f,
             style = KeyStyle.SPECIAL,
         ),
-        // 第 4 键显示「当前输入态」：拼音 拼 / 英文 EN / 五笔 五，点击循环切换
+        // 第 4 键显示「当前输入态」：拼音 拼 / 英文 EN / 五笔 五，点击在中文 / 英文之间切换
         KeyDef.fn(
             KeyAction.MODE_SWITCH,
             "中/英",

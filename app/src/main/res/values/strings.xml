@@ -184,6 +184,9 @@
     <!-- 输入法内置配置面板 -->
     <string name="settings_panel_title">输入设置</string>
     <string name="settings_panel_more">更多设置</string>
+    <string name="panel_chinese_input_method">中文输入法</string>
+    <string name="panel_chinese_input_pinyin">拼音</string>
+    <string name="panel_chinese_input_wubi">五笔</string>
     <string name="panel_toggle_chinese_punct">中文标点</string>
     <string name="panel_toggle_full_width">全角输出</string>
     <string name="panel_toggle_association">词语联想</string>
