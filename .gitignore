@@ -17,3 +17,6 @@ captures/
 # Test / report artifacts
 test-results/
 reports/
+
+# 本地产物 / 误提交的旧构建副本
+build-voca30/

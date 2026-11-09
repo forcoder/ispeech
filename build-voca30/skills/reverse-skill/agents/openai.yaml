@@ -1,3 +1,0 @@
-interface:
-  display_name: "Reverse Skill"
-  short_description: "Reverse-engineer observable behavior and reproduce it as a verifiable implementation"

@@ -1,9 +1,0 @@
-<!--
-  键面矢量图标的着色（普通功能键）：常态深色，按下态高亮主色。
-  对应搜狗图标成对提供的 `x` / `x_p`（常态 / 按下态）——本仓库不打包两份 png，
-  用 tint 的 state_pressed 表达同一件事。
--->
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_pressed="true" android:color="#4C7DF0" />
-    <item android:color="#000000" />
-</selector>

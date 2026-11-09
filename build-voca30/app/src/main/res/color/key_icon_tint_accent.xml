@@ -1,8 +1,0 @@
-<!--
-  键面矢量图标的着色（主题色强调键：短语 / AI / 语音）：常态即主色，按下转为深一档主色。
-  与 [key_icon_tint] 分工同 [KeyStyle.ACCENT] 与其它样式的关系。
--->
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_pressed="true" android:color="#3A66D0" />
-    <item android:color="#4C7DF0" />
-</selector>

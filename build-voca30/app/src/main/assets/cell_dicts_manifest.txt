@@ -1,4 +1,0 @@
-# 内置分类词库清单（由 tools/import 生成，随包分发）
-# 字段: <assets 文件名> <TAB> <显示名>
-# 首次启动时由 BundledCellDicts 自动装入 CellDictStore；同一份词库重复安装按覆盖处理。
-sogou_cell_wangluo.txt	网络流行新词
