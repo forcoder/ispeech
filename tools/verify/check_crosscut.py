@@ -23,6 +23,8 @@
 10. 分类词库（细胞词库）：CellDictStore 目录 / 索引 / 正文解析复用用户词库 -> 稳定 id +
      分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
      词典页 SAF 安装 + 启停 / 删除 + 中英文案
+11. 候选条字重（VOCA-56）：候选词必须常规字重（不加粗），首选仍靠橙色 + 底色区分，
+     且类注释口径与实现一致
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -1572,6 +1574,41 @@ def check_cell_dict_chain() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
+# 11. 候选条字重（VOCA-56）：候选词不加粗
+# ═════════════════════════════════════════════════════════════
+
+def check_candidate_style() -> None:
+    view = read(CANDIDATE_VIEW)
+    item_region = function_region(view, r"private fun createItemView\(")
+
+    # 11.1 候选文本用常规字重（Typeface.DEFAULT），不能再回到 DEFAULT_BOLD
+    check(
+        "typeface = Typeface.DEFAULT_BOLD" not in item_region
+        and "typeface = Typeface.DEFAULT" in item_region,
+        "候选词文本常规字重（createItemView 用 Typeface.DEFAULT）",
+        f"{rel(CANDIDATE_VIEW)} createItemView 仍把候选词设为粗体"
+        "（VOCA-56 要求候选词不加粗）",
+    )
+
+    # 11.2 首选 / 非首选只靠颜色 + 底色区分，字重保持一致
+    check(
+        "setTextColor(if (highlighted) PICKED_TEXT else TEXT_PRIMARY)" in item_region,
+        "首选与非首选靠颜色 / 底色区分（字重一致）",
+        f"{rel(CANDIDATE_VIEW)} 候选高亮不再走颜色区分（首选识别会退化）",
+    )
+
+    # 11.3 KDoc 口径：注释里不能仍声明候选「加粗」，否则下一次改样式会被误导
+    #（允许否定句「不加粗」——它记录的是这次的决定本身）
+    kdoc = view.split("class CandidateView", 1)[0]
+    bold_claims = [ln for ln in kdoc.splitlines() if "加粗" in ln and "不加粗" not in ln]
+    check(
+        not bold_claims,
+        "CandidateView 类注释已去掉「加粗」口径",
+        f"{rel(CANDIDATE_VIEW)} 类注释仍声明候选「加粗」，与实现不符：{bold_claims}",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
 
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
@@ -1595,6 +1632,8 @@ def main() -> int:
     check_user_dict_chain()
     print("-- 10. 分类词库（细胞词库）--")
     check_cell_dict_chain()
+    print("-- 11. 候选条字重（VOCA-56）--")
+    check_candidate_style()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 
