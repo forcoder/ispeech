@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  清空 / 关闭图标（粗圆角 ✕）。
+
+  用于快捷短语面板搜索框右侧的清空按钮，替代原先的 ✕ 字符。
+  线条粗细与颜色跟候选条翻页箭头（ic_page_prev）保持一套观感。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="14dp"
+    android:height="14dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:pathData="M7,7 L17,17"
+        android:strokeColor="#777777"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M17,7 L7,17"
+        android:strokeColor="#777777"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round" />
+</vector>

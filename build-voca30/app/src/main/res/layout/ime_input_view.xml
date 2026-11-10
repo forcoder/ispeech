@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  输入法整体输入视图：上方候选条 + 下方内容区。
+
+  内容区同时容纳：
+  - csBaby 快捷短语面板（点工具栏「短语」时显示，与软键盘同屏）
+  - 剪贴板面板（点工具栏「剪贴」时显示）
+  - 输入法切换面板（点工具栏「⌨」时显示）
+  - 配置面板（点工具栏「⚙」或候选条齿轮时显示，搜狗风格功能设置）
+  - 软键盘面板（默认可见）
+
+  子视图按「面板在上、键盘在下」的纵向顺序叠放：快捷短语面板打开时会与软键盘
+  同时显示（面板在上、键盘在下），以便用软键盘在面板内输入筛选关键词；
+  剪贴板 / 输入法切换面板打开时软键盘隐藏。服务侧切换 visibility，
+  GONE 的子视图不参与测量，因此窗口高度始终跟随当前可见内容。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ime_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:layout_gravity="bottom">
+
+    <include
+        layout="@layout/candidate_view"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <LinearLayout
+        android:id="@+id/ime_content"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <com.ispeech.input.QuickPhrasePanel
+            android:id="@+id/quick_phrase_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <com.ispeech.input.ClipboardPanel
+            android:id="@+id/clipboard_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <com.ispeech.input.InputMethodPanel
+            android:id="@+id/input_method_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <com.ispeech.input.AiReplyPanel
+            android:id="@+id/ai_reply_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <com.ispeech.input.SettingsPanel
+            android:id="@+id/settings_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+
+        <com.ispeech.input.VoicePanelView
+            android:id="@+id/voice_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <com.ispeech.input.SoftKeyboardView
+            android:id="@+id/soft_keyboard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+    </LinearLayout>
+</LinearLayout>
