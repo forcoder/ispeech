@@ -83,10 +83,15 @@ git rm --cached -r build-voca30
 git commit -m "chore(repo): 移除误提交的 build-voca30 子模块指针"
 ```
 
+**已于 2026-11-10 修复**：SRE 提交 `f916c4b`（`chore(repo): 移除误提交的 build-voca30 子模块指针`）。
+复跑验证：`main ← v35 ← v34` 合并**无冲突**，`build-voca30` 落地为 `040000 tree`（231 个真实文件），
+合并后 `:app:compileDebugKotlin` 通过、`:app:testDebugUnitTest --tests "com.ispeech.data.*"` BUILD SUCCESSFUL、
+`check_static` 6/6、`check_crosscut` 138/138、`check_model_host` 7/7 全绿。
+
 ### 4.2 两条子分支都未推到 origin
 
 `agent/agent/voca-34`、`agent/sre/voca-35` 在 `origin` 上都不存在，也没有 PR。
-合并前需推送并开 PR（标题带 `VOCA-33`）。
+合并前需推送并开 PR（标题带 `VOCA-33`）。截至 2026-11-10 仍未推送。
 
 ## 5. 其他发现（不属本 issue 范围）
 
@@ -102,8 +107,8 @@ git commit -m "chore(repo): 移除误提交的 build-voca30 子模块指针"
 | Issue | 状态 | 说明 |
 |---|---|---|
 | VOCA-34 | `in_review` | 下载链路修复，16/16 单测通过，等人工评审 |
-| VOCA-35 | `in_progress` | 换源已落地且验收全绿，但 §4.1 的 gitlink 未清，暂不进评审 |
-| VOCA-33 | `in_progress` | 父 issue；两条子链路合并验证后转 `in_review` |
+| VOCA-35 | `in_progress` | 换源已落地、验收全绿、gitlink 已由 `f916c4b` 清除；等 SRE 本轮自检后转 `in_review` |
+| VOCA-33 | `in_progress` | 父 issue；链路已端到端验证，待两条子分支推送并开 PR 后转 `in_review` |
 
 ## 7. 待人类决策
 
