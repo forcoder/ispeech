@@ -259,9 +259,10 @@ for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger;
 done
 ```
 
-当前状态（v1.5）：`check_static 6/6`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
-`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 66/66`、`check_crosscut 138/138`、
-`check_quick_trigger 29/29(+1 known warn)`。**全部通过**；分类词库（细胞词库）第 10 节 24 项全绿。
+当前状态（v1.5）：`check_static 6/6`、`check_input_logic 39/39`、`check_t9 91/91(+1 known warn)`、
+`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 66/66`、`check_crosscut 151/151`、
+`check_quick_trigger 42/42(+1 known warn)`。**全部通过**；分类词库（细胞词库）第 10 节 24 项全绿，
+候选条字重（VOCA-56「候选词不加粗」）第 12 节 3 项全绿。
 另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）；
 `tools/verify/check_quick_trigger.py` 校验快捷短语「简写（触发码）」规则 —— 尤其防止**单字母简写误用
 prefix 模式导致静默失效**（见 `docs/quick-phrase-enhancement.md` 的「简写」一节）。
