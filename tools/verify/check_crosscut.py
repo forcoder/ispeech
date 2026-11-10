@@ -62,6 +62,8 @@ CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
 
 QUICK_SCREEN = JAVA / "settings" / "QuickPhrasesScreen.kt"
 SETTINGS_STORE = JAVA / "settings" / "store" / "SettingsStore.kt"
+CHINESE_INPUT_METHOD = JAVA / "settings" / "store" / "ChineseInputMethod.kt"
+INPUT_MODE = JAVA / "input" / "InputMode.kt"
 KEYBOARD_SETTINGS = JAVA / "settings" / "store" / "KeyboardSettings.kt"
 KEYBOARD_VM = JAVA / "settings" / "keyboard" / "KeyboardViewModel.kt"
 KEYBOARD_SCREEN = JAVA / "settings" / "KeyboardScreen.kt"
@@ -89,6 +91,8 @@ NAV_GRAPH = JAVA / "settings" / "nav" / "IspeechNavGraph.kt"
 HOME_SCREEN = JAVA / "settings" / "HomeScreen.kt"
 MAIN_ACTIVITY = JAVA / "settings" / "MainActivity.kt"
 BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
+
+INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VERIFY_DIR = ROOT / "tools" / "verify"
 
@@ -1573,6 +1577,105 @@ def check_cell_dict_chain() -> None:
 
 # ═════════════════════════════════════════════════════════════
 
+def check_chinese_input_method() -> None:
+    """新增中文输入法设置：设置项 -> 持久化 -> UI / 内置面板 -> 中英切换策略。"""
+    enum_src = read(CHINESE_INPUT_METHOD)
+    check(
+        "enum class ChineseInputMethod" in enum_src
+        and 'PINYIN("拼音")' in enum_src
+        and 'WUBI("五笔")' in enum_src
+        and "?: PINYIN" in enum_src,
+        "ChineseInputMethod 枚举含拼音 / 五笔，未知值回落拼音",
+        f"{rel(CHINESE_INPUT_METHOD)} 枚举或默认值缺失",
+    )
+
+    store = read(SETTINGS_STORE)
+    check(
+        'stringPreferencesKey("input_method_mode")' in store
+        and "fun chineseInputMethodFlow(" in store
+        and "ChineseInputMethod.parse(" in store
+        and "fun setChineseInputMethod(" in store
+        and "fun chineseInputMethod(" in store,
+        "SettingsStore 提供中文输入法 flow / 阻塞读取 / 写入（沿用旧 key）",
+        f"{rel(SETTINGS_STORE)} 中文输入法持久化未闭环",
+    )
+
+    vm = read(KEYBOARD_VM)
+    check(
+        "chineseInputMethodFlow(app)" in vm
+        and "val chineseInputMethod" in vm
+        and "fun setChineseInputMethod(" in vm,
+        "KeyboardViewModel 订阅并暴露中文输入法设置",
+        f"{rel(KEYBOARD_VM)} 未接中文输入法状态",
+    )
+
+    screen = read(KEYBOARD_SCREEN)
+    check(
+        'KeyboardCardTitle("中文输入法")' in screen
+        and "ChineseInputMethod.entries" in screen
+        and "viewModel.setChineseInputMethod(it)" in screen,
+        "设置页新增「中文输入法」卡片并接单选",
+        f"{rel(KEYBOARD_SCREEN)} 缺少中文输入法卡片",
+    )
+
+    panel = read(SETTINGS_PANEL)
+    check(
+        "onChineseInputMethodChange" in panel
+        and "R.string.panel_chinese_input_method" in panel
+        and "ChineseInputMethod.entries" in panel,
+        "键盘内置设置面板新增中文输入法切换行",
+        f"{rel(SETTINGS_PANEL)} 未接中文输入法行",
+    )
+
+    service = read(SERVICE)
+    check(
+        "InputModePolicy.toggle(mode, chineseInputMethod)" in service
+        and "InputModePolicy.chineseMode(chineseInputMethod)" in service
+        and "applyChineseInputMethodChange" in service,
+        "输入法服务按设置做「中文 ⇄ 英文」两态切换",
+        f"{rel(SERVICE)} 未接 InputModePolicy",
+    )
+    check(
+        "InputMode.WUBI -> InputMode.PINYIN" not in service,
+        "旧的三态循环（五笔 → 拼音 → 英文）已移除",
+        f"{rel(SERVICE)} 仍保留三态循环",
+    )
+
+    policy = read(INPUT_MODE)
+    check(
+        "enum class InputMode" in policy
+        and "object InputModePolicy" in policy
+        and "if (current == InputMode.ENGLISH) chineseMode(method) else InputMode.ENGLISH" in policy,
+        "InputModePolicy 只做中文态 / 英文态两态切换",
+        f"{rel(INPUT_MODE)} 切换策略缺失",
+    )
+
+    test = read(INPUT_MODE_TEST)
+    check(
+        "InputModePolicy.toggle(InputMode.WUBI, ChineseInputMethod.WUBI)" in test
+        and "InputModePolicy.toggle(InputMode.ENGLISH, ChineseInputMethod.WUBI)" in test
+        and "ChineseInputMethod.PINYIN" in test,
+        "回归测试覆盖默认五笔 / 默认拼音两条中英切换路径",
+        f"{rel(INPUT_MODE_TEST)} 缺少中英切换回归用例",
+    )
+
+    zh = _named_strings(STRINGS)
+    en = _named_strings(STRINGS_EN)
+    keys = (
+        "panel_chinese_input_method",
+        "panel_chinese_input_pinyin",
+        "panel_chinese_input_wubi",
+    )
+    missing = sorted(k for k in keys if k not in zh or k not in en)
+    check(
+        not missing,
+        "中文输入法内置面板文案中英各齐",
+        f"中英 strings.xml 缺中文输入法文案：{missing}",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
+
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
     print("-- 1. LookupKind（WUBIPHRASE / PINYIN）--")
@@ -1595,6 +1698,8 @@ def main() -> int:
     check_user_dict_chain()
     print("-- 10. 分类词库（细胞词库）--")
     check_cell_dict_chain()
+    print("-- 11. 中文输入法（默认拼音 / 五笔 + 中英切换）--")
+    check_chinese_input_method()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

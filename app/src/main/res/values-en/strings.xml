@@ -193,6 +193,9 @@
     <!-- In-IME settings panel -->
     <string name="settings_panel_title">Input settings</string>
     <string name="settings_panel_more">More settings</string>
+    <string name="panel_chinese_input_method">Chinese input</string>
+    <string name="panel_chinese_input_pinyin">Pinyin</string>
+    <string name="panel_chinese_input_wubi">Wubi</string>
     <string name="panel_toggle_chinese_punct">Chinese punctuation</string>
     <string name="panel_toggle_full_width">Full-width output</string>
     <string name="panel_toggle_association">Word association</string>
