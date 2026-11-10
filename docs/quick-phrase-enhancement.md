@@ -625,6 +625,70 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
   `label + content` 能匹配上的用户条目（`QuickOverride.matchesAny`），避免在 csBaby 上
   生成同内容的第二条远端规则。
 
+### 12.6 内置 5 位触发码：`dtwsl` → 泡池须知（2026-11-10 追加）
+
+营业说明（泡池 / 充气城堡 / 泳池的收费与预约规则）是**逐字要发给客人**的文案：
+换行、emoji、全半角括号、`【】`、`--`、金额（150元 / 100元 / 50元）、时长（2小时 / 4小时）
+一个都不能丢。所以它按「内置规则」交付，正文以仓库内源文件为逐字基准。
+
+落点：
+
+| 项 | 值 |
+|---|---|
+| 正文源文件 | `tools/quick/phrases/dtwsl.txt`（11 行 / 281 字，逐字基准，改文案只改这里） |
+| 规则行 | `app/src/main/assets/quick_phrases.txt`：`dtwsl \t 泡池须知 \t <正文> \t exact \t 110 \t a` |
+| 候选名 | 「泡池须知」（4 字，候选条 / 面板卡片都放得下） |
+| 匹配方式 | `exact` —— **最短命中长度 = 整码 5 位**，打字中途不会弹出 281 字长文 |
+| 排序 | `kind = a` → `QUICKAPPLY`(order 0) 排在五笔 / 拼音候选之前；`weight = 110` 高于既有内置条目的 100 |
+
+正文换行不能直接写在规则行里（一行一条规则，真实换行会把后面的规则全部解析错位）。
+落盘时用字面量转义，口径与 `UserDictStore.escapeLineText` / `QuickPhraseCodec.sanitizeContent`
+一致：`\` → `\\`、换行 → `\n`、`\t` → `\t`，`\r` 丢弃。读取侧 `unescapeLineText` 还原，
+所以候选插入文本与源文件**逐字相同**。
+
+#### 5 位码的两种输入态（重要）
+
+`dtwsl` 是 5 位，比既有内置码都长，两种输入态的缓冲区上限不一样：
+
+- **拼音态（默认态）**：组合串上限 `MAX_PINYIN_LENGTH = 12`，`d t w s l` 能完整累积，
+  第 5 个字母落下时精确命中，候选首位即「泡池须知」。**验收走这条路径。**
+- **五笔态**：组合缓冲区上限 `MAX_CODE_LENGTH = 4`，第 5 个字母到来前会先把当前首选上屏，
+  所以 `dtwsl` 在五笔态永远打不全；且 `AppContainer.loadQuickPhrases()` 在五笔态
+  `includeLocal = false`，内置规则整体不挂载。要让五笔态也支持，必须改 `MAX_CODE_LENGTH`
+  （牵动五笔码表「定长 4 位」的假设），不在本次范围。
+
+用户自己的「快捷字母」仍限 2–4 位（`QuickPhrasesScreen.isValidShortcutTrigger`）：
+那是为了让用户在任意输入态都能敲完，与内置码这条 5 位的取舍不冲突。
+
+#### 幂等写入（有则更新、无则新增）
+
+```bash
+python3 tools/quick/upsert_quick_phrase.py \
+  --trigger dtwsl --label 泡池须知 \
+  --content-file tools/quick/phrases/dtwsl.txt \
+  --mode exact --weight 110 --kind a
+```
+
+- 同 trigger 已有行**原地替换**（行号不变），同 trigger 的多余行一并清理，
+  **条目总数不增长**；没有该 trigger 时才追加到文件末尾。
+- 第二次执行输出 `动作: unchanged`，文件字节不变（`check_quick_trigger.py` 的 L11 直接对
+  写入器函数做断言：重复执行 no-op、换正文原地更新、重复行清理）。
+- 加 `--check` 只比对不写盘：需要更新时退出码 1，可接进 CI / pre-commit。
+- 用户文件里的同 trigger 条目由 `QuickPhrasesViewModel` 的保存路径按 trigger 覆盖
+  （`indexOfFirst { it.trigger == userEntry.trigger }`），解析侧 `byTrigger[trigger]` 也只留一条，
+  因此不会出现「用户文件 + 内置资产各一条同 trigger」并存。
+
+#### 验收
+
+```bash
+python3 tools/verify/check_quick_trigger.py   # L 节：正文逐字一致 / 排首位 / 缓冲区 / 写入器幂等
+python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 \
+  --content-file tools/quick/phrases/dtwsl.txt --mode exact --weight 110 --kind a --check
+```
+
+离线断言覆盖到「输入 `dtwsl` 的候选首位是泡池须知、插入文本与源文件 sha256 一致」；
+真实候选条截图 / 真机记录需要在装有输入法的设备上补（离线环境没有 Android SDK）。
+
 ## 13. 导入「通用短语.csv」（2026-11-09 追加）
 
 来源：产品给的搜狗 / csBaby 导出文件 `通用短语.csv`（235 行、GBK、61 KB）。目标是「导进常用语，

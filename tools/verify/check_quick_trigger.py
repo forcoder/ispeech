@@ -14,8 +14,9 @@
 
 检查项：
     A. 文件中每条规则的字段完整性（trigger / label / content 必填）；
-    B. trigger 只能是小写 a-z；超过 4 位（IME 组合缓冲区 MAX_CODE_LENGTH）时告警
-       —— 完整码永远打不出来，只能靠 prefix 命中，拿不到「精确码优先」的首位加成；
+    B. trigger 只能是小写 a-z；> 12 位（拼音态组合串 MAX_PINYIN_LENGTH）直接判死，
+       5-12 位且用 prefix / contains 时告警 —— 五笔态组合缓冲区 MAX_CODE_LENGTH=4，
+       完整码只能在拼音态敲出，拿不到「精确码优先」的首位加成（exact / regex 不受影响）；
     C. trigger 全局唯一（大小写不敏感）；
     D. **1 字母 trigger 必须是 exact / regex 模式**（否则静默失效）；
     E. weight 为整数、kind 为 p/a、mode 为四种之一；
@@ -23,13 +24,17 @@
     G. 源码侧的排序契约未被改坏（QUICKAPPLY 在 WUBI 之前 + 精确码优先 + 守卫存在）；
     H. 用户自定义快捷字母全链路：设置页 2–4 位小写校验 / 中英文案 / 面板角标 / 保存即生效；
     I. 需求场景验收：输入 ``ycsf`` 时快捷短语排在候选第 1 位（与 Kotlin 排序同构）；
-    J. 远端规则的查看与快捷字母覆盖：远端进列表 / 覆盖写用户文件 / 排序胜出 / 恢复默认。
+    J. 远端规则的查看与快捷字母覆盖：远端进列表 / 覆盖写用户文件 / 排序胜出 / 恢复默认；
+    L. 内置 5 位触发码 dtwsl（泡池 / 充气城堡 / 泳池收费说明）：正文逐字一致、exact 排首位、
+       两种输入态的缓冲区行为、upsert 工具幂等。
 
 用法：``python3 tools/verify/check_quick_trigger.py``
 """
 
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import re
 import sys
 from pathlib import Path
@@ -50,6 +55,15 @@ APP_CONTAINER = ROOT / "app/src/main/java/com/ispeech/di/AppContainer.kt"
 STRINGS_ZH = ROOT / "app/src/main/res/values/strings.xml"
 STRINGS_EN = ROOT / "app/src/main/res/values-en/strings.xml"
 DOC = ROOT / "docs/quick-phrase-enhancement.md"
+
+# 内置 5 位触发码验收（泡池 / 充气城堡 / 泳池收费说明）
+DTWSL_TRIGGER = "dtwsl"
+DTWSL_LABEL = "泡池须知"
+DTWSL_SOURCE = ROOT / "tools/quick/phrases/dtwsl.txt"
+UPSERT_TOOL = ROOT / "tools/quick/upsert_quick_phrase.py"
+IME_SERVICE = ROOT / "app/src/main/java/com/ispeech/input/IspeechImeService.kt"
+PHRASE_SEARCH = ROOT / "app/src/main/java/com/ispeech/data/PhraseSearch.kt"
+SOGOU_PHRASES = ROOT / "app/src/main/assets/sogou_phrases.txt"
 
 VALID_MODES = {"exact", "prefix", "contains", "regex"}
 # prefix / contains 会被 minTriggerLength 守卫拦下；单字母规则只能用这两个模式之一
@@ -143,10 +157,16 @@ def check_rows(rows: list[dict]) -> None:
         if not re.fullmatch(r"[a-z]+", trig):
             fail(f"{tag} trigger 含非法字符: {trig!r}（只允许小写 a-z）")
             continue
-        if len(trig) > 4:
+        if len(trig) > 4 and row["mode"] not in UNGUARDED_MODES:
             warn(
-                f"{tag} trigger {trig!r} 超过 4 位 —— IME 组合缓冲区上限 MAX_CODE_LENGTH=4，"
-                f"完整码打不出来，只能靠 prefix 命中，拿不到「精确码优先」的首位加成；建议缩到 ≤4 位"
+                f"{tag} trigger {trig!r} 超过 4 位且用的是 {row['mode']} —— "
+                f"五笔态组合缓冲区上限 MAX_CODE_LENGTH=4，完整码只能在拼音态敲出，"
+                f"拿不到「精确码优先」的首位加成"
+            )
+        if len(trig) > 12:
+            fail(
+                f"{tag} trigger {trig!r} 超过拼音态组合串上限 MAX_PINYIN_LENGTH=12 —— "
+                f"完整码永远打不出来，该条静默失效"
             )
 
         # C. trigger 唯一
@@ -489,6 +509,7 @@ def main() -> int:
     check_exact_trigger_ranking()
     check_remote_shortcut_chain()
     check_pinyin_state_quick_chain()
+    check_dtwsl_phrase()
     check_space_long_press_triggers_voice()
     check_ai_key_shows_quick_phrases_first()
     check_ai_key_falls_back_to_llm_when_no_match()
@@ -573,6 +594,358 @@ def check_ai_key_falls_back_to_llm_when_no_match() -> None:
         'codeOverride == "快捷短语"' in text and "commitAiReply(index: Int = 0)" in text,
         "AI按键：多条建议可逐条上屏，且快捷短语标记可被清理",
         "未找到多候选上屏或快捷短语状态清理",
+    )
+
+
+def _unescape_rule_text(text: str) -> str:
+    """复刻 UserDictStore.unescapeLineText：\\n / \\r / \\t / \\\\ 还原，未知转义原样保留。"""
+    if "\\" not in text:
+        return text
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else None
+        if ch == "\\" and nxt is not None:
+            mapped = {"n": "\n", "r": "\r", "t": "\t", "\\": "\\"}.get(nxt)
+            if mapped is not None:
+                out.append(mapped)
+                i += 2
+                continue
+            out.append(ch)
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _parse_rule_rows(path: Path) -> list[dict]:
+    """解析规则文件为引擎口径的条目（content 已反转义，kind 已归一），与 QuickPhraseEngine 同构。"""
+    rows: list[dict] = []
+    if not path.exists():
+        return rows
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = raw.split("\t")
+        if len(fields) < 3:
+            continue
+        trigger = fields[0].strip()
+        content = _unescape_rule_text(fields[2].strip())
+        if not trigger or not content:
+            continue
+        label = fields[1].strip() or content
+        if len(fields) > 5:
+            kind = "QUICKAPPLY" if fields[5].strip().lower().startswith("a") else "PHRASE"
+        else:
+            kind = "PHRASE" if content == label else "QUICKAPPLY"
+        try:
+            weight = int(fields[4].strip()) if len(fields) > 4 else 100
+        except ValueError:
+            weight = 100
+        rows.append(
+            {
+                "line": lineno,
+                "trigger": trigger,
+                "label": label,
+                "content": content,
+                "mode": fields[3].strip().lower() if len(fields) > 3 else "prefix",
+                "weight": weight,
+                "kind": kind,
+            }
+        )
+    return rows
+
+
+def _quick_lookup(rows: list[dict], needle: str, limit: int = 10, min_trigger_length: int = 2) -> list[dict]:
+    """复刻 QuickPhraseEngine.lookup + CandidateRanking.comparator（regex 规则本仓库资产未使用）。"""
+    order = _kind_order_map()
+    needle = needle.lower()
+    if not needle or limit <= 0:
+        return []
+    out: list[dict] = []
+    scan_cap = max(limit, 64)
+    for row in rows:
+        trigger = row["trigger"].lower()
+        mode = row["mode"]
+        if mode in ("prefix", "contains") and len(needle) < min_trigger_length:
+            continue
+        if mode == "exact":
+            hit = trigger == needle
+        elif mode == "prefix":
+            hit = trigger.startswith(needle) or needle.startswith(trigger)
+        elif mode == "contains":
+            hit = trigger in needle or needle in trigger
+        else:
+            hit = False
+        if not hit:
+            continue
+        exact = trigger == needle
+        if not exact and len(out) >= scan_cap:
+            continue
+        out.append(
+            {
+                "code": row["trigger"],
+                "display": row["label"],
+                "insertText": row["content"],
+                "weight": row["weight"],
+                "kind": row["kind"],
+            }
+        )
+    out.sort(
+        key=lambda c: (
+            0 if c["code"].lower() == needle else 1,
+            order.get(c["kind"], 9),
+            -c["weight"],
+            c["display"],
+        )
+    )
+    return out[:limit]
+
+
+def _ime_buffer_limits() -> tuple[int, int]:
+    """从 IspeechImeService 读组合缓冲区上限：五笔态 / 拼音态。"""
+    text = read(IME_SERVICE) if IME_SERVICE.exists() else ""
+    code = re.search(r"MAX_CODE_LENGTH\s*=\s*(\d+)", text)
+    pinyin = re.search(r"MAX_PINYIN_LENGTH\s*=\s*(\d+)", text)
+    return (int(code.group(1)) if code else 4), (int(pinyin.group(1)) if pinyin else 12)
+
+
+def check_dtwsl_phrase() -> None:
+    """L. 内置 5 位触发码 dtwsl（泡池 / 充气城堡 / 泳池收费说明）。
+
+    验收点：正文逐字一致（含换行 / emoji / 全半角括号 / `--` / 数字）、exact 命中排首位、
+    两种输入态的缓冲区行为与文档一致、upsert 工具重复执行不增长条目。
+    """
+    # L1. 正文基准：尽情复制会丢空格 / 吞字符，所以正文以仓库内源文件为准逐字比对
+    if not DTWSL_SOURCE.exists():
+        fail(f"缺少正文源文件：{rel(DTWSL_SOURCE)}")
+        return
+    raw = read(DTWSL_SOURCE)
+    golden = raw[:-1] if raw.endswith("\n") else raw
+    digest = hashlib.sha256(golden.encode("utf-8")).hexdigest()[:12]
+    ok(
+        f"{rel(DTWSL_SOURCE)}：{len(golden.splitlines())} 行 / {len(golden)} 字，"
+        f"UTF-16 {len(golden.encode('utf-16-le')) // 2} 单元，sha256={digest}"
+    )
+
+    # L2. 规则表里同 trigger 只能有一条（用户文件 / 内置资产不得重复）
+    asset_rows = _parse_rule_rows(PHRASES)
+    hits = [row for row in asset_rows if row["trigger"].lower() == DTWSL_TRIGGER]
+    check(
+        len(hits) == 1,
+        f"quick_phrases.txt：{DTWSL_TRIGGER} 唯一一条，总数不重复",
+        f"quick_phrases.txt 里 {DTWSL_TRIGGER} 出现 {len(hits)} 次（应恰好 1 条）",
+    )
+    if len(hits) != 1:
+        return
+    row = hits[0]
+
+    sogou_hits = [r for r in _parse_rule_rows(SOGOU_PHRASES) if r["trigger"].lower() == DTWSL_TRIGGER]
+    check(
+        not sogou_hits,
+        f"sogou_phrases.txt：没有同 trigger 的 {DTWSL_TRIGGER}（跨文件不重复）",
+        f"sogou_phrases.txt 也定义了 {DTWSL_TRIGGER}，两个文件都会进候选，应删除其一",
+    )
+
+    # L3. 字段口径：label / exact / 应用档位 / 权重
+    check(
+        row["label"] == DTWSL_LABEL,
+        f"label = {DTWSL_LABEL}（4 字，候选条放得下；覆盖面见文档 12.6）",
+        f"label 应为 {DTWSL_LABEL}（还实际为 {row['label']!r}）",
+    )
+    check(
+        row["mode"] == "exact",
+        "mode = exact：整码命中，打字中途不会弹长文本",
+        f"mode 应为 exact（实际 {row['mode']!r}）—— exact 命中才能拿到候选首位",
+    )
+    check(
+        row["kind"] == "QUICKAPPLY",
+        "kind = a（应用档位）：命中后排在五笔 / 拼音候选之前",
+        f"kind 应为 a / QUICKAPPLY（实际 {row['kind']}）",
+    )
+    check(
+        row["weight"] >= 100,
+        f"weight = {row['weight']}（不输给既有 100 权重的内置条目）",
+        f"weight 过低（{row['weight']}）：同码排序时会输给默认权重条目",
+    )
+
+    # L4. 正文逐字一致
+    same = row["content"] == golden
+    check(
+        same,
+        f"正文逐字一致：{len(row['content'])} 字 / {len(row['content'].splitlines())} 行、sha256={hashlib.sha256(row['content'].encode('utf-8')).hexdigest()[:12]}",
+        "正文与源文件不一致（换行 / emoji / 全半角括号 / 空格有任何差异都会在这里暴露）",
+    )
+    if not same:
+        return
+
+    # L5. 正文结构：首行不是触发码、空行位置、首尾无多余空白
+    lines = row["content"].split("\n")
+    check(
+        lines[0].startswith("🌹周六及节假日（不含末日）"),
+        "首行从 🌹 开始：触发码 dtwsl 与分隔空格没有混进上屏内容",
+        f"首行不以 🌹 开头：{lines[0][:20]!r}（触发码或分隔空格被当成正文了）",
+    )
+    check(
+        [i for i, line in enumerate(lines) if line == ""] == [1, 8] and len(lines) == 11,
+        "正文 11 行，空行正好在第 2 / 第 9 行（段落结构未被转义丢失）",
+        f"正文行结构不对：{len(lines)} 行，空行下标 {[i for i, line in enumerate(lines) if line == '']}",
+    )
+    check(
+        row["content"] == row["content"].strip(),
+        "正文首尾无多余空白（上屏不会多出空格 / 空行）",
+        "正文首尾没有多余空白",
+    )
+
+    # L6. 关键片段：金额 / 时长 / 【】 / -- / 全角标点 / emoji
+    must = (
+        "🌹周六及节假日（不含末日）",
+        "泡池（仅限晴天）",
+        "充气城堡（4小时）二选一免费1次",
+        "（使用请提前1天预约，否则不可用）",
+        "其它日期按需收费；",
+        "【恒温泡池】付费项目默认不使用",
+        "💰。恒温冲浪水疗泡池按需收费【不用无相关费用】",
+        "--平台“须知”有详细 说明：",
+        "150元/池水",
+        "恒温功能开2小时+余温可用约4小时",
+        "1、150元/池水",
+        "2、若用请提前一天说明",
+        "免费送1份中药",
+        "瑶浴",
+        "缓解疲劳🥰",
+        "充气城堡：首2小时100元，之后50元/2小时",
+        "【泳池】",
+        "该季节泳池暂不开放",
+    )
+    missing = [token for token in must if token not in row["content"]]
+    check(
+        not missing,
+        f"关键片段全部保留（{len(must)} 项：金额 / 时长 / 【】/ -- / 全角标点 / emoji）",
+        f"正文少了这些片段：{missing}",
+    )
+    check(
+        row["content"].count(" ") == 1 and row["content"].count("  ") == 0,
+        "空格数量与原文一致：全文只有「有详细 说明」这 1 个半角空格，没有被吞 / 被补",
+        f"空格数量不对：{row['content'].count(' ')} 个（原文 1 个）",
+    )
+
+    # L7. 落盘形态：一条规则一行，正文里不能有真实换行 / tab
+    escaped_line = f"{DTWSL_TRIGGER}\t{DTWSL_LABEL}\t"
+    raw_lines = [line for line in read(PHRASES).split("\n") if line.startswith(escaped_line)]
+    check(
+        len(raw_lines) == 1
+        and "\n" not in raw_lines[0].replace("\\n", "")
+        and "\t" not in raw_lines[0].split("\t")[2],
+        "落盘为单行：正文换行已转义为字面量 \\n，没有把一条规则拆成多行",
+        "落盘形态不对：正文里有真实换行 / tab，会把后续规则全部解析错位",
+    )
+
+    # L8. 候选命中：拼音态（默认）5 位完整累积 -> 精确命中排首位
+    code_limit, pinyin_limit = _ime_buffer_limits()
+    all_rows = asset_rows + _parse_rule_rows(SOGOU_PHRASES)
+    buffer = ""
+    for ch in DTWSL_TRIGGER:
+        if len(buffer) >= pinyin_limit:
+            buffer = ""
+        buffer += ch
+    pinyin_hits = _quick_lookup(all_rows, buffer)
+    check(
+        buffer == DTWSL_TRIGGER
+        and bool(pinyin_hits)
+        and pinyin_hits[0]["display"] == DTWSL_LABEL
+        and pinyin_hits[0]["insertText"] == golden,
+        f"拼音态（缓冲区 {pinyin_limit} 位）：输入 {DTWSL_TRIGGER} → 候选首位「{DTWSL_LABEL}」，上屏文本与源文件一致",
+        f"拼音态输入 {DTWSL_TRIGGER} 未命中或未排首位：{[c['display'] for c in pinyin_hits[:3]]}",
+    )
+
+    partial_hits = _quick_lookup(all_rows, DTWSL_TRIGGER[:-1])
+    check(
+        all(hit["display"] != DTWSL_LABEL for hit in partial_hits),
+        f"exact 模式：输入 {DTWSL_TRIGGER[:-1]}（少 1 位）不命中 —— 最短命中长度 = 整码 {len(DTWSL_TRIGGER)} 位",
+        f"输入 {DTWSL_TRIGGER[:-1]} 就弹出了「{DTWSL_LABEL}」：exact 语义被改坏（打字中途会误弹长文本）",
+    )
+
+    # L9. 五笔态：缓冲区 4 位，第 5 个字母先上屏当前首选 -> 5 位码打不全（文档必须写明）
+    wubi_buffer = ""
+    for ch in DTWSL_TRIGGER:
+        if len(wubi_buffer) >= code_limit:
+            wubi_buffer = ""
+        wubi_buffer += ch
+    check(
+        wubi_buffer != DTWSL_TRIGGER,
+        f"五笔态（缓冲区 {code_limit} 位）：{DTWSL_TRIGGER} 打不全，需在拼音态输入（与文档 12.6 一致）",
+        f"五笔态缓冲区上限变了（{code_limit} 位）：{DTWSL_TRIGGER} 现在能完整敲出，请同步文档 12.6 的说明",
+    )
+
+    # L10. 快捷短语面板：关键词搜索也包含触发码，面板里输入 dtwsl 同样能筛到
+    search = read(PHRASE_SEARCH) if PHRASE_SEARCH.exists() else ""
+    check(
+        "PhraseHitField.TRIGGER" in search and "SCORE_FIELD_TRIGGER" in search,
+        "PhraseSearch：触发码是搜索字段（面板输入 dtwsl 也能筛到）",
+        "PhraseSearch 不再搜索触发码字段，面板里输入 dtwsl 会筛不到",
+    )
+
+    # L11. 写入器幂等：重复执行不新增、同 trigger 换内容原地更新、重复行被清理
+    module = None
+    if not UPSERT_TOOL.exists():
+        fail(f"缺少写入器：{rel(UPSERT_TOOL)}")
+    else:
+        try:
+            spec = importlib.util.spec_from_file_location("upsert_quick_phrase", UPSERT_TOOL)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)  # type: ignore[union-attr]
+        except Exception as exc:  # noqa: BLE001 - 校验脚本只报告，不抛出
+            fail(f"无法加载 {rel(UPSERT_TOOL)}：{exc}")
+    if module is not None:
+        tool_row = module.build_row(DTWSL_TRIGGER, DTWSL_LABEL, golden, "exact", 110, "a")
+        asset_text = read(PHRASES)
+        once, action, dupes = module.upsert_row(asset_text, DTWSL_TRIGGER, tool_row)
+        twice, action2, _ = module.upsert_row(once, DTWSL_TRIGGER, tool_row)
+        check(
+            action == "unchanged" and dupes == 0 and once == asset_text and twice == once and action2 == "unchanged",
+            "写入器：对当前规则表重复执行是 no-op（字节一致、无重复条目）",
+            f"写入器对当前规则表不是幂等的：action={action} dupes={dupes} changed={once != asset_text}",
+        )
+
+        header = "\n".join(line for line in asset_text.split("\n") if line.startswith("#"))
+        first, first_action, _ = module.upsert_row(header, DTWSL_TRIGGER, tool_row)
+        second, second_action, _ = module.upsert_row(first, DTWSL_TRIGGER, tool_row)
+        check(
+            first_action == "inserted"
+            and second_action == "unchanged"
+            and second == first
+            and module.count_rows(first) == 1
+            and module.count_rows(second) == 1,
+            "写入器：空表上连续执行两次，只新增 1 条（条目总数不增长）",
+            "写入器重复执行会新增第二条同 trigger 规则",
+        )
+
+        changed_row = module.build_row(DTWSL_TRIGGER, DTWSL_LABEL, golden + "。", "exact", 110, "a")
+        updated, update_action, _ = module.upsert_row(first, DTWSL_TRIGGER, changed_row)
+        check(
+            update_action == "updated" and module.count_rows(updated) == 1,
+            "写入器：同 trigger 换正文时原地更新（不新增行）",
+            "写入器把同 trigger 的新正文追加成了第二条规则",
+        )
+
+        duplicated = first + tool_row + "\n"
+        cleaned, _, removed = module.upsert_row(duplicated, DTWSL_TRIGGER, tool_row)
+        check(
+            removed == 1 and module.count_rows(cleaned) == 1,
+            "写入器：已存在的重复同 trigger 行会被清理（只留 1 条）",
+            f"写入器没有清理重复行（removed={removed}，剩余 {module.count_rows(cleaned)} 条）",
+        )
+
+    # L12. 文档：5 位码在两种输入态的行为差异必须写明
+    doc = read(DOC) if DOC.exists() else ""
+    check(
+        "### 12.6" in doc and DTWSL_TRIGGER in doc and "MAX_CODE_LENGTH" in doc,
+        "docs/quick-phrase-enhancement.md 12.6：记录 dtwsl 落点、转义、两种输入态缓冲区差异",
+        "文档缺少 12.6（5 位触发码 / dtwsl）说明：后来者会踩同一个缓冲区坑",
     )
 
 
