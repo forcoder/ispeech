@@ -1,0 +1,3 @@
+interface:
+  display_name: "Pentagi"
+  short_description: "Run or bootstrap authorized PentAGI autonomous security-agent workflows"

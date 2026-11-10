@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动图标前景：白色对话气泡 + 品牌渐变笔画条（呼应 logo.svg） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 白色对话气泡 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,30 h28 a8,8 0 0 1 8,8 v16 a8,8 0 0 1 -8,8 h-18 l-10,9 v-9 h-0 a8,8 0 0 1 -8,-8 v-16 a8,8 0 0 1 8,-8 z" />
+
+    <!-- 渐变定义 -->
+    <path
+        android:fillColor="#5B6CFF"
+        android:pathData="M44,39 h20 a2.5,2.5 0 0 1 0,5 h-20 a2.5,2.5 0 0 1 0,-5 z" />
+    <path
+        android:fillColor="#8A2BE2"
+        android:pathData="M48,47 h16 a2.5,2.5 0 0 1 0,5 h-16 a2.5,2.5 0 0 1 0,-5 z" />
+    <path
+        android:fillColor="#5B6CFF"
+        android:pathData="M44,55 h12 a2.5,2.5 0 0 1 0,5 h-12 a2.5,2.5 0 0 1 0,-5 z" />
+</vector>

@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">iSpeech</string>
+    <string name="app_slogan">Wubi typing · Quick phrases · Quick apps</string>
+
+    <!-- Common buttons -->
+    <string name="btn_confirm">OK</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_delete">Delete</string>
+    <string name="btn_edit">Edit</string>
+    <string name="btn_add">Add</string>
+    <string name="btn_import">Import</string>
+    <string name="btn_export">Export</string>
+    <string name="btn_reset">Reset</string>
+    <string name="btn_retry">Retry</string>
+    <string name="btn_close">Close</string>
+    <string name="btn_copy">Copy</string>
+    <string name="btn_apply">Apply</string>
+
+    <!-- Settings home -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_intro">Configure dictionary, quick phrases, account sync and appearance</string>
+    <string name="settings_dict_desc">Manage the Wubi 86 dictionary and custom word lists</string>
+    <string name="settings_quick_desc">Maintain shortcut letters and reply templates, including quick app rules</string>
+    <string name="settings_csbaby_desc">Sign in to csBaby to enable cloud rule sync</string>
+    <string name="settings_sync_desc">Sync cloud keyword rules into local quick phrases</string>
+    <string name="settings_theme_desc">Choose light, dark or follow system</string>
+    <string name="settings_about_desc">Version and release notes</string>
+
+    <!-- Wubi dictionary -->
+    <string name="dict_title">Wubi Dictionary</string>
+    <string name="dict_search_hint">Type a Wubi code, e.g. ggll</string>
+    <string name="dict_summary_title">Dictionary Summary</string>
+    <string name="dict_entry_count">Total entries: %1$d</string>
+    <string name="dict_code_count">Total codes: %1$d</string>
+    <string name="dict_single_count">Single characters: %1$d</string>
+    <string name="dict_phrase_count">Phrases: %1$d</string>
+    <string name="dict_sample_single">Single character sample</string>
+    <string name="dict_sample_phrase">Phrase sample</string>
+    <string name="dict_not_found">No matching entries</string>
+    <string name="dict_import_hint">One code and word per line, separated by tab or space; optional usage count and mode (wb/cn). Lines without a mode go to the dictionary you pick</string>
+    <string name="dict_user_title">User Dictionary Import / Export</string>
+    <string name="dict_user_count">Current user entries: %1$d</string>
+    <string name="dict_import_wubi">Import Wubi dict</string>
+    <string name="dict_import_pinyin">Import Pinyin dict</string>
+    <string name="dict_export">Export as text</string>
+    <string name="dict_import_result">Imported %1$d entries (updated %2$d, skipped %3$d)</string>
+    <string name="dict_import_failed">Import failed: %1$s</string>
+    <string name="dict_export_failed">Export failed: %1$s</string>
+    <string name="dict_cell_title">Category Dictionaries</string>
+    <string name="dict_cell_hint">Install local text dictionaries (one "code + word" per line, same format as the user dictionary; an optional `# category: name` header is supported) and enable or disable them at will. Enabled entries join the candidate lookup — wb codes for Wubi, cn codes for Pinyin.</string>
+    <string name="dict_cell_add">Add dictionary</string>
+    <string name="dict_cell_empty">No category dictionaries installed yet</string>
+    <string name="dict_cell_entry_count">%1$d entries</string>
+    <string name="dict_cell_category_unknown">Custom</string>
+    <string name="dict_cell_added">Installed "%1$s": %2$d entries (skipped %3$d)</string>
+    <string name="dict_cell_updated">Updated "%1$s": %2$d entries (skipped %3$d)</string>
+    <string name="dict_cell_add_failed">Dictionary operation failed: %1$s</string>
+    <string name="dict_cell_remove">Delete</string>
+
+    <!-- Quick phrases -->
+    <string name="quick_title">Quick Phrases</string>
+    <string name="quick_search_hint">Search shortcut letters or content</string>
+    <string name="quick_add_rule">Add Quick Phrase</string>
+    <string name="quick_edit_rule">Edit Quick Phrase</string>
+    <string name="quick_trigger">Shortcut letters</string>
+    <string name="quick_trigger_hint">e.g. ycsf — type ycsf in the IME and this phrase is the first candidate</string>
+    <string name="quick_trigger_error">Use 2–4 lowercase letters (Wubi codes are capped at 4)</string>
+    <string name="quick_label">Label</string>
+    <string name="quick_content">Content</string>
+    <string name="quick_match_mode">Match mode</string>
+    <string name="quick_weight">Weight</string>
+    <string name="quick_kind">Kind</string>
+    <string name="quick_enabled">Enabled</string>
+    <string name="quick_empty">No quick phrases yet. Tap the button to add one.</string>
+    <string name="quick_import_app">Import from Quick Apps</string>
+    <string name="quick_saved">Saved</string>
+    <string name="quick_user_file">Local file: quick_phrases_user.txt</string>
+    <string name="quick_source_files">Local: quick_phrases_user.txt · Remote: quick_phrases_remote.txt</string>
+    <string name="quick_remote_shortcut_title">Set shortcut letters</string>
+    <string name="quick_remote_shortcut_desc">Remote rule content is read-only; the shortcut letters are saved locally and can be restored anytime</string>
+    <string name="quick_remote_overridden">Overridden to %1$s</string>
+    <string name="quick_remote_restore">Restore default</string>
+    <string name="quick_remote_override_set">Shortcut letters “%1$s” set. Tap Save &amp; Sync to write locally.</string>
+    <string name="quick_remote_override_restored">Remote default shortcut restored. Tap Save &amp; Sync to write locally.</string>
+    <string name="quick_panel_search_hint">Type to search phrases (initials ok)</string>
+    <string name="quick_panel_search_active">🔍 %1$s</string>
+
+    <!-- Match modes -->
+    <string name="quick_mode_exact">Exact</string>
+    <string name="quick_mode_prefix">Prefix</string>
+    <string name="quick_mode_contains">Contains</string>
+    <string name="quick_mode_regex">Regex</string>
+
+    <!-- Candidate kinds -->
+    <string name="lookup_kind_wubi">Wubi</string>
+    <string name="lookup_kind_wubi_phrase">Word</string>
+    <string name="lookup_kind_pinyin">Pinyin</string>
+    <string name="lookup_kind_phrase">Phrase</string>
+    <string name="lookup_kind_quickapply">App</string>
+
+    <!-- csBaby sign in -->
+    <string name="csbaby_login_title">csBaby Sign In</string>
+    <string name="csbaby_identifier_hint">Account / phone / email</string>
+    <string name="csbaby_password_hint">Password</string>
+    <string name="csbaby_name_hint">Nickname (optional)</string>
+    <string name="csbaby_login">Sign In</string>
+    <string name="csbaby_register">Register</string>
+    <string name="csbaby_logout">Sign Out</string>
+    <string name="csbaby_logged_in">Signed in: %1$s</string>
+    <string name="csbaby_not_logged_in">Not signed in</string>
+    <string name="csbaby_login_failed">Sign in failed: %1$s</string>
+
+    <!-- Sync -->
+    <string name="sync_title">Sync</string>
+    <string name="sync_now">Sync Now</string>
+    <string name="sync_never">Not synced yet</string>
+    <string name="sync_last_time">Last sync: %1$s</string>
+    <string name="sync_success">Synced %1$d rules</string>
+    <string name="sync_failed">Sync failed: %1$s</string>
+    <string name="sync_need_login">Please sign in to csBaby first</string>
+    <string name="sync_upload_now">Upload Local</string>
+    <string name="sync_upload_desc">Upload local quick phrases to csBaby (de-duplicated by trigger)</string>
+    <string name="sync_upload_success">Uploaded %1$d rules</string>
+
+    <!-- Theme -->
+    <string name="theme_title">Theme</string>
+    <string name="theme_follow_system">Follow system</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_color_hint">Brand color: #5B6CFF</string>
+
+    <!-- About -->
+    <string name="about_title">About iSpeech</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_desc">iSpeech: a Sogou Wubi 86 style IME with quick phrases and cloud sync.</string>
+
+    <!-- Voice input -->
+    <string name="voice_listening">Listening…</string>
+    <string name="voice_need_permission">Please grant microphone permission first</string>
+    <string name="voice_no_match">Didn\'t catch that, please try again</string>
+    <string name="voice_cancel">Voice input cancelled</string>
+    <string name="voice_unavailable">Voice input is not available on this device</string>
+    <string name="voice_service_unavailable">No usable speech recognition service on this device. Choose another service component in Settings → Speech Recognition, or install a speech app.</string>
+    <string name="voice_network_error">Network error — speech recognition needs a connection</string>
+    <string name="voice_audio_error">Recording failed — check whether another app is using the microphone</string>
+    <string name="voice_error_code">Speech recognition failed (error %1$d)</string>
+    <string name="voice_panel_listening">Listening…</string>
+    <string name="voice_panel_hint">Release to insert · swipe up to cancel</string>
+    <string name="voice_panel_hint_cancel">Release to cancel</string>
+
+    <!-- ASR model configuration -->
+    <string name="asr_title">ASR Model</string>
+    <string name="asr_description">Choose the speech recognition engine and parameters used by voice input</string>
+    <string name="asr_engine_label">Engine</string>
+    <string name="asr_engine_system">System recognizer</string>
+    <string name="asr_engine_system_desc">Use the built-in Android speech recognition service</string>
+    <string name="asr_engine_custom">Custom service</string>
+    <string name="asr_engine_custom_desc">Target an installed recognition service component</string>
+    <string name="asr_engine_funasr">FunASR Offline</string>
+    <string name="asr_engine_funasr_desc">FunASR Paraformer-zh-small model — fully offline, higher Chinese accuracy. First use downloads a ~74 MB model.</string>
+    <string name="voice_model_downloading">Downloading speech model %1$d%%</string>
+    <string name="voice_model_ready">Speech model ready — tap the mic again to talk</string>
+    <string name="voice_model_failed">Speech model download failed; check your network and retry</string>
+    <string name="asr_component_label">Service component</string>
+    <string name="asr_component_hint">package/class, e.g. com.example/.AsrService</string>
+    <string name="asr_model_label">Model name</string>
+    <string name="asr_model_hint">Model or variant passed to the service, may be empty</string>
+    <string name="asr_language_label">Language</string>
+    <string name="asr_options_label">Options</string>
+    <string name="asr_partial_label">Partial results</string>
+    <string name="asr_partial_desc">Stream interim results while speaking</string>
+    <string name="asr_offline_label">Prefer offline</string>
+    <string name="asr_offline_desc">Use on-device models when available</string>
+    <string name="asr_saved">Speech recognition settings saved</string>
+    <string name="asr_save_failed">Failed to save speech recognition settings: %1$s</string>
+
+    <!-- In-IME settings panel -->
+    <string name="settings_panel_title">Input settings</string>
+    <string name="settings_panel_more">More settings</string>
+    <string name="panel_toggle_chinese_punct">Chinese punctuation</string>
+    <string name="panel_toggle_full_width">Full-width output</string>
+    <string name="panel_toggle_association">Word association</string>
+    <string name="panel_toggle_learning">Frequency learning</string>
+    <string name="panel_toggle_pinyin_mixed">Mixed pinyin</string>
+    <string name="panel_toggle_fuzzy_pinyin">Fuzzy pinyin</string>
+    <string name="panel_toggle_traditional">Traditional output</string>
+    <string name="panel_toggle_vibrate">Key vibration</string>
+    <string name="quick_search_empty">No matching quick phrase. Try pinyin initials (fp → 发票).</string>
+    <string name="quick_search_count">%1$d matches · keyword %2$s</string>
+    <string name="quick_search_smart">Smart search: shortcut letters / label / content / pinyin initials · %1$d total</string>
+    <string name="quick_tier_initials">Pinyin initials</string>
+    <string name="quick_save_sync">Save &amp; Sync</string>
+    <string name="quick_saved_local_only">Saved %1$d locally; not signed in to csBaby, cloud not synced</string>
+    <string name="quick_synced">Saved %1$d · cloud: created %2$d · updated %3$d · deleted %4$d</string>
+    <string name="quick_synced_partial">Saved locally · cloud applied: created %1$d · updated %2$d · deleted %3$d; %4$d not applied (backend rejects update / delete)</string>
+    <string name="quick_synced_none">Saved %1$d; nothing to sync to cloud</string>
+    <string name="quick_sync_failed">Saved locally; cloud sync failed: %1$s</string>
+    <string name="sync_upload_partial">Cloud applied: created %1$d · updated %2$d · deleted %3$d; %4$d not applied (backend rejects update / delete)</string>
+</resources>
