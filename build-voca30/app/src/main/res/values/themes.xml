@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 日间主题：基于 Material3，无 ActionBar，供 Compose 使用 -->
+    <style name="Theme.Ispeech" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/ispeech_primary</item>
+        <item name="colorOnPrimary">@color/ispeech_on_primary</item>
+        <item name="colorSecondary">@color/ispeech_secondary</item>
+        <item name="android:windowBackground">@color/ispeech_bg</item>
+        <item name="android:statusBarColor">@color/ispeech_bg</item>
+        <item name="android:navigationBarColor">@color/ispeech_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

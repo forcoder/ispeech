@@ -1,0 +1,38 @@
+<!--
+  表情键图标：笑脸（两眼 + 弧嘴）+ 右上角四角星。
+  复刻搜狗 Android 版 `ime_function_expression.png`（按下态 `_p` 为实心高亮，
+  本仓库用键面背景 + 图标 tint 表达按下态，见 res/color/key_icon_tint.xml）。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M4.6,12.2 a7.4,7.4 0 1 0 14.8,0 a7.4,7.4 0 1 0 -14.8,0"
+        android:strokeColor="#1F2329"
+        android:strokeWidth="1.8"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M9.2,10.0 V12.0"
+        android:strokeColor="#1F2329"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M14.2,9.8 L15.8,11.2"
+        android:strokeColor="#1F2329"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M8.8,14.0 a4.0,4.0 0 0 0 6.4,0"
+        android:strokeColor="#1F2329"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M18.6,3.4 l0.8,2.0 l2.0,0.8 l-2.0,0.8 l-0.8,2.0 l-0.8,-2.0 l-2.0,-0.8 l2.0,-0.8 z"
+        android:strokeColor="#1F2329"
+        android:strokeWidth="1.4"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>
