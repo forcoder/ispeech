@@ -67,7 +67,7 @@
     <string name="quick_edit_rule">Edit Quick Phrase</string>
     <string name="quick_trigger">Shortcut letters</string>
     <string name="quick_trigger_hint">e.g. ycsf — type ycsf in the IME and this phrase is the first candidate</string>
-    <string name="quick_trigger_error">Use 2–4 lowercase letters (Wubi codes are capped at 4)</string>
+    <string name="quick_trigger_error">Use 1–8 lowercase letters</string>
     <string name="quick_label">Label</string>
     <string name="quick_content">Content</string>
     <string name="quick_match_mode">Match mode</string>
@@ -85,6 +85,11 @@
     <string name="quick_remote_restore">Restore default</string>
     <string name="quick_remote_override_set">Shortcut letters “%1$s” set. Tap Save &amp; Sync to write locally.</string>
     <string name="quick_remote_override_restored">Remote default shortcut restored. Tap Save &amp; Sync to write locally.</string>
+    <string name="quick_trigger_wubi_hint">Over 4 letters: incomplete in Wubi mode, fine in Pinyin mode</string>
+    <string name="quick_add_cloud_shortcut">Add new rule</string>
+    <string name="quick_add_local_rule">Add local quick phrase</string>
+    <string name="quick_add_cloud_rule">Add cloud shortcut</string>
+    <string name="btn_add_cloud_shortcut">Add cloud shortcut</string>
     <string name="quick_panel_search_hint">Type to search phrases (initials ok)</string>
     <string name="quick_panel_search_active">🔍 %1$s</string>
 
@@ -197,6 +202,10 @@
     <string name="quick_synced">Saved %1$d · cloud: created %2$d · updated %3$d · deleted %4$d</string>
     <string name="quick_synced_partial">Saved locally · cloud applied: created %1$d · updated %2$d · deleted %3$d; %4$d not applied (backend rejects update / delete)</string>
     <string name="quick_synced_none">Saved %1$d; nothing to sync to cloud</string>
+    <string name="quick_cloud_added_success">Cloud shortcut “%1$s” added</string>
+    <string name="quick_cloud_added_failed">Could not add cloud shortcut “%1$s”: %2$s</string>
+    <string name="quick_cloud_login_required">Sign in to csBaby first to add a cloud shortcut</string>
+    <string name="quick_cloud_added_refresh_failed">Cloud shortcut “%1$s” was added, but refreshing the local list failed: %2$s. Tap Sync from Remote to retry.</string>
     <string name="quick_sync_failed">Saved locally; cloud sync failed: %1$s</string>
     <string name="sync_upload_partial">Cloud applied: created %1$d · updated %2$d · deleted %3$d; %4$d not applied (backend rejects update / delete)</string>
 </resources>

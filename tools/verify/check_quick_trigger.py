@@ -45,6 +45,8 @@ COMPOSITE_ENGINE = ROOT / "app/src/main/java/com/ispeech/engine/CompositeEngine.
 QUICK_SCREEN = ROOT / "app/src/main/java/com/ispeech/settings/QuickPhrasesScreen.kt"
 QUICK_PANEL = ROOT / "app/src/main/java/com/ispeech/input/QuickPhrasePanel.kt"
 QUICK_VM = ROOT / "app/src/main/java/com/ispeech/settings/quick/QuickPhrasesViewModel.kt"
+QUICK_TRIGGER_POLICY = ROOT / "app/src/main/java/com/ispeech/settings/quick/QuickTriggerPolicy.kt"
+QUICK_EDITS = ROOT / "app/src/main/java/com/ispeech/settings/quick/QuickPhraseEdits.kt"
 SYNC_REPO = ROOT / "app/src/main/java/com/ispeech/data/SyncRepository.kt"
 APP_CONTAINER = ROOT / "app/src/main/java/com/ispeech/di/AppContainer.kt"
 STRINGS_ZH = ROOT / "app/src/main/res/values/strings.xml"
@@ -268,15 +270,29 @@ def check_user_trigger_chain() -> None:
         else:
             fail(f"缺少中英文案 {key}（zh={key in zh} en={key in en}）")
 
-    # 设置页：2–4 位小写字母校验，未通过时确认按钮禁用
+    # 设置页：快捷字母校验（1–8 位小写字母），未通过时确认按钮禁用
+    #
+    # 断言变更记录（VOCA-74）：原断言锁定「2–4 位」硬编码。需求 VOCA-74 明确要求
+    # 快捷字母 1–8 位；长度上限 4 是五笔态组合缓冲的限制，只影响五笔态（拼音态上限 12），
+    # 因此改为「提示」而非「禁止」。校验规则本身已抽到 QuickTriggerPolicy（有 Kotlin 单测
+    # QuickTriggerPolicyTest 覆盖 1–8 位边界与 1 位强转 exact），这里校验委托关系仍在。
     screen = read(QUICK_SCREEN) if QUICK_SCREEN.exists() else ""
+    policy = read(QUICK_TRIGGER_POLICY) if QUICK_TRIGGER_POLICY.exists() else ""
     if not screen:
         fail(f"文件不存在：{QUICK_SCREEN}")
     else:
-        if "isValidShortcutTrigger" in screen and "in 2..4" in screen and "'a'..'z'" in screen:
-            ok("QuickPhrasesScreen：快捷字母校验为 2–4 位小写字母")
+        if "fun isValidShortcutTrigger" in screen and "QuickTriggerPolicy.isValid" in screen:
+            ok("QuickPhrasesScreen：快捷字母校验委托给 QuickTriggerPolicy")
         else:
-            fail("QuickPhrasesScreen 未实现 2–4 位小写字母校验（超出 IME 组合缓冲区上限会打不出来）")
+            fail("QuickPhrasesScreen 的 isValidShortcutTrigger 未委托 QuickTriggerPolicy（校验规则散落会不一致）")
+        if "LENGTH_RANGE = 1..8" in policy and "it in 'a'..'z'" in policy:
+            ok("QuickTriggerPolicy：快捷字母为 1–8 位小写字母")
+        else:
+            fail("QuickTriggerPolicy 未实现 1–8 位小写字母校验")
+        if "if (trigger.length == 1) QuickMatchMode.EXACT" in policy:
+            ok("QuickTriggerPolicy：1 位快捷字母强制 exact（否则被 minTriggerLength 守卫拦下，静默失效）")
+        else:
+            fail("1 位快捷字母未强制 exact —— minTriggerLength=2 会让它完全打不出候选")
         if "triggerValid && editor.content.isNotBlank()" in screen:
             ok("QuickPhrasesScreen：快捷字母非法时确认按钮禁用")
         else:
@@ -479,6 +495,117 @@ def check_pinyin_state_quick_chain() -> None:
     )
 
 
+def check_create_flow() -> None:
+    """L. 新增 / 编辑快捷短语的完整链路（VOCA-74）。
+
+    设置页必须能直接新建一条短语（触发字母 + 候选内容），保存后立即出现在列表并可被
+    输入法命中；编辑改了快捷字母不能留下孤儿条目；云端新增成功后要立刻刷新本地列表。
+    """
+    screen = read(QUICK_SCREEN)
+    vm = read(QUICK_VM)
+    edits = read(QUICK_EDITS)
+    policy = read(QUICK_TRIGGER_POLICY)
+    zh = read(STRINGS_ZH)
+    en = read(STRINGS_EN)
+
+    # L1. UI 入口：FAB -> 类型选择 -> 本地规则 / 云端简写两个弹窗
+    check(
+        "FloatingActionButton(onClick = { choosingAddKind = true })" in screen
+        and "quick_add_local_rule" in screen
+        and "btn_add_cloud_shortcut" in screen,
+        "QuickPhrasesScreen：FAB 打开「新增」类型选择，提供本地规则与云端简写两个入口",
+        "设置页缺少新增入口（FAB 或两个新增分支之一）",
+    )
+    check(
+        "QuickEditor()" in screen and "CloudShortcutEditor()" in screen,
+        "QuickPhrasesScreen：两个新增分支分别打开空白编辑弹窗",
+        "新增分支未打开空白弹窗（会带着上一条的内容）",
+    )
+
+    # L2. 必填校验：快捷字母合法 + 内容非空
+    check(
+        "enabled = triggerValid && editor.content.isNotBlank()" in screen,
+        "QuickPhrasesScreen：快捷字母非法或内容为空时确认按钮禁用",
+        "新增 / 编辑弹窗未同时校验快捷字母与内容",
+    )
+    check(
+        "enabled = keywordValid && editor.replyTemplate.isNotBlank()" in screen,
+        "QuickPhrasesScreen：云端简写弹窗同样校验触发字母与内容",
+        "云端简写弹窗缺少必填校验",
+    )
+
+    # L3. 列表变换：新增 / 编辑 / 删除的规则集中在可测对象里
+    check(
+        "fun upsert(" in edits and "fun remove(" in edits,
+        "QuickPhraseEdits：新增 / 编辑 / 删除的列表变换独立可测",
+        "列表变换仍内联在 ViewModel 里，无法单测",
+    )
+    check(
+        "originalTrigger != userEntry.trigger" in edits
+        and "removeAll { it.trigger == originalTrigger }" in edits,
+        "QuickPhraseEdits：编辑改快捷字母时移除旧条目（不留孤儿规则）",
+        "编辑改快捷字母会残留旧 trigger 的条目",
+    )
+    check(
+        "QuickPhraseEdits.upsert(state.entries, userEntry, originalTrigger)" in vm,
+        "QuickPhrasesViewModel：upsert 传入原快捷字母",
+        "ViewModel 未把编辑前的快捷字母传给列表变换",
+    )
+    check(
+        "originalTrigger = entry.trigger" in screen,
+        "QuickPhrasesScreen：编辑弹窗记录编辑前的快捷字母",
+        "编辑弹窗未记录原快捷字母，改字母时会残留旧条目",
+    )
+
+    # L4. 云端新增后立即刷新，而不是只弹提示
+    check(
+        "SyncRepository.pullAndWriteRemoteRules(app)" in vm
+        and "AppContainer.invalidateEngine()" in vm,
+        "QuickPhrasesViewModel：云端新增成功后拉取远端规则并重建引擎（立即可见 / 可命中）",
+        "云端新增只弹提示不刷新，新规则要等下次「从远程同步」才出现",
+    )
+    check(
+        "matchType = QuickTriggerPolicy.remoteMatchType(keyword)" in vm,
+        "QuickPhrasesViewModel：云端 1 位关键字显式下发 EXACT",
+        "云端 1 位关键字落成 CONTAINS 会被 minTriggerLength 拦下，输入法里没有候选",
+    )
+    check(
+        "if (trigger.length == 1) \"EXACT\" else null" in policy,
+        "QuickTriggerPolicy.remoteMatchType：1 位 EXACT、其余交给后端默认",
+        "QuickTriggerPolicy 未提供云端 match_type 推导",
+    )
+
+    # L5. 超过五笔缓冲上限时提示而不是禁用
+    check(
+        "WUBI_BUFFER_LIMIT = 4" in policy and "fun longerThanWubiBuffer(" in policy,
+        "QuickTriggerPolicy：超过 4 位标记为「五笔态打不全」",
+        "缺少五笔缓冲上限标记（5–8 位会让用户以为五笔态也能用）",
+    )
+    check(
+        "R.string.quick_trigger_wubi_hint" in screen,
+        "QuickPhrasesScreen：超过 4 位时展示能力提示",
+        "超过 4 位没有任何提示，用户不知道五笔态打不全",
+    )
+
+    # L6. 中英文案齐全
+    for path, text in ((STRINGS_ZH, zh), (STRINGS_EN, en)):
+        missing = [
+            key for key in (
+                "quick_trigger_wubi_hint",
+                "quick_add_local_rule",
+                "quick_add_cloud_rule",
+                "btn_add_cloud_shortcut",
+                "quick_cloud_added_refresh_failed",
+            )
+            if f'name="{key}"' not in text
+        ]
+        check(
+            not missing,
+            f"{rel(path)}：新增流程文案齐全",
+            f"{rel(path)} 缺新增流程文案：{missing}",
+        )
+
+
 def main() -> int:
     print("=" * 62)
     print("快捷短语简写（触发码）规则校验")
@@ -489,6 +616,7 @@ def main() -> int:
     check_exact_trigger_ranking()
     check_remote_shortcut_chain()
     check_pinyin_state_quick_chain()
+    check_create_flow()
     check_space_long_press_triggers_voice()
     check_ai_key_shows_quick_phrases_first()
     check_ai_key_falls_back_to_llm_when_no_match()

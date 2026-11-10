@@ -131,45 +131,16 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
     }.getOrElse { emptyList() }
 
     /**
-     * 合并用户 / 远端规则用于展示。
+     * 合并用户 / 远端规则用于展示，规则见 [QuickPhraseMerge]。
      *
-     * 用户文件里 label + content 与某条远端规则相同的条目视为该规则的「快捷字母覆盖」：
-     * 用覆盖条目的 trigger / mode / kind 替换远端条目展示，并从用户卡片中移除，避免同一条短语
-     * 出现两次；返回的 [DisplayMerge.infoById] 以展示 id 为键，供 UI 判断来源与「恢复默认」。
-     * 没匹配到远端的用户条目（普通规则 / 远端已删除后遗留的覆盖）照常展示。
+     * 这里只负责把合并结果与使用记录接起来：覆盖条目的 trigger 变了、id 也随之变化，
+     * 所以要把原远端规则的次数 / 收藏并到新 id 上。
+     * （测试见 `QuickPhraseMergeTest`。）
      */
     private fun mergeForDisplay(
         user: List<QuickEntry>,
         remote: List<QuickEntry>,
-    ): DisplayMerge {
-        val overrides = HashMap<Pair<String, String>, ArrayDeque<QuickEntry>>()
-        user.forEach { entry ->
-            overrides.getOrPut(entry.label to entry.content) { ArrayDeque() }.addLast(entry)
-        }
-        val display = ArrayList<QuickEntry>(user.size + remote.size)
-        val infoById = LinkedHashMap<String, RemoteRuleInfo>()
-        val originalIdById = LinkedHashMap<String, String>()
-        val consumed = HashSet<String>()
-        remote.forEach { rule ->
-            val override = overrides[rule.label to rule.content]?.removeFirstOrNull()
-            val effective = if (override == null) {
-                rule
-            } else {
-                consumed.add(override.trigger)
-                rule.copy(
-                    trigger = override.trigger,
-                    mode = override.mode,
-                    kind = override.kind,
-                )
-            }
-            val displayId = PhraseUsageStore.idOf(effective)
-            infoById[displayId] = RemoteRuleInfo(rule, override?.trigger)
-            originalIdById[displayId] = PhraseUsageStore.idOf(rule)
-            display.add(effective)
-        }
-        display.addAll(user.filterNot { it.trigger in consumed })
-        return DisplayMerge(display, infoById, originalIdById)
-    }
+    ): QuickPhraseMerge.Result = QuickPhraseMerge.merge(user, remote)
 
     /** 搜索栏输入：实时过滤 + 联想。 */
     fun setKeyword(keyword: String) {
@@ -181,15 +152,17 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
         setKeyword("")
     }
 
-    /** 新增或按触发词覆盖同一规则。 */
-    fun upsert(entry: QuickEntry) {
+    /**
+     * 新增或按触发词覆盖同一规则。
+     *
+     * [originalTrigger] 非空表示这是编辑（旧快捷字母），改了字母时旧条目会被移除，
+     * 详见 [QuickPhraseEdits.upsert]。
+     */
+    fun upsert(entry: QuickEntry, originalTrigger: String? = null) {
         val userEntry = entry.copy(source = QuickSource.USER)
         _uiState.update { state ->
-            val list = state.entries.toMutableList()
-            val index = list.indexOfFirst { it.trigger == userEntry.trigger }
-            if (index >= 0) list[index] = userEntry else list.add(userEntry)
             state.copy(
-                entries = list,
+                entries = QuickPhraseEdits.upsert(state.entries, userEntry, originalTrigger),
                 dirty = true,
                 tip = "已更新「${userEntry.trigger}」，点击右上角「保存并同步」写入并上传",
             ).withMatches()
@@ -200,7 +173,7 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
     fun remove(entry: QuickEntry) {
         _uiState.update { state ->
             state.copy(
-                entries = state.entries.filterNot { it.trigger == entry.trigger },
+                entries = QuickPhraseEdits.remove(state.entries, entry.trigger),
                 dirty = true,
                 tip = "已删除「${entry.trigger}」，点击右上角「保存并同步」写入并上传",
             ).withMatches()
@@ -217,14 +190,15 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
      */
     fun setRemoteShortcut(original: QuickEntry, trigger: String) {
         val shortcut = trigger.trim().lowercase()
-        // 防御性校验：正常入口已在弹窗里禁用非法输入
-        if (shortcut.length !in 2..4 || shortcut.any { it !in 'a'..'z' }) return
+        // 防御性校验：正常入口已在弹窗里禁用非法输入（规则见 QuickTriggerPolicy）
+        if (!QuickTriggerPolicy.isValid(shortcut)) return
         val override = QuickEntry(
             trigger = shortcut,
             label = original.label,
             content = original.content,
             weight = original.weight + REMOTE_OVERRIDE_WEIGHT_BONUS,
-            mode = QuickMatchMode.PREFIX,
+            // 1 位快捷字母必须是 exact，prefix 会被 minTriggerLength 守卫拦下
+            mode = QuickTriggerPolicy.effectiveMode(shortcut, QuickMatchMode.PREFIX),
             kind = original.kind,
             source = QuickSource.USER,
         )
@@ -334,7 +308,11 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
 
     /**
      * 通过 csBaby 后端添加一条云端快捷短语。
-     * @param keyword 简写（触发词）
+     *
+     * 成功后重新拉取远端规则落盘并 [load]，让新条目**立即出现在列表**并进入输入法引擎 ——
+     * 只弹「已添加成功」而不刷新的话，用户要等下一次「从远程同步」才看得到自己刚建的规则。
+     *
+     * @param keyword 简写（触发词，1–8 位小写字母，见 [QuickTriggerPolicy]）
      * @param replyTemplate 上屏内容
      */
     fun addCloudShortcut(keyword: String, replyTemplate: String) {
@@ -353,16 +331,36 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
                 val client = AppContainer.csBabyClient(app)
                 val request = RuleUpsertRequest(
                     keyword = keyword,
-                    replyTemplate = replyTemplate
+                    replyTemplate = replyTemplate,
+                    // 1 位关键字必须显式 EXACT，否则落成 CONTAINS 会被 minTriggerLength 拦下
+                    matchType = QuickTriggerPolicy.remoteMatchType(keyword),
                 )
                 client.createRule(auth, request)
             }
-            .onSuccess { rule ->
-                _uiState.update {
-                    it.copy(
-                        saving = false,
-                        tip = app.getString(R.string.quick_cloud_added_success, keyword)
-                    )
+            .onSuccess {
+                // 云端已写入：拉一次远端列表落盘，新规则立刻进列表与输入法引擎
+                val refreshed = runCatching { SyncRepository.pullAndWriteRemoteRules(app) }
+                if (refreshed.isSuccess) {
+                    AppContainer.invalidateEngine()
+                    load()
+                    _uiState.update {
+                        it.copy(
+                            saving = false,
+                            tip = app.getString(R.string.quick_cloud_added_success, keyword)
+                        )
+                    }
+                } else {
+                    // 云端已建成，只有本地刷新失败：如实说明，避免用户以为没建成功又建一遍
+                    _uiState.update {
+                        it.copy(
+                            saving = false,
+                            tip = app.getString(
+                                R.string.quick_cloud_added_refresh_failed,
+                                keyword,
+                                refreshed.exceptionOrNull()?.message ?: "未知错误"
+                            )
+                        )
+                    }
                 }
             }
             .onFailure { throwable ->
@@ -404,13 +402,6 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
         val remote: List<QuickEntry>,
         val usage: Map<String, Int>,
         val starred: Set<String>,
-    )
-
-    /** 展示合并结果：展示条目 + 远端展示信息 + 覆盖前的原始 id（用于沿用使用记录）。 */
-    private data class DisplayMerge(
-        val entries: List<QuickEntry>,
-        val infoById: Map<String, RemoteRuleInfo>,
-        val originalIdById: Map<String, String>,
     )
 }
 
