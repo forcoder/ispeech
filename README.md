@@ -242,6 +242,7 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 ## 文档
 
 - `docs/sogou-feature-matrix.md` — 搜狗五笔功能对照表（已实现 / 差异 / Roadmap）
+- `docs/keyboard-ui.md` — 键盘界面规格（字号 / 配色 / 间距 / 换行键，含搜狗同机实测像素）
 - `docs/t9-and-symbols.md` — 九宫格 T9、颜文字 / 更多符号、输入法切换（键位设计与服务侧接线）
 - `docs/stats-and-hanconversion.md` — 输入统计与简繁转换（数据来源、许可、接线）
 - `docs/quick-phrase-enhancement.md` — 快捷短语收藏 / 最近使用

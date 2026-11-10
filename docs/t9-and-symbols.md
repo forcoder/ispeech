@@ -43,7 +43,8 @@
 ### 1.3 颜文字 / 更多符号页（追加式）
 
 - `T9Layouts.kaomojiPages()`：每个 `KaomojiData.categories` 分类一页，每行 3 条，页标题 `颜·分类名`（避开表情页已有的「动物」）；
-  键宽权重 2f 让 `SoftKeyboardView.keyTextSize`（`SoftKeyboardView.kt:335-339`）走 `weight > 1.4f` 分支用 18sp，长颜文字才放得下。
+  键宽权重 2f 让 `SoftKeyboardView.keyTextSize` 对 `weight > 1.4f` 的键降一档字号（九宫格布局 18sp，
+  26 键布局 15sp），长颜文字才放得下。字号 / 键面规格见 `docs/keyboard-ui.md`。
 - `T9Layouts.moreSymbolPages()`：每个 `KaomojiData.symbolCategories` 分类一页，每行 8 个单字符。
 - 两者都追加在**各自布局的末尾**：`KeyboardLayouts.symbols()` 追加更多符号、`KeyboardLayouts.emoji()` 追加颜文字，
   页码条（`SoftKeyboardView.buildPageBar`）会自动显示「颜·开心 9/15 点此翻页」。
