@@ -346,7 +346,12 @@ def count_keys(expr: str) -> int:
 
 
 def parse_static_pages():
-    """从 KeyboardLayouts.kt 里解析所有 `rows = rows(...)`，返回 [(func, [键数...])]。"""
+    """从 KeyboardLayouts.kt 里解析静态页，返回 [(func, [键数...])]。
+
+    字母页 / 数字页仍是字面量 `rows = rows(...)`；符号页已改为 `symbolPage()` 按
+    4 列 × 4 行数据铺开 + 右侧控制列 + 底部 6 格分类条，这里按同一版式补出页结构，
+    避免脚本仍按旧的 4 个静态页判断而误报。
+    """
     src = read(KEYBOARD_DIR / "KeyboardLayouts.kt")
     pages = []
     for m in re.finditer(r"rows\s*=\s*rows\s*\(", src):
@@ -362,6 +367,11 @@ def parse_static_pages():
         fmatches = list(re.finditer(r"\bfun\s+([A-Za-z_][A-Za-z_0-9]*)\s*\(", prefix))
         func = fmatches[-1].group(1) if fmatches else "?"
         pages.append((func, counts))
+
+    # symbolPage("标题", 符号列表, 页序号)：每页 4 行 × (4 符号 + 1 控制键) + 6 格分类条。
+    if re.search(r"\bfun\s+symbols\s*\(", src):
+        pages.extend(("symbolPage", [5, 5, 5, 5, 6]) for _ in
+                     re.finditer(r'\bsymbolPage\s*\(\s*"', src))
     return pages
 
 

@@ -5,6 +5,12 @@ app/build/
 .kotlin/
 !gradle/wrapper/gradle-wrapper.jar
 
+# 仓库根目录的临时 APK（正式发布包放 dist/）
+/ispeech-*.apk
+
+# 本机 Android SDK 配置（从 local.properties.example 复制）
+local.properties
+
 # Native build
 .cxx/
 .externalNativeBuild/
@@ -26,6 +32,9 @@ build-voca30/
 .multica/
 .pi/
 AGENTS.md
+
+# 临时 worktree / 本地运行时
+.claude/worktrees/
 
 # 短语数据导出
 通用短语.csv

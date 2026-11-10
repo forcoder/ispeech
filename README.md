@@ -143,11 +143,12 @@ app/src/main/java/com/ispeech/
 
 ## 构建方法
 
-1. 用 **Android Studio** 打开本目录
-2. 等待 Gradle 同步完成（需 Android SDK 34+）
-3. 连接真机或模拟器，点击 Run
+1. 用 **Android Studio** 打开本目录（需 Android SDK 34+）。
+2. 首次构建前配置 SDK：复制 `local.properties.example` 为 `local.properties`，把 `sdk.dir` 指向本机 Android SDK；
+   或在环境变量里设置 `ANDROID_HOME`。`local.properties` 是机器本地配置，不提交。
+3. 连接真机或模拟器，点击 Run。
 
-命令行构建（本机已装 JDK 17 + Android SDK 时；JDK 17 现已装在本机，见下文）：
+命令行构建（JDK 17）：
 
 ```bash
 export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
@@ -155,22 +156,10 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 ./gradlew assembleRelease    # 检测到 keystore/keystore.properties 时自动签名
 ```
 
-### 远端构建机（本机缺 Android SDK 时）
+### 远端构建机（可选）
 
-开发机（本项目日常使用的那台 Mac）**已装 JDK 17（Temurin 17.0.20.1，2026-10-18 安装），但没有 Android SDK
-（`local.properties` 指向 `/opt/homebrew/share/android-commandlinetools`，本机无 brew）**，
-所以编译 / 装机 / 冒烟测试仍放在远端构建机上做：
-
-```bash
-./ispeech-remote.sh sync     # 本地源码 → 远端（排除 build/ .gradle/）
-./ispeech-remote.sh build    # 远端 assembleDebug
-./ispeech-remote.sh install  # 装到远端模拟器
-./ispeech-remote.sh test     # 选中智语输入法 + 截图
-./ispeech-remote.sh pull     # 取回 debug APK 到 dist/
-./ispeech-remote.sh sh       # 远端交互 shell
-```
-
-远端：`cookie@43.136.44.72:10010`，JDK 17 + Android SDK + `emulator-5554`（Android 14）。
+没有本地 Android SDK 时，在构建机上执行同样的 Gradle 命令即可。历史远端环境：
+`cookie@43.136.44.72:10010`，JDK 17 + Android SDK + `emulator-5554`（Android 14）。
 
 > 本轮（v1.5 四项修复 + 图标复刻）的编译与真机验证证据、可复现命令、以及踩到的坑
 > （重装后必须先 `ime enable` 再 `ime set`；`ImageView` 没有 `minWidth/minHeight`）
@@ -236,8 +225,8 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 - 快捷短语面板的文本筛选依赖硬件键盘（软键盘在面板打开时让位给列表）
 - 云端同步与 AI 回复需先在设置页登录 csBaby
 - 首次使用需手动启用输入法
-- **本机（这台 Mac）没有 Android SDK**（JDK 17 已装）：编译、装机、冒烟测试仍在远端构建机执行（见上文）；
-  本仓库里的 APK 与实测结论都产自远端环境
+- **构建依赖 JDK 17 + Android SDK 34**：`local.properties` 不入库，按「构建方法」配置本机 SDK 路径；
+  仓库 `dist/` 里的 APK 是历史交付包，重新构建请以 `assembleDebug` / `assembleRelease` 产物为准
 
 ## 文档
 
@@ -259,7 +248,7 @@ for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger;
 done
 ```
 
-当前状态（v1.5 + 内置 `dtwsl`）：`check_static 6/6`、`check_input_logic 39/39`、
+当前状态（v1.5 + 内置 `dtwsl`）：`check_static 6/6`、`check_input_logic 44/44`、
 `check_t9 91/91(+1 known warn)`、`check_stats 53/53`、`check_phrase_usage 31/31`、
 `check_pinyin 66/66`、`check_crosscut 151/151`、`check_quick_trigger 65/65(+1 known warn)`。
 **全部通过**；分类词库（细胞词库）第 10 节 24 项全绿，候选条字重（VOCA-56「候选词不加粗」）第 12 节 3 项全绿，
