@@ -254,12 +254,24 @@ for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger;
 done
 ```
 
-当前状态（v1.5）：`check_static 5/5`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
-`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 66/66`、`check_crosscut 138/138`、
-`check_quick_trigger 29/29(+1 known warn)`。**全部通过**；分类词库（细胞词库）第 10 节 24 项全绿。
+当前状态（v1.5 + 内置 `dtwsl`）：`check_static 5/5`、`check_input_logic 38/39`（1 项**既有红**：
+符号页早改为 `symbolPage()` 程序化生成，脚本仍按 `rows = rows(` 期望 4 个静态页；基线 `6a985cf` 同样 38/39，
+与快捷短语无关）、`check_t9 91/91(+1 known warn)`、`check_stats 53/53`、`check_phrase_usage 31/31`、
+`check_pinyin 66/66`、`check_crosscut 138/138`、`check_quick_trigger 65/65(+1 known warn)`。
 另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）；
 `tools/verify/check_quick_trigger.py` 校验快捷短语「简写（触发码）」规则 —— 尤其防止**单字母简写误用
 prefix 模式导致静默失效**（见 `docs/quick-phrase-enhancement.md` 的「简写」一节）。
+
+内置规则的新增 / 改文案走写入器，别手工贴 tab 分隔行（正文换行必须转义成字面量 `\n`，手贴极易拆行）：
+
+```bash
+python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 \
+  --content-file tools/quick/phrases/dtwsl.txt --mode exact --weight 110 --kind a
+```
+
+有则更新、无则新增（重复执行不产生第二条，条目总数不增长），`--check` 只比对不写盘。
+正文源文件放 `tools/quick/phrases/<trigger>.txt`；内置 5 位码 `dtwsl` → 泡池须知的取舍与两种输入态差异
+见 `docs/quick-phrase-enhancement.md` 12.6。
 
 ## 品牌设计
 
