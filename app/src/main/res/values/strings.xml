@@ -67,7 +67,7 @@
     <string name="quick_edit_rule">编辑快捷短语</string>
     <string name="quick_trigger">快捷字母</string>
     <string name="quick_trigger_hint">例：ycsf → 输入法里敲 ycsf，候选第一位就是这条短语</string>
-    <string name="quick_trigger_error">快捷字母需为 2–4 位小写字母（与五笔编码上限 4 位一致）</string>
+    <string name="quick_trigger_error">快捷字母需为 1–8 位小写字母</string>
     <string name="quick_label">名称</string>
     <string name="quick_content">内容</string>
     <string name="quick_match_mode">匹配方式</string>
@@ -91,6 +91,7 @@
     <string name="quick_add_cloud_shortcut">添加新规则</string>
     <string name="quick_add_local_rule">添加本地快捷短语</string>
     <string name="quick_add_cloud_rule">添加云端简写</string>
+    <string name="quick_trigger_wubi_hint">超过 4 位：五笔态打不全，拼音态可完整输入</string>
 
     <!-- 匹配方式 -->
     <string name="quick_mode_exact">精确匹配</string>
@@ -205,5 +206,6 @@
     <string name="quick_cloud_login_required">请先登录 csBaby 账号</string>
     <string name="quick_cloud_added_success">云端简写「%1$s」已添加成功</string>
     <string name="quick_cloud_added_failed">云端简写「%1$s」添加失败：%2$s</string>
+    <string name="quick_cloud_added_refresh_failed">云端简写「%1$s」已添加，但本地列表刷新失败：%2$s；请点「从远程同步」重试</string>
     <string name="sync_upload_partial">云端生效：新增 %1$d · 修改 %2$d · 删除 %3$d；%4$d 条未生效（后端不支持修改 / 删除）</string>
 </resources>

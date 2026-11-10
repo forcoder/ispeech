@@ -68,17 +68,16 @@ import com.ispeech.engine.QuickMatchMode
 import com.ispeech.engine.QuickSource
 import com.ispeech.settings.quick.QuickPhrasesUiState
 import com.ispeech.settings.quick.QuickPhrasesViewModel
+import com.ispeech.settings.quick.QuickTriggerPolicy
 import com.ispeech.settings.quick.RemoteRuleInfo
 
 /**
- * 快捷字母校验：2–4 位小写字母。
+ * 快捷字母校验：1–8 位小写字母（规则与推导见 [QuickTriggerPolicy]）。
  *
- * 上限 4 与输入法五笔态的组合缓冲区 MAX_CODE_LENGTH 一致：超过 4 位时第 5 个字母会先上屏
- * 当前首选再重新起码，完整简写永远打不出来，也就拿不到「精确命中排第一」。
- * 数字 / 符号在五笔态直接上屏、不进入编码缓冲，所以同样不允许。
+ * 超过 4 位在五笔态打不全（组合缓冲 MAX_CODE_LENGTH=4），但拼音态上限 12、可以完整输入，
+ * 所以只做提示不禁用；1 位会被强制转成 exact，否则 prefix 的 minTriggerLength 守卫会拦下它。
  */
-internal fun isValidShortcutTrigger(trigger: String): Boolean =
-    trigger.length in 2..4 && trigger.all { it in 'a'..'z' }
+internal fun isValidShortcutTrigger(trigger: String): Boolean = QuickTriggerPolicy.isValid(trigger)
 
 /** 快捷短语页：搜索 / 编辑本地快捷规则，并可增删 csBaby 云端简写。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -217,7 +216,7 @@ fun QuickPhrasesScreen(onBack: () -> Unit, onOpenSync: () -> Unit) {
             onChange = { editor = it },
             onDismiss = { editor = null },
             onConfirm = {
-                viewModel.upsert(current.toEntry())
+                viewModel.upsert(current.toEntry(), current.originalTrigger)
                 editor = null
             },
         )
@@ -451,6 +450,8 @@ private data class QuickEditor(
     val weightText: String = "100",
     val mode: QuickMatchMode = QuickMatchMode.PREFIX,
     val kind: LookupKind = LookupKind.QUICKAPPLY,
+    /** 编辑前条目的快捷字母；新增时为 null。改了字母时据此移除旧条目，避免留下孤儿规则。 */
+    val originalTrigger: String? = null,
 ) {
     /** 转换为引擎条目；label 为空时回退为内容（与引擎解析规则一致）。 */
     fun toEntry(): QuickEntry {
@@ -462,7 +463,8 @@ private data class QuickEditor(
             label = label.ifEmpty { content },
             content = content,
             weight = weightText.toIntOrNull() ?: 100,
-            mode = mode,
+            // 1 位快捷字母强转 exact：prefix 会被 minTriggerLength 守卫拦下，规则静默失效
+            mode = QuickTriggerPolicy.effectiveMode(trigger, mode),
             kind = kind,
         )
     }
@@ -476,6 +478,7 @@ private data class QuickEditor(
             weightText = entry.weight.toString(),
             mode = entry.mode,
             kind = entry.kind,
+            originalTrigger = entry.trigger,
         )
     }
 }
@@ -506,19 +509,7 @@ private fun QuickEditorDialog(
                         onChange(editor.copy(trigger = raw.lowercase().filter { it in 'a'..'z' }))
                     },
                     label = { Text(stringResource(R.string.quick_trigger)) },
-                    supportingText = {
-                        val showError = editor.trigger.isNotEmpty() && !triggerValid
-                        Text(
-                            text = stringResource(
-                                if (showError) R.string.quick_trigger_error else R.string.quick_trigger_hint
-                            ),
-                            color = if (showError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    },
+                    supportingText = { TriggerSupportingText(editor.trigger) },
                     isError = editor.trigger.isNotEmpty() && !triggerValid,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
@@ -628,19 +619,7 @@ private fun RemoteShortcutEditorDialog(
                         onChange(editor.copy(trigger = raw.lowercase().filter { it in 'a'..'z' }))
                     },
                     label = { Text(stringResource(R.string.quick_trigger)) },
-                    supportingText = {
-                        val showError = editor.trigger.isNotEmpty() && !triggerValid
-                        Text(
-                            text = stringResource(
-                                if (showError) R.string.quick_trigger_error else R.string.quick_trigger_hint
-                            ),
-                            color = if (showError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    },
+                    supportingText = { TriggerSupportingText(editor.trigger) },
                     isError = editor.trigger.isNotEmpty() && !triggerValid,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
@@ -670,6 +649,31 @@ private data class CloudShortcutEditor(
     val replyTemplate: String = "",
 )
 
+/**
+ * 快捷字母输入框的辅助文案：非法时给错误提示，合法但超过五笔缓冲上限时给能力提示。
+ *
+ * 三处弹窗（本地规则 / 远端覆盖 / 云端简写）共用，避免同一份规则出现三种解释。
+ */
+@Composable
+private fun TriggerSupportingText(trigger: String) {
+    val showError = trigger.isNotEmpty() && !isValidShortcutTrigger(trigger)
+    val wubiHint = !showError && QuickTriggerPolicy.longerThanWubiBuffer(trigger)
+    Text(
+        text = stringResource(
+            when {
+                showError -> R.string.quick_trigger_error
+                wubiHint -> R.string.quick_trigger_wubi_hint
+                else -> R.string.quick_trigger_hint
+            }
+        ),
+        color = if (showError) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+    )
+}
+
 /** 云端简写添加弹窗：两个字段 + 校验（keyword 与 replyTemplate 必填）。 */
 @Composable
 private fun CloudShortcutEditorDialog(
@@ -694,19 +698,7 @@ private fun CloudShortcutEditorDialog(
                         onChange(editor.copy(keyword = raw.lowercase().filter { it in 'a'..'z' }))
                     },
                     label = { Text(stringResource(R.string.quick_trigger)) },
-                    supportingText = {
-                        val showError = editor.keyword.isNotEmpty() && !keywordValid
-                        Text(
-                            text = stringResource(
-                                if (showError) R.string.quick_trigger_error else R.string.quick_trigger_hint
-                            ),
-                            color = if (showError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    },
+                    supportingText = { TriggerSupportingText(editor.keyword) },
                     isError = editor.keyword.isNotEmpty() && !keywordValid,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(

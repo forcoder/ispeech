@@ -577,8 +577,10 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 | 关注点 | 位置 / 规则 |
 | --- | --- |
 | 数据 | `QuickEntry.trigger` 就是快捷字母；用户规则文件 `filesDir/quick_phrases_user.txt` 第一列 |
-| 录入 | 设置页「快捷短语」新增 / 编辑弹窗（本地规则与云端简写两处同一套校验）：只保留小写字母，2–4 位 |
-| 为什么限 4 位 | 五笔态组合缓冲上限 `MAX_CODE_LENGTH = 4`，第 5 个字母会先把当前首选上屏再重新起码，更长的简写永远打不全 |
+| 录入 | 设置页「快捷短语」新增 / 编辑弹窗（本地规则 / 远端覆盖 / 云端简写三处共用 `QuickTriggerPolicy`）：只保留小写字母，1–8 位 |
+| 为什么是 1–8 位 | 上限受两态缓冲约束：五笔态 `MAX_CODE_LENGTH = 4`、拼音态 `MAX_PINYIN_LENGTH = 12`。因此 5–8 位在拼音态可完整输入并精确命中，五笔态打不全——UI 用 `quick_trigger_wubi_hint` 提示而不禁用 |
+| 1 位必须 exact | `QuickPhraseEngine.matches` 对 prefix / contains 有 `minTriggerLength = 2` 守卫（防打字中途误触）。1 位配 prefix 在输入该字母时**一个候选都不出**，`QuickTriggerPolicy.effectiveMode` 直接强转 EXACT |
+| 云端 1 位 | 后端默认 `match_type=CONTAINS`，回读同样落进受守卫的档位，故 `QuickTriggerPolicy.remoteMatchType` 对 1 位显式下发 `EXACT` |
 | 排序 | `CandidateRanking`：精确码优先 → `LookupKind.order`（应用 0 < 短语 1 < 词库 2 …）；`QuickPhraseEngine.lookup` 保证**精确命中不受扫描上限截断**，规则表再大也排第一 |
 | 生效时机 | 保存即 `AppContainer.invalidateEngine()`，输入法无需重启 |
 | 可见性 | 输入法内「短语」面板每行右侧以角标显示快捷字母，用户不必回设置页查 |
@@ -624,3 +626,36 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 - 覆盖条目是本地别名，`SyncRepository.pushLocalRules` 会读取远端文件并跳过
   `label + content` 能匹配上的用户条目（`QuickOverride.matchesAny`），避免在 csBaby 上
   生成同内容的第二条远端规则。
+
+### 12.6 在管理界面新增快捷短语（VOCA-74）
+
+设置页「快捷短语」页（`QuickPhrasesScreen`）右下角 FAB → 「新增」类型选择 → 二选一：
+
+| 入口 | 弹窗字段 | 落点 | 生效路径 |
+| --- | --- | --- | --- |
+| 添加本地快捷短语 | 快捷字母（必填，1–8 位小写）、名称（可空，空则用内容）、内容（必填）、权重、匹配方式、类型 | `filesDir/quick_phrases_user.txt` | 点右上角「保存并同步」写盘 → `AppContainer.invalidateEngine()` → 输入法立即可命中 |
+| 添加云端简写 | 快捷字母（必填，同上）、内容（必填） | csBaby 后端 `POST api/rules` | 成功后 `SyncRepository.pullAndWriteRemoteRules` 重新落盘 + `invalidateEngine()` → **立即出现在列表并可命中** |
+
+本地新增的列表变换集中在 `QuickPhraseEdits.upsert`（纯逻辑 + 单测 `QuickPhraseCreateFlowTest`）：
+
+- 同快捷字母再次新增是**覆盖**，不追加（否则文件里两行同 trigger，解析时后者吞掉前者）；
+- **编辑时改了快捷字母会移除旧条目**。修复前只做 `indexOfFirst { trigger == 新值 }`，
+  改字母会追加一条新规则、旧 trigger 的条目留在文件里成为孤儿（列表多一条、输入法两个字母都能命中）；
+- 新增条目来源固定为「用户」。
+
+与远端规则的关系（本地优先，云端下发）：
+
+- 用户在本地为某条**远端**规则设了快捷字母 → 生成覆盖条目（`label + content` 相同），
+  展示上折叠进远端卡片、推送时跳过（`QuickOverride.matchesAny`），不会在云端造出重复规则；
+- 用户新建的本地短语**即使内容与某条远端规则相同**，只要 `label` 不同就不会被误判为覆盖
+  （判据是 `label + content` 同时相等，见 `QuickPhraseMergeTest`）；
+- 未登录 csBaby 时本地新增照常落盘并提示「已保存到本地；未登录 csBaby，未同步云端」。
+
+已知限制：
+
+- 云端新增走 `POST api/rules`，返回后重新拉取复核；若拉取失败，提示「已添加，但本地列表刷新失败」
+  而不是报成功——避免用户以为没建成又建一条（`quick_cloud_added_refresh_failed`）。
+- 后端对单条规则没有 PUT / DELETE，云端侧的修改 / 删除仍沿用 12.5 的 `sync/push` 复核口径。
+- 5–8 位快捷字母在**五笔态**打不全（组合缓冲 4 位），仅拼音态可完整输入；UI 做提示，不禁用。
+- `check_input_logic.py` 的「键盘布局页数」一项在本次改动前即失败，
+  与快捷短语无关，未在本次修复范围内。
