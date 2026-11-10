@@ -2,6 +2,7 @@
 .gradle/
 build/
 app/build/
+.kotlin/
 !gradle/wrapper/gradle-wrapper.jar
 
 # Native build
@@ -17,6 +18,14 @@ captures/
 # Test / report artifacts
 test-results/
 reports/
+
+# 本地产物 / 误提交的旧构建副本
+build-voca30/
+
+# 智能体运行时写进工作区根目录的文件（不属于产品代码）
+.multica/
+.pi/
+AGENTS.md
 
 # 短语数据导出
 通用短语.csv
