@@ -106,13 +106,13 @@ tracker 只认一种输入：**「刚刚上屏了一段文本」**，并自带�
 
 事件                        判定条件（全部满足）                      动作
 ──────────────────────────────────────────────────────────────────────────────
-onCommit(text, source, t)    source == SingleChar                     idle  → pending(text, t)
+onCommit(text, source, t)    source == SINGLE_CHAR                     idle  → pending(text, t)
                              （单字候选上屏）
 
 onInterrupt()                任何「不该学习的中断」                    任意  → idle
                              （见下表）
 
-onCommit(text, source, t)    source == SingleChar                     若 0 < t-pending.t ≤ W（默认 5 s）且
+onCommit(text, source, t)    source == SINGLE_CHAR                     若 0 < t-pending.t ≤ W（默认 5 s）且
                              ？已达两跳                                两字不同 or 该词在词库 → 判定「成词」
                                                                       否则 idle
                              其余 source（含标点 / 空格 / 英文 /
@@ -125,7 +125,7 @@ reset()                      换输入框 / 换输入态 / 关面板            
 **「单字候选上屏」的严格定义**（对应 `IspeechImeService.pickCandidate` 的调用链）：
 
 ```kotlin
-source == SingleChar ⟺ 候选来源 kind ∈ {WUBI} 且 insertText.length == 1（按码点）
+source == SINGLE_CHAR ⟺ 候选来源 kind ∈ {WUBI} 且 insertText.length == 1（按码点）
 ```
 
 - `kind == WUBIPHRASE / PINYIN / PHRASE / QUICKAPPLY` 一律不是单字候选；
@@ -135,16 +135,16 @@ source == SingleChar ⟺ 候选来源 kind ∈ {WUBI} 且 insertText.length == 1
   它们不经过候选，与「拼」无关；这正是 AC-3.3 要挡的；
 - **「无候选时上屏原始编码」不算单字**（`IspeechImeService.kt:596`、`:913` 的
   `commit(buffer, allowAssociation = false)`）：上屏的是 `klge` 这样的字符串而不是汉字，
-  与「选了一个单字」不是一回事。这两条路径**不强制显式传参**——默认值 `WordCandidate`
-  与 `Direct` 在本状态机里结果都是 idle（§1 状态机表），差别只在日志 `reason`；
-  实现时顺手传 `Direct` 可让跳过原因可读，非必做。
+  与「选了一个单字」不是一回事。这两条路径**不强制显式传参**——默认值 `WORD_CANDIDATE`
+  与 `DIRECT` 在本状态机里结果都是 idle（§1 状态机表），差别只在日志 `reason`；
+  实现时顺手传 `DIRECT` 可让跳过原因可读，非必做。
 
 ### 接线点（服务侧只改 6 处，全部是「喂事件」或「重置」）
 
 | # | 位置 | 调用 | 说明 |
 | --- | --- | --- | --- |
 | 1 | `IspeechImeService.kt:1164` `pickCandidate()` 的 `commit(...)` 之前 | `tracker.onCommit(insertText, sourceOf(candidate), now)` | 唯一的「可能成词」入口 |
-| 2 | `IspeechImeService.kt:921` `commit(text, allowAssociation, source)` | 新增 `source: CommitSource = CommitSource.WordCandidate` 默认参数；原样透传给 tracker，不自行判定 | 默认值让 4 个既有调用点（`:596`/`:905`/`:913`/`:917`）**无需改动**：它们要么不是单字（`:905` 语音、`:917` 由 #1 显式传值）、要么是「无候选时上屏原码」（`:596`/`:913`）。`WordCandidate` 与 `Direct` 在本状态机里**结果相同**（都 → idle），差别只在跳过日志的 `reason` 取值；因此这两处**不强制改**，实现时可顺手传 `Direct` 以让日志更准 |
+| 2 | `IspeechImeService.kt:921` `commit(text, allowAssociation, source)` | 新增 `source: CommitSource = CommitSource.WORD_CANDIDATE` 默认参数；原样透传给 tracker，不自行判定 | 默认值让 4 个既有调用点（`:596`/`:905`/`:913`/`:917`）**无需改动**：它们要么不是单字（`:905` 语音、`:917` 由 #1 显式传值）、要么是「无候选时上屏原码」（`:596`/`:913`）。`WORD_CANDIDATE` 与 `DIRECT` 在本状态机里**结果相同**（都 → idle），差别只在跳过日志的 `reason` 取值；因此这两处**不强制改**，实现时可顺手传 `DIRECT` 以让日志更准 |
 | 3 | `IspeechImeService.kt:948` `commitDirect()` | `tracker.onInterrupt()` | 标点 / 空格 / 换行 / 英文 / emoji / 语音全部走这里 |
 | 4 | `IspeechImeService.kt:1212` `openPanel()` / `:1268` `closePanel()` | `tracker.onInterrupt()` | AC-3.4「面板操作」 |
 | 5 | `IspeechImeService.kt:752` `toggleMode()` / `:399` `onStartInput()` | `tracker.reset()` | 换态 / 换输入框 |
@@ -154,11 +154,11 @@ source == SingleChar ⟺ 候选来源 kind ∈ {WUBI} 且 insertText.length == 1
 
 | 调用点 | 传什么 |
 | --- | --- |
-| `pickCandidate` → `commit(insertText, source = sourceOf(candidate))` | `sourceOf`：`kind == WUBI && insertText 码点长度 == 1` → `SingleChar`，否则 `WordCandidate` |
+| `pickCandidate` → `commit(insertText, source = sourceOf(candidate))` | `sourceOf`：`kind == WUBI && insertText 码点长度 == 1` → `SINGLE_CHAR`，否则 `WORD_CANDIDATE` |
 | `commitTop` 的 `commit(top.insertText)` | 同上，用 `sourceOf(top)` |
-| `:596` / `:913` 的无候选原码上屏 | `Direct`（可选；不传也走默认 `WordCandidate`，结果相同） |
-| `commitT9` 的 `commit(text)` | `WordCandidate`（九宫格不走五笔单字，且 `t9Digits` 非空时 `learn()` 已短路） |
-| `commitVoiceText` → `commit(candidate.insertText)`（`:1646`） | `WordCandidate`（语音上屏是整句） |
+| `:596` / `:913` 的无候选原码上屏 | `DIRECT`（可选；不传也走默认 `WORD_CANDIDATE`，结果相同） |
+| `commitT9` 的 `commit(text)` | `WORD_CANDIDATE`（九宫格不走五笔单字，且 `t9Digits` 非空时 `learn()` 已短路） |
+| `commitVoiceText` → `commit(candidate.insertText)`（`:1646`） | `WORD_CANDIDATE`（语音上屏是整句） |
 
 **光标移动**（AC-3.4 后半）现状**没有**任何事件源：`IspeechImeService` 未覆写 `onUpdateSelection`，
 全仓 `getTextBeforeCursor` 只用于撤销与 AI 原文比对（`999`/`1226`/`1895`/`2092` 行）。
@@ -310,7 +310,7 @@ code("喂猫") = charPrefix('喂') + charPrefix('猫') = "kl" + "qt" = "klqt"
    上一跳的输入码（`pending.code`），二期直接复用该字段扩展，不改状态机。
 
 > 二期不在一期编码里预留接口之外的任何东西：`PhraseLearningTracker` 的 `source` 枚举
-> 预留 `PinyinSingleChar` 即可，判定逻辑与推导函数在二期新增实现。
+> 预留 `PINYIN_SINGLE_CHAR` 即可，判定逻辑与推导函数在二期新增实现。
 
 ---
 
@@ -318,8 +318,8 @@ code("喂猫") = charPrefix('喂') + charPrefix('猫') = "kl" + "qt" = "klqt"
 
 ### 决策：不加标记位
 
-**一期不加标记位，继续用 `text.length > 1` 隐式判断；但把判断从两处（`UserDictStore.kt:362`
-与 `IspeechImeService.kt:1051`）收敛到一处，并给「隐式判断」补一条明确的不变量与测试。
+**一期不加标记位，继续用长度隐式判断；但把判断从两处（`UserDictStore.kt:362`
+与 `IspeechImeService.kt:1051`）收敛到一处，并把长度口径从 UTF-16 修正为**码点**。
 文件格式不变（仍是 `code<TAB>text<TAB>count<TAB>mode`），不需要版本号、不需要迁移。**
 
 ### 现状
@@ -327,13 +327,14 @@ code("喂猫") = charPrefix('喂') + charPrefix('猫') = "kl" + "qt" = "klqt"
 | 位置 | 判断 | 用途 |
 | --- | --- | --- |
 | `UserDictStore.kt:362` | `if (text.length == 1) WUBI else PHRASE` | 决定候选档位（单字 < 词组） |
+| `CellDictEngine.kt:100` | 同上，复制了一份 | 同上 |
 | `IspeechImeService.kt:1051` `dictModeOf` | 看 `LookupKind` | 决定写哪个库（`wb`/`cn`） |
 
 ### 为什么可以不加标记位
 
-- 「是不是词组」在**五笔模式**下与「文本长度 > 1」等价：`LookupKind.WUBI` 只由
+- 「是不是词组」在**五笔模式**下与「文本是 1 个码点」等价：`LookupKind.WUBI` 只由
   `WubiEngine` 的单字条目产生（`WubiEngine.kt:202`，`entry.isPhrase` 为假），
-  `WUBIPHRASE` 由词组条目产生；用户词库里的条目只要 `text.length > 1` 就必然是词组档。
+  `WUBIPHRASE` 由词组条目产生；用户词库里的条目只要码点数 > 1 就必然是词组档。
 - 加标记位要付出：文件格式变成 5 列 → `parseUserDictLine`（`UserDictStore.kt:57`）的
   兼容分支再加一层 → 导出/导入/同步（`DictionaryViewModel`、`SyncRepository`）三处都要改 →
   AC-3.10「现有用户词数据必须兼容、不得要求清库」的风险面从 0 变成 1。
@@ -348,19 +349,27 @@ code("喂猫") = charPrefix('喂') + charPrefix('猫') = "kl" + "qt" = "klqt"
 **对冲**（写进代码注释，不新增字段）：
 
 ```kotlin
-// 不变量：UserDictMode.WUBI 下 text.length == 1 ⟺ 单字档，> 1 ⟺ 词组档。
-// 该不变量由 UserDictStoreTest#entryKindFollowsTextLength 守护；若将来需要打破它，
+// 不变量：UserDictMode.WUBI 下 codePointLength(text) == 1 ⟺ 单字档，> 1 ⟺ 词组档。
+// 该不变量由 UserDictStoreTest#entryKindFollowsCodePointLength 守护；若将来需要打破它，
 // 必须加显式列并按 ADR-0001 §4「迁移方式」执行，不允许在调用点各自特判。
 ```
 
+**长度口径必须修（实测，非推断）**：`wubi86.dict` 的 70,391 个单字里有 **42,870 个是非 BMP 字符**
+（`𦟖`、`𡊃` 等），UTF-16 下 `String.length == 2`。因此现有的 `text.length == 1` 判断
+**会把这些字错判成词组档**（候选档位与排序都受影响）。这是既有缺陷，但本功能依赖同一判断，
+必须改用 `codePointLength`（定义见 §5.2），否则「含生僻字的词」会在单字档/词组档之间串档。
+
+**这是本 ADR 唯一要求改既有行为的地方**，影响面与回滚见 §15。
+
 **唯一需要改的代码**：把 `UserDictStore.kt:356-366` 的 `toCandidate()` 里的判断抽成
-`internal fun entryKindOf(text: String): LookupKind`，让 `IspeechImeService.dictModeOf` 复用同一判定，
-消除「两处各自隐式判断」。这是纯重构，不改行为。
+`internal fun entryKindOf(text: String): LookupKind`（内部用 `codePointLength`），
+让 `CellDictEngine.kt:100` 与 `IspeechImeService.dictModeOf` 复用同一判定，
+消除「三处各自隐式判断」。行为变化仅限非 BMP 单字（42,870 个字从词组档回到单字档，即修正）。
 
 ### 迁移方式（若将来必须加显式列）
 
 1. 文件格式加第 5 列 `kind`（`s` = 单字 / `p` = 词组）；
-2. `parseUserDictLine` 的 `when` 增加分支：第 5 列为 `s`/`p` 时以其为准，否则回落到 `text.length`；
+2. `parseUserDictLine` 的 `when` 增加分支：第 5 列为 `s`/`p` 时以其为准，否则回落到 `codePointLength(text)`；
    现有 4 列数据**原样按长度推断**，不需要重写文件；
 3. 首次写盘时统一补列（`persist()` 已有全量重写逻辑，天然完成迁移）；
 4. 回滚 = revert 单个 PR；旧版本读 5 列文件时，第 5 列会被 `fields.last().toIntOrNull()` 判为非数字，
@@ -374,13 +383,13 @@ code("喂猫") = charPrefix('喂') + charPrefix('猫') = "kl" + "qt" = "klqt"
 ### 5.1 学习判定输入（tracker 的公开接口）
 
 ```kotlin
-/** 上屏来源：只有 [SingleChar] 可能参与词组学习。 */
+/** 上屏来源：只有 [SINGLE_CHAR] 可能参与词组学习。 */
 internal enum class CommitSource {
-    SingleChar,   // 五笔单字候选（kind == WUBI，文本按码点为 1 个字符）
-    WordCandidate,// 词组候选 / 用户词 / 拼音候选
-    Direct,       // 标点 / 空格 / 换行 / 英文 / emoji / 语音（commitDirect 系）
-    Panel,        // 快捷短语面板 / AI 回复
-    Association,  // 联想上屏
+    SINGLE_CHAR,     // 五笔单字候选（kind == WUBI，文本按码点为 1 个字符）
+    WORD_CANDIDATE,  // 词组候选 / 用户词 / 拼音候选
+    DIRECT,          // 标点 / 空格 / 换行 / 英文 / emoji / 语音（commitDirect 系）
+    PANEL,           // 快捷短语面板 / AI 回复
+    ASSOCIATION,     // 联想上屏
 }
 
 /** 一次成词判定结果。null 表示「本次不学习」。 */
@@ -392,9 +401,9 @@ internal data class PhraseLearningDecision(
 )
 
 internal class PhraseLearningTracker(
-    private val codeOf: (Char) -> String?,           // 单字 → 全码（长度 ≥ 2）；查不到返回 null
+    private val codeOf: (String) -> String?,         // 单字（码点串）→ 全码（长度 ≥ 2）；查不到返回 null
     private val systemHasWord: (String) -> Boolean,  // 系统词库是否已有该词（精确匹配）
-    private val windowMillis: Long = 5_000,          // W，见 §6
+    private val windowMillis: Long = LEARN_WINDOW_MILLIS,  // W，见 §6；常量定义见下
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     fun onCommit(text: String, source: CommitSource): PhraseLearningDecision?
@@ -403,6 +412,9 @@ internal class PhraseLearningTracker(
     /** 供单测注入固定时间：把 clock 换成可变实现即可，不需要额外 API。 */
 }
 ```
+
+> **`codeOf` 的参数类型是 `String` 而不是 `Char`**——见 §5.2 的说明：`wubi86.dict` 里
+> 有 42,870 个非 BMP 单字（如 `𦟖`），单个 `Char` 承载不下，用 `Char` 会让这些字静默查不到。
 
 #### 契约要点
 
@@ -432,26 +444,58 @@ if (first == second && !systemHasWord(text)) return null   // 同字且词库无
 /** 五笔双字词组码推导：纯函数，不查词库、不依赖 Android。 */
 internal object PhraseCodeDeriver {
     /**
-     * @param first 第一字
-     * @param second 第二字
-     * @param codeOf 单字 → 全码（实现侧由 WubiEngine 提供，测试侧用字典桩）
+     * @param first 第一字（单个**码点**的 String，不是 Char）
+     * @param second 第二字（同上）
+     * @param codeOf 单字码点串 → 全码（实现侧由 WubiEngine 提供，测试侧用字典桩）
      * @return 4 位小写码；任一前置条件不满足返回 null
      */
-    fun derive(first: Char, second: Char, codeOf: (Char) -> String?): String?
+    fun derive(first: String, second: String, codeOf: (String) -> String?): String?
 }
 ```
+
+> **为什么用 `String` 而不是 `Char`**（实测，不是推断）：`wubi86.dict` 的 70,391 个单字里，
+> **42,870 个是非 BMP 字符**（如 `aaae` → `𧝣`、`aaal` → `𦾟`），UTF-16 下占 2 个 `Char`。
+> 用 `Char` 会把它们拆成代理对的一半，`codeOf` 必然查不到——表现为「含生僻字的词永远学不会」，
+> 且不会报错。用「单个码点的 `String`」既覆盖生僻字，也让 `text.codePointCount() == 1`
+> 成为可断言的前置条件。
+>
+> 对应的判定口径统一为**码点**，不是 UTF-16 长度：
+>
+> ```kotlin
+> /** 码点长度；不能用 String.length（非 BMP 字会被算成 2）。 */
+> internal fun codePointLength(text: String): Int =
+>     if (text.isEmpty()) 0 else text.codePointCount(0, text.length)
+> ```
+>
+> 仓库里已有同类手写先例可对齐：`InputStats.charCountOf`（`InputStats.kt:207-221`）用
+> `isHighSurrogate()` 逐位判断，`IspeechImeService.kt:2188` 用 `codePointAt`。本 ADR 选
+> `codePointCount` 是因为它是最短实现且语义无歧义。
+>
+> 注意这与仓库现状**不一致**：`UserDictStore.kt:362` / `CellDictEngine.kt:100` /
+> `WubiEngine.kt:53` / `PinyinDictLoader.kt:28` 都用 `text.length`。本 ADR 只要求修
+> **`UserDictStore` 这一条链路**（见 §4），其余两处的同类缺陷记录在 §14 第 8 条，
+> 建议单独开 issue。
 
 `codeOf` 的实现侧契约（**这是本 ADR 对 `WubiEngine` 的唯一新增要求**）：
 
 ```kotlin
 /** 单字全码：同字多条记录时取最长码，同长取权重最高，再同则取字典序最小。查不到返回 null。 */
-fun fullCodeOf(char: Char): String?
+fun fullCodeOf(char: String): String?
 ```
 
-实测支撑：`WubiEngine` 现在按 `byCode: Map<String, List<DictEntry>>` 建索引，
-反向索引（字 → 全码）需要额外建一次，成本为一次 16.5 万行遍历（与 `WubiEngine` 构造同量级，
-现有构造已在后台线程完成，见 `IspeechImeService.kt:288` 的预热逻辑）。
-**不新建第二份词库解析**：`fullCodeOf` 挂在现有 `WubiEngine` 上，复用已有 `byCode`。
+实测支撑与实现约束：`WubiEngine` 现在只建 `byCode: Map<String, List<DictEntry>>`（码 → 条目），
+**这个方向反查不了「字 → 码」**——必须新增一张反向索引 `byText: Map<String, String>`
+（单字 → 全码），在构造期一次性建好：
+
+- 规模：单字条目 75,034 行 / **70,391 个不同字**，即 70,391 个 key；对比 `byCode`
+  已持有的 165,599 个 `DictEntry`，增量同量级、可控。
+- 时机：`WubiEngine` 的构造已在后台线程（`IspeechImeService.kt:275` 的
+  `withContext(Dispatchers.Default)`，注释明确写了主线程构建会 `Input dispatching timed out`），
+  新增索引不引入主线程风险；但**必须在现有单次遍历里顺手填表**，不能做第二遍全文解析。
+- key 用 `String`（单字码点串），与 §5.2 的非 BMP 结论一致。`phrasesByFirstChar` 用 `Char`
+  只做联想首字索引、不参与推导，本 ADR 不改它。
+
+**不新建第二份词库解析**：`fullCodeOf` 挂在现有 `WubiEngine` 上，与 `byCode` 共用同一次解析。
 
 ### 5.3 词库条目结构（不变）
 
@@ -479,8 +523,8 @@ AC-3.6 的「再次拼一次 → count=2、权重 140」直接由它满足（实
 
 | 项 | 默认值 | 落地方式 | 依据 / 可调性 |
 | --- | --- | --- | --- |
-| 时间窗 W | **5,000 ms** | `PhraseLearningTracker(windowMillis = 5_000)` 单一常量 | 需求给的估计值（五笔打两个四码字约 2–3 s）。**标注「待 UX 真机节奏复核」**；调整方式 = 改这一个构造参数 + 同步改 AC-3.2 的边界用例（5,001 ms），不动状态机 |
-| 一期范围 | 五笔 2 字 | `CommitSource.SingleChar` 只认 `kind == WUBI` | 拼音与 3 字词另立二期（§3） |
+| 时间窗 W | **5,000 ms** | `private companion object { const val LEARN_WINDOW_MILLIS = 5_000L }`，构造参数默认值引用它 | 需求给的估计值（五笔打两个四码字约 2–3 s）。**标注「待 UX 真机节奏复核」**；调整方式 = 改这一个构造参数 + 同步改 AC-3.2 的边界用例（5,001 ms），不动状态机 |
+| 一期范围 | 五笔 2 字 | `CommitSource.SINGLE_CHAR` 只认 `kind == WUBI` | 拼音与 3 字词另立二期（§3） |
 | 排序 | 复用 `+100_000` | 不改 `UserDictEngine.kt:26/36` | 系统词最大权重 65535 < 100000，用户词组恒在首位；AC-3.12 直接满足 |
 | 防误触 | 三重保护 | G1/G2（§2）+ 「系统已有不学」+ 「中断即失效」+ 「同字不学」 | `嘿嘿`/`呵呵` 实测都在系统词库（`klkl`/`ksks`），由「已有不学」挡住；`你你` 实测不在（`wqwq` 下是 `像你`/`爷爷`/`爸爸`/`爹爹`），由「同字不学」挡住 |
 | 开关 | 复用 `settings.learning` | 只在写库前检查 | `KeyboardSettings.kt:24`、`SettingsStore.kt:134` 已存在，UI 文案「用户词频学习」（`KeyboardScreen.kt:125-129`）无需改 |
@@ -537,9 +581,19 @@ W 取 5 s 会让慢用户学不到。**建议 UX 复核时测两组**：① 连�
 | `longestCodeWinsOverSummaryCode` | `charPrefix('你') == "wq"`（`wq`/`wqi`/`wqiy` 三条中取最长 `wqiy`） |
 | `summaryCodeForChanIsRejected` | `charPrefix('产') == "ut"`；若误用最高权重码会得到 1 位的 `u`，断言 `fullCodeOf('产') == "ute"` |
 | `tiesBreakByWeightThenLexicographic` | 构造同长同权两条记录，断言取字典序小者 |
-| `rejectsNonCjk` | `derive('T','恤') == null` |
+| `rejectsNonCjk` | `derive("T", "恤") == null` |
+| `acceptsNonBmpFirstChar` | `codePointLength("𧝣") == 1`；`derive` 用真实词条 `aaae → 𧝣` 做桩，断言 `fullCodeOf("𧝣") == "aaae"` 且能正常参与推导（不被代理对拆断） |
 | `rejectsCharWithoutFullCode` | `codeOf` 返回 null 时 `null` |
 | `rejectsCodeShorterThanTwo` | `codeOf` 返回 `"u"` 时 `null` |
+
+**T-2b `EntryKindTest`** —— 覆盖 §4 的码点口径修正（这是本 ADR 唯一改既有行为处）：
+
+| 用例 | 断言 |
+| --- | --- |
+| `singleBmpCharIsSingle` | `entryKindOf("喂") == LookupKind.WUBI` |
+| `singleNonBmpCharIsSingle` | `entryKindOf("𧝣") == LookupKind.WUBI`（现实现返回 `PHRASE`，本修正的核心） |
+| `twoCharWordIsPhrase` | `entryKindOf("喂猫") == LookupKind.PHRASE` |
+| `twoNonBmpCharsIsPhrase` | `entryKindOf("𧝣𦾟") == LookupKind.PHRASE`——用**合成字符串**，不是词库 fixture（实测词库里 0 条双字词含非 BMP 字），目的只是证明码点计数不会把两个非 BMP 字误判成 1 个单字 |
 
 **T-3 `onUpdateSelection` 真机验证（不属于单测）**：见 §1 风险标注，验证「自因 vs 他因」区分方法。
 
@@ -690,8 +744,16 @@ AC-3.10 的「不得要求用户清库」从「需要验证」降级为「结构
    与本 ADR「服务侧只改 6 处」的原则相符，但仍是 `IspeechImeService` 增长的一部分。
 6. **推导规则依赖词库的取码约定**。若上游 `wubi86.dict` 换版且取码规则变化，
    T-2 的集合精确断言会立即失败——这是**刻意的**（宁可测试红，不要让用户学到错码）。
-7. **`systemHasWord` 需要一次词库查询**。实现侧应复用 `WubiEngine` 已建的 `byCode` 索引
-   （`entry.text == word` 反查），不能每次上屏遍历全表。
+7. **`systemHasWord` 也必须建索引，不能遍历全表**。`byCode` 是「码 → 条目」，
+   按 `text` 查需要另一张「词 → 是否存在」的表；与 §5.2 的 `byText`（单字 → 全码）
+   在同一次构造遍历里一起建，不要新增第三次遍历。
+8. **`CellDictEngine.kt:100` 与 `WubiEngine.kt:53`、`PinyinDictLoader.kt:28` 同样用 UTF-16 长度
+   判单字/词组**。本 ADR 只要求把 `entryKindOf` 这一条链路改成码点；
+   另外两处（细胞词库的 `isWord`、拼音词表的 `isWord`）的同类缺陷**不在本 ADR 修复范围**，
+   建议单独开 issue 统一，避免为一个词组的自学习功能扩大改动面。
+9. **`entryKindOf` 的修正会让 42,870 个非 BMP 单字的候选档位发生变化**。理论上这是修正，
+   但候选条上会看到顺序变化；若测试同学发现「某些生僻字候选位置变了」，那是预期行为，
+   不是回归。
 
 ---
 
@@ -701,11 +763,27 @@ AC-3.10 的「不得要求用户清库」从「需要验证」降级为「结构
 | --- | --- | --- |
 | 新增 `PhraseCodeDeriver` / `PhraseLearningTracker` | 纯新增，0 调用点 | 无 |
 | `WubiEngine` 新增 `fullCodeOf` | 现有调用点：`QuickLocator.kt:105`、`DictionaryViewModel.kt:67`、`AboutViewModel.kt:40`（均为构造，不受新增方法影响） | 无 |
-| `IspeechImeService` 6 处接线 | `pickCandidate:1164`、`commit:921`（新增 `source` 默认参数）、`commitDirect:948`、`openPanel:1212`/`closePanel:1268`、`toggleMode:752`/`onStartInput:399`、新增 `onUpdateSelection` | 无既有调用点必须改：`source` 默认值让 `:596`/`:905`/`:913`/`:917` 全部保持可用（默认 `WordCandidate` 与 `Direct` 在本状态机里结果相同）。仅 `pickCandidate`/`commitTop` 需显式传 `sourceOf(...)`，那是新增调用而非改动 |
+| `IspeechImeService` 6 处接线 | `pickCandidate:1164`、`commit:921`（新增 `source` 默认参数）、`commitDirect:948`、`openPanel:1212`/`closePanel:1268`、`toggleMode:752`/`onStartInput:399`、新增 `onUpdateSelection` | 无既有调用点必须改：`source` 默认值让 `:596`/`:905`/`:913`/`:917` 全部保持可用（默认 `WORD_CANDIDATE` 与 `DIRECT` 在本状态机里结果相同）。仅 `pickCandidate`/`commitTop` 需显式传 `sourceOf(...)`，那是新增调用而非改动 |
 | 新增 `onUpdateSelection` | 全仓 0 处覆写 | 无 |
 | 复用 `UserDictStore.record` | 现有调用点：`IspeechImeService.kt:1027`、`:1045` | 无 |
 | 不改 `LookupKind` | 若改会波及 `QuickPhrasesScreen:787` 的穷尽 `when`、`IspeechImeService:1051` | **本 ADR 明确不改** |
 | 不改 `CommitType` | `InputStats` 的 `MARK_COMMIT` 解析依赖枚举名 | **本 ADR 明确不改**（词组上屏仍算 `CANDIDATE`） |
+| **改** `UserDictStore.toCandidate` 的单字/词组判定口径 | 判定点共 3 处：`UserDictStore.kt:362`、`CellDictEngine.kt:100`、`IspeechImeService.kt:1051`（前者是判定源，后两者各自复制） | 抽 `entryKindOf(text)` + `codePointLength(text)`，三处共用。**行为变化**：42,870 个非 BMP 单字从「词组档」回到「单字档」（即修正）。回滚 = revert 该 PR，无需数据迁移 |
+| 新增 `codePointLength` 工具函数 | 放在 `data/UserDictStore.kt` 同级（`internal`），与 `escapeLineText` 等既有 internal 工具同文件 | 无既有调用点 |
+
+### 15.1 命名与风格校验（按仓库既有惯例，非新建规约）
+
+仓库内所有 `enum class` 的取值都是 SCREAMING_SNAKE_CASE（`KeyAction`、`Panel`、`Mode`、
+`UserDictMode`、`CommitType`、`LookupKind` 全部如此，逐个核对过），因此：
+
+- `CommitSource` 的取值必须是 `SINGLE_CHAR` / `WORD_CANDIDATE` / `DIRECT` / `PANEL` / `ASSOCIATION`；
+- 类名用 UpperCamelCase（`PhraseLearningTracker`、`PhraseCodeDeriver`），与 `UserDictStore`、
+  `CompositeEngine`、`PinyinEngine` 一致；
+- 只在模块内可见的类型用 `internal`（仓库先例：`QueryPhraseCodec`、`RemoteRuleMap`、
+  `parseUserDictLine`、`escapeLineText`）；
+- 常量集中为 `private companion object` 里的 `const val`（先例：`UserDictStore` 的
+  `BASE_WEIGHT`/`MAX_WEIGHT`、`WubiEngine` 的 `WEIGHT_RANK`），不散落魔法值——
+  因此 `5_000` 这个时间窗必须命名为 `LEARN_WINDOW_MILLIS` 而不是字面量。
 
 ---
 
