@@ -1,0 +1,17 @@
+<!--
+  Shift 键图标（英文态、未开启）：描边上箭头。
+  用矢量图标替代原先的 ⇧ 字形，避免不同 ROM 上字体字形粗细不一显得粗糙。
+  描边 2.8 / 24dp：与实心态（单击大写 / 锁定）视觉重量一致，不再显得过瘦。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M12,4 L5,11 H9 V19 H15 V11 H19 Z"
+        android:strokeColor="#1F2329"
+        android:strokeWidth="2.8"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>
