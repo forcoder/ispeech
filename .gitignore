@@ -17,3 +17,6 @@ captures/
 # Test / report artifacts
 test-results/
 reports/
+
+# 短语数据导出
+通用短语.csv
