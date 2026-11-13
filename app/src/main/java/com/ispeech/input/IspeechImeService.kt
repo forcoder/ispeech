@@ -34,6 +34,7 @@ import com.ispeech.data.UserDictStore
 import com.ispeech.data.UserDictMode
 import com.ispeech.data.FunAsrModelStore
 import com.ispeech.di.AppContainer
+import com.ispeech.engine.AssociationCommit
 import com.ispeech.engine.CompositeEngine
 import com.ispeech.engine.LookupCandidate
 import com.ispeech.engine.LookupEngine
@@ -1169,8 +1170,20 @@ class IspeechImeService : InputMethodService() {
         }
         val candidate = candidates.getOrNull(index) ?: return
         val wasAssociation = associationActive
-        if (!wasAssociation) learn(candidate)
-        commit(candidate.insertText, allowAssociation = !wasAssociation)
+        if (!wasAssociation) {
+            learn(candidate)
+            commit(candidate.insertText)
+            return
+        }
+        // 联想词以已上屏末字开头，整词上屏会把这个字重复一遍（「你」+「你好」→「你你好」）：
+        // 只上屏多出来的部分，靠已上屏的字接续
+        val text = AssociationCommit.textToCommit(lastCommit, candidate.insertText)
+        if (text.isEmpty()) {
+            clearAssociation()
+            renderCandidateView()
+            return
+        }
+        commit(text, allowAssociation = false)
     }
 
     /** 组合码带下划线，等价于 macOS 版的 marked text 样式 */

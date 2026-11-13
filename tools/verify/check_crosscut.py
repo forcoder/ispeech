@@ -23,6 +23,8 @@
 10. 分类词库（细胞词库）：CellDictStore 目录 / 索引 / 正文解析复用用户词库 -> 稳定 id +
      分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
      词典页 SAF 安装 + 启停 / 删除 + 中英文案
+11. 联想词上屏去重：AssociationCommit 规则 -> 服务 pickCandidate 联想分支接线 ->
+     规则本身用 Python 复刻跑用例（「你」+「你好」不能变「你你好」）
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -75,6 +77,7 @@ PHRASE_USAGE = JAVA / "data" / "PhraseUsageStore.kt"
 USER_DICT_STORE = JAVA / "data" / "UserDictStore.kt"
 USER_DICT_ENGINE = JAVA / "engine" / "UserDictEngine.kt"
 CELL_DICT_STORE = JAVA / "data" / "CellDictStore.kt"
+ASSOCIATION_COMMIT = JAVA / "engine" / "AssociationCommit.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
@@ -1571,6 +1574,76 @@ def check_cell_dict_chain() -> None:
     )
 
 
+
+# ═════════════════════════════════════════════════════════════
+
+def check_association_commit() -> None:
+    """11. 联想词上屏去重：「你」上屏后点联想词「你好」不能得到「你你好」."""
+    commit = read(ASSOCIATION_COMMIT)
+    service = read(SERVICE)
+    check(
+        "object AssociationCommit" in commit,
+        "AssociationCommit 规则存在",
+        f"{rel(ASSOCIATION_COMMIT)} 缺失或没有 AssociationCommit",
+    )
+    check(
+        "candidate.startsWith(lastCommit)" in commit and "substring(lastCommit.length)" in commit,
+        "规则：联想词以已上屏文本开头时只补多出来的部分",
+        "AssociationCommit.textToCommit 未实现「去掉已上屏前缀」",
+    )
+    pick = re.search(r"private fun pickCandidate\(.*?\n    \}", service, re.S)
+    body = pick.group(0) if pick else ""
+    check(
+        "AssociationCommit.textToCommit" in body,
+        "pickCandidate 的联想分支走 AssociationCommit",
+        "pickCandidate 未调用 AssociationCommit.textToCommit（联想词仍会整词上屏）",
+    )
+    check(
+        "commit(text, allowAssociation = false)" in body,
+        "联想词上屏后不再接续联想（沿用原语义，只改上屏文本）",
+        "pickCandidate 联想分支的上屏调用被改动，需人工确认",
+    )
+
+    def text_to_commit(last_commit: str, candidate: str) -> str:
+        """Python 复刻 AssociationCommit.textToCommit（改 Kotlin 时同步改这里）."""
+        if not last_commit or not candidate:
+            return candidate
+        if candidate == last_commit:
+            return ""
+        if len(candidate) <= len(last_commit):
+            return candidate
+        return candidate[len(last_commit):] if candidate.startswith(last_commit) else candidate
+
+    cases = [
+        # 末字单字上屏 -> 联想词只补后半截
+        (("你", "你好"), "好"),
+        (("你", "你们"), "们"),
+        # 词组整词前缀重合 -> 只补多出来的部分
+        (("你好", "你好吗"), "吗"),
+        (("天气", "天气预报"), "预报"),
+        # 无前缀重合 -> 整词上屏（用户词库「包含」联想 / 词组接续）
+        (("气", "天气"), "天气"),
+        (("天气", "气温"), "气温"),
+        # 与已上屏内容相同 -> 不重复写
+        (("天气", "天气"), ""),
+        # 无已上屏文本 -> 原样
+        (("", "你好"), "你好"),
+    ]
+    bad = [(args, want, text_to_commit(*args)) for args, want in cases if text_to_commit(*args) != want]
+    check(
+        not bad,
+        f"去重规则用例全过（{len(cases)} 组：单字接续 / 整词重合 / 无重合 / 完全相同）",
+        f"去重规则用例不符：{bad}",
+    )
+
+    matrix = read(ROOT / "docs" / "sogou-feature-matrix.md")
+    check(
+        "联想" in matrix and "重复" in matrix,
+        "功能矩阵同步「联想词上屏不重复已上屏文字」口径",
+        "docs/sogou-feature-matrix.md 未写联想词去重口径",
+    )
+
+
 # ═════════════════════════════════════════════════════════════
 
 def main() -> int:
@@ -1595,6 +1668,8 @@ def main() -> int:
     check_user_dict_chain()
     print("-- 10. 分类词库（细胞词库）--")
     check_cell_dict_chain()
+    print("-- 11. 联想词上屏去重 --")
+    check_association_commit()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 
