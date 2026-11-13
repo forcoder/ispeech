@@ -32,15 +32,22 @@ import com.ispeech.data.Punctuation
 import com.ispeech.data.PunctuationConverter
 import com.ispeech.data.UserDictStore
 import com.ispeech.data.UserDictMode
+import com.ispeech.data.codePointLength
 import com.ispeech.data.FunAsrModelStore
 import com.ispeech.di.AppContainer
 import com.ispeech.engine.CompositeEngine
+import com.ispeech.engine.CommitSource
 import com.ispeech.engine.LookupCandidate
 import com.ispeech.engine.LookupEngine
 import com.ispeech.engine.LookupKind
+import com.ispeech.engine.PhraseLearningDecision
+import com.ispeech.engine.PhraseLearningTracker
+import com.ispeech.engine.PhraseSkipReason
 import com.ispeech.engine.PinyinEngine
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickLocator
+import com.ispeech.engine.WubiEngine
+import com.ispeech.engine.isSelfCausedSelectionChange
 import com.ispeech.input.keyboard.KeyAction
 import com.ispeech.input.keyboard.KeyDef
 import com.ispeech.input.keyboard.KeyboardLayoutKind
@@ -116,6 +123,12 @@ class IspeechImeService : InputMethodService() {
         private const val T9_MAX_DIGITS = 9
 
         /**
+         * 本服务写完 InputConnection 后的光标宽限窗：窗内不带组合区的 `onUpdateSelection`
+         * 一律视为自因，不算「用户移动光标」（ADR-0001 §1、F1）。
+         */
+        private const val SELF_WRITE_GRACE_MILLIS = 300L
+
+        /**
          * 九宫格一次最多展开的字母组合数。
          *
          * 每个组合都要过一次词库，9 位数字理论上 4^9 组；截断保证长数字串下的单次查询可控，
@@ -150,6 +163,9 @@ class IspeechImeService : InputMethodService() {
     private enum class Panel { NONE, QUICK_PHRASE, CLIPBOARD, SWITCH_IME, SETTINGS, VOICE, AI_REPLY }
 
     private var engine: CompositeEngine? = null
+
+    /** 五笔词库引擎：词组学习的编码推导（[WubiEngine.fullCodeOf]）与「系统已有不学」都要用它。 */
+    private var wubiEngine: WubiEngine? = null
 
     /** 键盘设置（高度、候选数、标点、联想、学习…），随 DataStore 实时更新 */
     private var settings: KeyboardSettings = KeyboardSettings()
@@ -239,6 +255,37 @@ class IspeechImeService : InputMethodService() {
     /** 候选条编码区覆盖显示（如「AI回复」「联想」「语音」） */
     private var codeOverride: String? = null
 
+    /**
+     * 词组自学习状态机（ADR-0001）：只认「刚上屏了一段文本」，成词判定与编码推导全在这里。
+     * 服务侧只负责喂事件、写库与打日志，不含任何判定逻辑。
+     */
+    private val phraseTracker = PhraseLearningTracker(
+        codeOf = { char -> wubiEngine?.fullCodeOf(char) },
+        systemHasWord = { word -> wubiEngine?.hasWord(word) == true },
+    )
+
+    /** 本次进程内词组学习的跳过计数（只存内存，见 ADR-0001 §10）。 */
+    private val phraseSkips = java.util.concurrent.ConcurrentHashMap<PhraseSkipReason, Int>()
+
+    /**
+     * 自因过滤的容差：本服务每次写 InputConnection 都会触发一次 `onUpdateSelection`，
+     * 用「与上次已知光标的距离」判断是不是自己造成的。默认 0 即只比 `newSelStart`；
+     * 真机若发现同一 commit 会连着回多次且位置有偏移，再调大（ADR-0001 §1 降级口径）。
+     */
+    private var selectionTolerance: Int = 0
+
+    /** 最近一次已知的宿主光标位置；-1 表示尚未观测到（此时不判中断）。 */
+    private var lastKnownCursor: Int = -1
+
+    /**
+     * 本服务上一次写 InputConnection 的时刻（`SystemClock.uptimeMillis()`）。
+     *
+     * 上屏后光标必然前移、组合区被替换成汉字时光标还可能后移（`klge` → `喂`），
+     * 只比位置会把每一次正常上屏都误判成「用户移动光标」，于是词组永远学不到（ADR-0001 F1）。
+     * 因此自己的写操作后留一个短宽限窗：窗内不带组合区的回调一律视为自因。
+     */
+    private var selfWriteAt: Long = 0
+
     // ── 语音输入状态 ──
 
     /** 系统语音识别封装（onCreate 主线程创建，onDestroy 释放） */
@@ -278,6 +325,7 @@ class IspeechImeService : InputMethodService() {
             // 期间设置又改过：以最新代次为准，本次结果丢弃（与 refreshEngineIfStale 同规则）
             if (built == null || engineGeneration != AppContainer.engineGeneration()) return@launch
             engine = built
+            wubiEngine = built.engines.firstOrNull { it is WubiEngine } as? WubiEngine
             if (buffer.isNotEmpty()) refreshCandidates() else renderCandidateView()
         }
         // SpeechRecognizer 必须在主线程创建，onCreate 即在主线程
@@ -593,7 +641,8 @@ class IspeechImeService : InputMethodService() {
             val index = keyCode - KeyEvent.KEYCODE_1
             when {
                 index < candidates.size -> pickCandidate(index)
-                candidates.isEmpty() && buffer.isNotEmpty() -> commit(buffer, allowAssociation = false)
+                candidates.isEmpty() && buffer.isNotEmpty() ->
+                    commit(buffer, allowAssociation = false, source = CommitSource.DIRECT)
             }
             return true
         }
@@ -751,6 +800,8 @@ class IspeechImeService : InputMethodService() {
     /** 输入态循环切换：五笔 → 拼音 → 英文 → 五笔（字母页左下角「中/英」键）。 */
     private fun toggleMode() {
         if (buffer.isNotEmpty()) commitTop()
+        // 换输入态（五笔 → 拼音 → 英文）后两跳不再同属一套编码空间，上一跳作废
+        phraseTracker.reset()
         mode = when (mode) {
             Mode.WUBI -> Mode.PINYIN
             Mode.PINYIN -> Mode.ENGLISH
@@ -910,15 +961,20 @@ class IspeechImeService : InputMethodService() {
         if (buffer.isEmpty()) return
         val top = candidates.firstOrNull()
         if (top == null) {
-            commit(buffer, allowAssociation = false)
+            // 无候选时上屏的是 `klge` 这样的原始编码，不是「选了一个单字」——按中断处理
+            commit(buffer, allowAssociation = false, source = CommitSource.DIRECT)
             return
         }
         learn(top)
-        commit(top.insertText)
+        commit(top.insertText, source = sourceOf(top))
     }
 
     /** 上屏文本，清空组合状态；[allowAssociation] 为真时接着给联想候选 */
-    private fun commit(text: String, allowAssociation: Boolean = true) {
+    private fun commit(
+        text: String,
+        allowAssociation: Boolean = true,
+        source: CommitSource = CommitSource.WORD_CANDIDATE,
+    ) {
         if (text.isEmpty()) return
         // 快捷短语面板打开时，选中的候选（汉字 / 英文）写入面板搜索框而不是宿主输入框：
         // 这样中文可以正常输入，也不会把临时搜索词带进聊天框。
@@ -926,6 +982,9 @@ class IspeechImeService : InputMethodService() {
             setPanelKeyword(panelKeyword + text)
             return
         }
+        // 只有「单字候选上屏」可能参与词组学习；同时在两跳之间出现任何其它上屏都算中断
+        onPhraseCommit(text, source)
+        markSelfWrite()
         val out = convertHan(text)
         currentInputConnection?.commitText(out, 1)
         buffer = ""
@@ -951,6 +1010,9 @@ class IspeechImeService : InputMethodService() {
             setPanelKeyword(panelKeyword + text)
             return
         }
+        // 标点 / 空格 / 换行 / 英文 / emoji / 语音与「拼」无关，出现即让词组学习失效（AC-3.3）
+        phraseTracker.onInterrupt()
+        markSelfWrite()
         val out = convertHan(text)
         currentInputConnection?.commitText(out, 1)
         lastCommit = out
@@ -1054,6 +1116,92 @@ class IspeechImeService : InputMethodService() {
         LookupKind.PINYIN -> UserDictMode.PINYIN
         LookupKind.PHRASE -> null
         LookupKind.QUICKAPPLY -> null
+    }
+
+    /** 候选 → 词组学习的上屏来源：只有「五笔单字候选」算 [CommitSource.SINGLE_CHAR]（ADR-0001 §1）。 */
+    private fun sourceOf(candidate: LookupCandidate): CommitSource =
+        if (candidate.kind == LookupKind.WUBI && codePointLength(candidate.insertText) == 1) {
+            CommitSource.SINGLE_CHAR
+        } else {
+            CommitSource.WORD_CANDIDATE
+        }
+
+    // ──────────────────────────────────────────────
+    //  词组自学习（VOCA-65 条目 3 / ADR-0001）
+    // ──────────────────────────────────────────────
+
+    /** 把一次上屏喂给 tracker；成词则由 [learnPhrase] 写库。判定逻辑全在 tracker 内。 */
+    private fun onPhraseCommit(text: String, source: CommitSource) {
+        val decision = phraseTracker.onCommit(text, source)
+        if (decision != null) {
+            learnPhrase(decision)
+            return
+        }
+        val skipped = phraseTracker.lastSkip ?: return
+        val count = phraseSkips.merge(skipped.reason, 1, Int::plus) ?: 1
+        // 推导不出是 ADR §9 A3 风险的早期信号（推导规则与词库口径漂移），用 WARN
+        if (skipped.reason == PhraseSkipReason.UNDECIDABLE) {
+            Log.w(TAG, "phrase_learn undecidable first=${skipped.first} second=${skipped.second} count=$count")
+        } else {
+            Log.d(TAG, "phrase_learn skipped reason=${skipped.reason.name.lowercase()} count=$count")
+        }
+    }
+
+    /**
+     * 成词写库：复用 [UserDictStore.record]，写入 `wb` 库的 3 列格式（count 从 1 起）。
+     *
+     * 学习开关只在「决定写库」这一刻检查——开关语义是「要不要落盘」，不是「要不要识别」，
+     * 在事件入口短路会让切换瞬间的状态不自洽（ADR-0001 §1 失败分支）。
+     * 写盘必须走 `Dispatchers.IO`：这是 AC-3.11「连续 10 次学习无 ANR」的实现前提。
+     */
+    private fun learnPhrase(decision: PhraseLearningDecision) {
+        if (!settings.learning) {
+            Log.d(TAG, "phrase_learn skipped reason=disabled")
+            return
+        }
+        Log.i(TAG, "phrase_learn commit code=${decision.code} text=${decision.text}")
+        val store: UserDictStore = AppContainer.userDict(this)
+        serviceScope.launch(Dispatchers.IO) {
+            store.record(decision.code, decision.text, UserDictMode.WUBI)
+        }
+    }
+
+    /**
+     * 宿主光标移动：非本服务自因的变化一律让词组学习失效（AC-3.4 后半）。
+     *
+     * 本服务每次 commit / setComposingText 都会触发一次回调，所以不能「收到回调就中断」，
+     * 必须用 [lastKnownCursor] 区分自因与他因；判定本身抽在纯函数
+     * [isSelfCausedSelectionChange] 里，可 JVM 表驱动单测。
+     */
+    override fun onUpdateSelection(
+        oldSelStart: Int,
+        oldSelEnd: Int,
+        newSelStart: Int,
+        newSelEnd: Int,
+        candidatesStart: Int,
+        candidatesEnd: Int,
+    ) {
+        super.onUpdateSelection(
+            oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd,
+        )
+        // 带组合区（candidatesStart >= 0）的回调必然是本服务自己 setComposingText 造成的：
+        // 用户正在打下一个字的编码，不能当成「移动光标」把上一跳清掉。
+        // 刚写完 InputConnection 的宽限窗内同理——那是上屏本身的光标前移，不是用户操作。
+        val composing = candidatesStart >= 0
+        val withinSelfWrite =
+            android.os.SystemClock.uptimeMillis() - selfWriteAt <= SELF_WRITE_GRACE_MILLIS
+        if (!composing && !withinSelfWrite &&
+            !isSelfCausedSelectionChange(newSelStart, lastKnownCursor, selectionTolerance)
+        ) {
+            phraseTracker.onInterrupt()
+            Log.d(TAG, "phrase_learn skipped reason=interrupt")
+        }
+        lastKnownCursor = newSelStart
+    }
+
+    /** 记下「刚写了一笔」，供 [onUpdateSelection] 的自因判定使用。 */
+    private fun markSelfWrite() {
+        selfWriteAt = android.os.SystemClock.uptimeMillis()
     }
 
     /** 词库编码长度上限：五笔码 4 位、拼音串最多 12 位（与 [MAX_PINYIN_LENGTH] 一致）。 */
@@ -1170,7 +1318,8 @@ class IspeechImeService : InputMethodService() {
         val candidate = candidates.getOrNull(index) ?: return
         val wasAssociation = associationActive
         if (!wasAssociation) learn(candidate)
-        commit(candidate.insertText, allowAssociation = !wasAssociation)
+        val source = if (wasAssociation) CommitSource.ASSOCIATION else sourceOf(candidate)
+        commit(candidate.insertText, allowAssociation = !wasAssociation, source = source)
     }
 
     /** 组合码带下划线，等价于 macOS 版的 marked text 样式 */
@@ -1208,12 +1357,13 @@ class IspeechImeService : InputMethodService() {
     //  面板：快捷短语 / 剪贴板
     // ──────────────────────────────────────────────
 
-    /** 打开 / 关闭面板（重复点击同一面板即关闭） */
+    /** openPanel 前先让词组学习失效：面板切换算中断（AC-3.4） */
     private fun openPanel(target: Panel) {
         if (panel == target) {
             closePanel()
             return
         }
+        phraseTracker.onInterrupt()
         commitPending()
         clearAssociation()
         panel = target
@@ -1267,6 +1417,7 @@ class IspeechImeService : InputMethodService() {
 
     private fun closePanel() {
         if (panel == Panel.NONE) return
+        phraseTracker.onInterrupt()
         panel = Panel.NONE
         panelKeyword = ""
         quickPhrasePanel?.setKeyword("")
@@ -2087,6 +2238,9 @@ class IspeechImeService : InputMethodService() {
     /** 上屏 AI 回复；若输入框仍是生成前原文，先删除原文（替换语义）。 */
     private fun commitAiReply(index: Int = 0) {
         val candidate = candidates.getOrNull(index) ?: return
+        // AI 回复是整段文本上屏，且不经过 [commit]：显式中断，避免它与上一跳单字凑成词
+        phraseTracker.onInterrupt()
+        markSelfWrite()
         val ic = currentInputConnection
         if (ic != null && aiSourceLen > 0) {
             val before = ic.getTextBeforeCursor(aiSourceLen, 0)?.toString().orEmpty()
@@ -2160,6 +2314,7 @@ class IspeechImeService : InputMethodService() {
             // 期间又改了一次设置：以最新代次为准，本次结果丢弃
             if (generation != AppContainer.engineGeneration()) return@launch
             engine = latest
+            wubiEngine = latest.engines.firstOrNull { it is WubiEngine } as? WubiEngine
             if (buffer.isNotEmpty()) refreshCandidates()
         }
     }
@@ -2208,6 +2363,10 @@ class IspeechImeService : InputMethodService() {
         if (isEmpty()) this else filter { renderable(it.insertText) }
 
     private fun resetState() {
+        // 换输入框 / 换输入态：上一跳作废，且光标基线要重新观测
+        phraseTracker.reset()
+        lastKnownCursor = -1
+        selfWriteAt = 0
         buffer = ""
         t9Digits = ""
         t9Seq++

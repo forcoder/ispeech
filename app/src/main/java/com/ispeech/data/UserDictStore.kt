@@ -359,10 +359,29 @@ private fun UserDictEntry.toCandidate(): LookupCandidate = LookupCandidate(
     insertText = text,
     weight = weight,
     kind = when (mode) {
-        UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE
+        UserDictMode.WUBI -> entryKindOf(text)
         UserDictMode.PINYIN -> LookupKind.PINYIN
     },
 )
+
+/**
+ * 码点长度：不能用 [String.length]——`wubi86.dict` 的 70,391 个单字里有 42,870 个是非 BMP 字符
+ * （`𦟖`、`𡊃` 等），UTF-16 下 `length == 2`，会被错判成词组档。
+ */
+internal fun codePointLength(text: String): Int =
+    if (text.isEmpty()) 0 else text.codePointCount(0, text.length)
+
+/**
+ * 五笔模式下用户词条属于哪个候选档：码点长度 1 为单字档，其余为词组档。
+ *
+ * 不变量：`UserDictMode.WUBI` 下 `codePointLength(text) == 1 ⟺ 单字档，> 1 ⟺ 词组档`。
+ * 该不变量由 `PhraseCodeDeriverTest#单字与词组档按码点判定` 守护；若将来需要打破它，必须加显式列并按 ADR-0001 §4「迁移方式」
+ * 执行，不允许在调用点各自特判。
+ *
+ * 用户词库与分类词库共用这一判定，避免两处各写一遍 `text.length == 1` 而漂移。
+ */
+internal fun entryKindOf(text: String): LookupKind =
+    if (codePointLength(text) == 1) LookupKind.WUBI else LookupKind.PHRASE
 
 /** 单行文本转义：换行 / 回车 / 制表符 / 反斜杠写成字面量，保证一条记录占一行。 */
 internal fun escapeLineText(text: String): String {
