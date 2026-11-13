@@ -38,3 +38,7 @@ AGENTS.md
 
 # 短语数据导出
 通用短语.csv
+.claude/skills/
+
+# Multica daemon 注入的 agent 说明（每个 worktree 单独生成）
+CLAUDE.md
