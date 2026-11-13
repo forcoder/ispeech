@@ -2,6 +2,7 @@ package com.ispeech.engine
 
 import com.ispeech.data.CellDictEntry
 import com.ispeech.data.UserDictMode
+import com.ispeech.data.entryKindOf
 
 /**
  * 分类词库（细胞词库）引擎：把用户安装的本地词库并入候选排序与联想。
@@ -97,7 +98,7 @@ private fun CellDictEntry.toCandidate(): LookupCandidate = LookupCandidate(
     insertText = text,
     weight = CELL_DICT_WEIGHT,
     kind = when (mode) {
-        UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE
+        UserDictMode.WUBI -> entryKindOf(text)
         UserDictMode.PINYIN -> LookupKind.PINYIN
     },
 )

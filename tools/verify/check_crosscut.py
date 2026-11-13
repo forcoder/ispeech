@@ -23,8 +23,13 @@
 10. 分类词库（细胞词库）：CellDictStore 目录 / 索引 / 正文解析复用用户词库 -> 稳定 id +
      分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
      词典页 SAF 安装 + 启停 / 删除 + 中英文案
-11. 候选条字重（VOCA-56）：候选词必须常规字重（不加粗），首选仍靠橙色 + 底色区分，
+11. 中文输入法（默认拼音 / 五笔 + 中英切换）：ChineseInputMethod -> SettingsStore ->
+     KeyboardViewModel / 设置页 / 内置面板 -> InputModePolicy
+12. 候选条字重（VOCA-56）：候选词必须常规字重（不加粗），首选仍靠橙色 + 底色区分，
      且类注释口径与实现一致
+13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：PhraseCodeDeriver / PhraseLearningTracker 纯函数
+     -> WubiEngine 反向索引 -> 服务接线（onCommit / onInterrupt / reset / onUpdateSelection）
+     -> 写盘线程与学习开关
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -1482,9 +1487,9 @@ def check_cell_dict_chain() -> None:
     )
     check(
         "internal const val CELL_DICT_WEIGHT = 80_000" in cell_engine
-        and "UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE" in cell_engine
+        and "UserDictMode.WUBI -> entryKindOf(text)" in cell_engine
         and "UserDictMode.PINYIN -> LookupKind.PINYIN" in cell_engine,
-        "权重 8 万（让位用户词 / 压过系统词），档位与用户词库一致",
+        "权重 8 万（让位用户词 / 压过系统词），档位与用户词库共用 entryKindOf",
         f"{rel(CELL_DICT_ENGINE)} 权重或档位映射缺失",
     )
     check(
@@ -1712,6 +1717,69 @@ def check_chinese_input_method() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
+# 13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：纯函数 + 接线 + 写盘线程
+# ═════════════════════════════════════════════════════════════
+
+def check_phrase_learning() -> None:
+    service = read(SERVICE)
+    deriver = read(JAVA / "engine" / "PhraseCodeDeriver.kt")
+    tracker = read(JAVA / "engine" / "PhraseLearningTracker.kt")
+    wubi = read(JAVA / "engine" / "WubiEngine.kt")
+    check(
+        "internal object PhraseCodeDeriver" in deriver
+        and "fun derive(first: String, second: String" in deriver
+        and "fun isSingleCjk(text: String)" in deriver,
+        "PhraseCodeDeriver 为纯函数对象（无 Android 依赖）",
+        f"{rel(JAVA / 'engine' / 'PhraseCodeDeriver.kt')} 缺少纯函数判定入口",
+    )
+    check(
+        "android." not in tracker and "import com.ispeech.data.codePointLength" in tracker,
+        "PhraseLearningTracker 零 Android 依赖（可 JVM 单测）",
+        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 引入了 Android 依赖",
+    )
+    check(
+        "const val LEARN_WINDOW_MILLIS = 5_000L" in tracker
+        and "private val windowMillis: Long = LEARN_WINDOW_MILLIS" in tracker,
+        "时间窗 W 是构造参数（默认 5 s），非写死",
+        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 时间窗未参数化",
+    )
+    check(
+        "fun fullCodeOf(char: String): String?" in wubi and "fun hasWord(word: String): Boolean" in wubi,
+        "WubiEngine 提供 fullCodeOf / hasWord（推导与「系统已有不学」）",
+        f"{rel(JAVA / 'engine' / 'WubiEngine.kt')} 缺少反向索引接口",
+    )
+    check(
+        "phraseTracker.onCommit(text, source)" in service
+        and "phraseTracker.onInterrupt()" in service
+        and "phraseTracker.reset()" in service,
+        "服务侧三个 tracker 调用点（onCommit / onInterrupt / reset）齐全",
+        f"{rel(SERVICE)} 词组学习接线不全",
+    )
+    check(
+        "override fun onUpdateSelection(" in service
+        and "isSelfCausedSelectionChange(newSelStart, lastKnownCursor, selectionTolerance)" in service,
+        "AC-3.4 光标分支：新增 onUpdateSelection 并走自因过滤",
+        f"{rel(SERVICE)} 缺少 onUpdateSelection 覆写或自因过滤",
+    )
+    phrase_region = function_region(service, r"private fun learnPhrase\(decision: PhraseLearningDecision\)")
+    check(
+        "serviceScope.launch(Dispatchers.IO)" in phrase_region,
+        "AC-3.11 词组写盘走 Dispatchers.IO",
+        f"{rel(SERVICE)} learnPhrase 未走 IO 线程（主线程会 ANR）",
+    )
+    check(
+        "if (!settings.learning)" in phrase_region,
+        "AC-3.8 复用「用户词频学习」开关，未新增设置项",
+        f"{rel(SERVICE)} learnPhrase 未检查 settings.learning",
+    )
+    check(
+        "store.record(decision.code, decision.text, UserDictMode.WUBI)" in phrase_region,
+        "词组写入 wb 用户词库（复用 record，格式不变）",
+        f"{rel(SERVICE)} 词组未写入 wb 库",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
 
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
@@ -1739,6 +1807,8 @@ def main() -> int:
     check_chinese_input_method()
     print("-- 12. 候选条字重（VOCA-56）--")
     check_candidate_style()
+    print("-- 13. 词组自学习（VOCA-65 条目 3）--")
+    check_phrase_learning()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 
