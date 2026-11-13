@@ -23,7 +23,11 @@
 10. 分类词库（细胞词库）：CellDictStore 目录 / 索引 / 正文解析复用用户词库 -> 稳定 id +
      分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
      词典页 SAF 安装 + 启停 / 删除 + 中英文案
-11. 词组自学习（VOCA-65 条目 3 / ADR-0001）：PhraseCodeDeriver / PhraseLearningTracker 纯函数
+11. 中文输入法（默认拼音 / 五笔 + 中英切换）：ChineseInputMethod -> SettingsStore ->
+     KeyboardViewModel / 设置页 / 内置面板 -> InputModePolicy
+12. 候选条字重（VOCA-56）：候选词必须常规字重（不加粗），首选仍靠橙色 + 底色区分，
+     且类注释口径与实现一致
+13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：PhraseCodeDeriver / PhraseLearningTracker 纯函数
      -> WubiEngine 反向索引 -> 服务接线（onCommit / onInterrupt / reset / onUpdateSelection）
      -> 写盘线程与学习开关
 
@@ -65,6 +69,8 @@ CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
 
 QUICK_SCREEN = JAVA / "settings" / "QuickPhrasesScreen.kt"
 SETTINGS_STORE = JAVA / "settings" / "store" / "SettingsStore.kt"
+CHINESE_INPUT_METHOD = JAVA / "settings" / "store" / "ChineseInputMethod.kt"
+INPUT_MODE = JAVA / "input" / "InputMode.kt"
 KEYBOARD_SETTINGS = JAVA / "settings" / "store" / "KeyboardSettings.kt"
 KEYBOARD_VM = JAVA / "settings" / "keyboard" / "KeyboardViewModel.kt"
 KEYBOARD_SCREEN = JAVA / "settings" / "KeyboardScreen.kt"
@@ -92,6 +98,8 @@ NAV_GRAPH = JAVA / "settings" / "nav" / "IspeechNavGraph.kt"
 HOME_SCREEN = JAVA / "settings" / "HomeScreen.kt"
 MAIN_ACTIVITY = JAVA / "settings" / "MainActivity.kt"
 BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
+
+INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VERIFY_DIR = ROOT / "tools" / "verify"
 
@@ -1251,64 +1259,7 @@ def check_user_dict_chain() -> None:
         f"dictModeOf 返回 null 的分支数不是 2：{mode_region.count('-> null')}",
     )
 
-    # 9.7 词组自学习（VOCA-65 条目 3 / ADR-0001）：纯函数 + 接线 + 写盘线程
-    deriver = read(JAVA / "engine" / "PhraseCodeDeriver.kt")
-    tracker = read(JAVA / "engine" / "PhraseLearningTracker.kt")
-    wubi = read(JAVA / "engine" / "WubiEngine.kt")
-    check(
-        "internal object PhraseCodeDeriver" in deriver
-        and "fun derive(first: String, second: String" in deriver
-        and "fun isSingleCjk(text: String)" in deriver,
-        "PhraseCodeDeriver 为纯函数对象（无 Android 依赖）",
-        f"{rel(JAVA / 'engine' / 'PhraseCodeDeriver.kt')} 缺少纯函数判定入口",
-    )
-    check(
-        "android." not in tracker and "import com.ispeech.data.codePointLength" in tracker,
-        "PhraseLearningTracker 零 Android 依赖（可 JVM 单测）",
-        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 引入了 Android 依赖",
-    )
-    check(
-        "const val LEARN_WINDOW_MILLIS = 5_000L" in tracker
-        and "private val windowMillis: Long = LEARN_WINDOW_MILLIS" in tracker,
-        "时间窗 W 是构造参数（默认 5 s），非写死",
-        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 时间窗未参数化",
-    )
-    check(
-        "fun fullCodeOf(char: String): String?" in wubi and "fun hasWord(word: String): Boolean" in wubi,
-        "WubiEngine 提供 fullCodeOf / hasWord（推导与「系统已有不学」）",
-        f"{rel(JAVA / 'engine' / 'WubiEngine.kt')} 缺少反向索引接口",
-    )
-    check(
-        "phraseTracker.onCommit(text, source)" in service
-        and "phraseTracker.onInterrupt()" in service
-        and "phraseTracker.reset()" in service,
-        "服务侧三个 tracker 调用点（onCommit / onInterrupt / reset）齐全",
-        f"{rel(SERVICE)} 词组学习接线不全",
-    )
-    check(
-        "override fun onUpdateSelection(" in service
-        and "isSelfCausedSelectionChange(newSelStart, lastKnownCursor, selectionTolerance)" in service,
-        "AC-3.4 光标分支：新增 onUpdateSelection 并走自因过滤",
-        f"{rel(SERVICE)} 缺少 onUpdateSelection 覆写或自因过滤",
-    )
-    phrase_region = function_region(service, r"private fun learnPhrase\(decision: PhraseLearningDecision\)")
-    check(
-        "serviceScope.launch(Dispatchers.IO)" in phrase_region,
-        "AC-3.11 词组写盘走 Dispatchers.IO",
-        f"{rel(SERVICE)} learnPhrase 未走 IO 线程（主线程会 ANR）",
-    )
-    check(
-        "if (!settings.learning)" in phrase_region,
-        "AC-3.8 复用「用户词频学习」开关，未新增设置项",
-        f"{rel(SERVICE)} learnPhrase 未检查 settings.learning",
-    )
-    check(
-        "store.record(decision.code, decision.text, UserDictMode.WUBI)" in phrase_region,
-        "词组写入 wb 用户词库（复用 record，格式不变）",
-        f"{rel(SERVICE)} 词组未写入 wb 库",
-    )
-
-    # 9.8 设置页删除带模式；快捷定位器可指定模式
+    # 9.7 设置页删除带模式；快捷定位器可指定模式
     check(
         "store.remove(entry.code, entry.text, entry.mode)" in keyboard_vm,
         "设置页删除用户词条时带上模式",
@@ -1320,7 +1271,7 @@ def check_user_dict_chain() -> None:
         f"{rel(QUICK_LOCATOR)} 未支持 userDictMode",
     )
 
-    # 9.9 导入 / 导出（S2）：store -> ViewModel -> SAF 选择器 -> 文案
+    # 9.8 导入 / 导出（S2）：store -> ViewModel -> SAF 选择器 -> 文案
     dictionary_vm = read(DICTIONARY_VM)
     dictionary_screen = read(DICTIONARY_SCREEN)
     check(
@@ -1632,6 +1583,204 @@ def check_cell_dict_chain() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
+# 11. 候选条字重（VOCA-56）：候选词不加粗
+# ═════════════════════════════════════════════════════════════
+
+def check_candidate_style() -> None:
+    view = read(CANDIDATE_VIEW)
+    item_region = function_region(view, r"private fun createItemView\(")
+
+    # 11.1 候选文本用常规字重（Typeface.DEFAULT），不能再回到 DEFAULT_BOLD
+    check(
+        "typeface = Typeface.DEFAULT_BOLD" not in item_region
+        and "typeface = Typeface.DEFAULT" in item_region,
+        "候选词文本常规字重（createItemView 用 Typeface.DEFAULT）",
+        f"{rel(CANDIDATE_VIEW)} createItemView 仍把候选词设为粗体"
+        "（VOCA-56 要求候选词不加粗）",
+    )
+
+    # 11.2 首选 / 非首选只靠颜色 + 底色区分，字重保持一致
+    check(
+        "setTextColor(if (highlighted) PICKED_TEXT else TEXT_PRIMARY)" in item_region,
+        "首选与非首选靠颜色 / 底色区分（字重一致）",
+        f"{rel(CANDIDATE_VIEW)} 候选高亮不再走颜色区分（首选识别会退化）",
+    )
+
+    # 11.3 KDoc 口径：注释里不能仍声明候选「加粗」，否则下一次改样式会被误导
+    #（允许否定句「不加粗」——它记录的是这次的决定本身）
+    kdoc = view.split("class CandidateView", 1)[0]
+    bold_claims = [ln for ln in kdoc.splitlines() if "加粗" in ln and "不加粗" not in ln]
+    check(
+        not bold_claims,
+        "CandidateView 类注释已去掉「加粗」口径",
+        f"{rel(CANDIDATE_VIEW)} 类注释仍声明候选「加粗」，与实现不符：{bold_claims}",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
+
+def check_chinese_input_method() -> None:
+    """新增中文输入法设置：设置项 -> 持久化 -> UI / 内置面板 -> 中英切换策略。"""
+    enum_src = read(CHINESE_INPUT_METHOD)
+    check(
+        "enum class ChineseInputMethod" in enum_src
+        and 'PINYIN("拼音")' in enum_src
+        and 'WUBI("五笔")' in enum_src
+        and "?: PINYIN" in enum_src,
+        "ChineseInputMethod 枚举含拼音 / 五笔，未知值回落拼音",
+        f"{rel(CHINESE_INPUT_METHOD)} 枚举或默认值缺失",
+    )
+
+    store = read(SETTINGS_STORE)
+    check(
+        'stringPreferencesKey("input_method_mode")' in store
+        and "fun chineseInputMethodFlow(" in store
+        and "ChineseInputMethod.parse(" in store
+        and "fun setChineseInputMethod(" in store
+        and "fun chineseInputMethod(" in store,
+        "SettingsStore 提供中文输入法 flow / 阻塞读取 / 写入（沿用旧 key）",
+        f"{rel(SETTINGS_STORE)} 中文输入法持久化未闭环",
+    )
+
+    vm = read(KEYBOARD_VM)
+    check(
+        "chineseInputMethodFlow(app)" in vm
+        and "val chineseInputMethod" in vm
+        and "fun setChineseInputMethod(" in vm,
+        "KeyboardViewModel 订阅并暴露中文输入法设置",
+        f"{rel(KEYBOARD_VM)} 未接中文输入法状态",
+    )
+
+    screen = read(KEYBOARD_SCREEN)
+    check(
+        'KeyboardCardTitle("中文输入法")' in screen
+        and "ChineseInputMethod.entries" in screen
+        and "viewModel.setChineseInputMethod(it)" in screen,
+        "设置页新增「中文输入法」卡片并接单选",
+        f"{rel(KEYBOARD_SCREEN)} 缺少中文输入法卡片",
+    )
+
+    panel = read(SETTINGS_PANEL)
+    check(
+        "onChineseInputMethodChange" in panel
+        and "R.string.panel_chinese_input_method" in panel
+        and "ChineseInputMethod.entries" in panel,
+        "键盘内置设置面板新增中文输入法切换行",
+        f"{rel(SETTINGS_PANEL)} 未接中文输入法行",
+    )
+
+    service = read(SERVICE)
+    check(
+        "InputModePolicy.toggle(mode, chineseInputMethod)" in service
+        and "InputModePolicy.chineseMode(chineseInputMethod)" in service
+        and "applyChineseInputMethodChange" in service,
+        "输入法服务按设置做「中文 ⇄ 英文」两态切换",
+        f"{rel(SERVICE)} 未接 InputModePolicy",
+    )
+    check(
+        "InputMode.WUBI -> InputMode.PINYIN" not in service,
+        "旧的三态循环（五笔 → 拼音 → 英文）已移除",
+        f"{rel(SERVICE)} 仍保留三态循环",
+    )
+
+    policy = read(INPUT_MODE)
+    check(
+        "enum class InputMode" in policy
+        and "object InputModePolicy" in policy
+        and "if (current == InputMode.ENGLISH) chineseMode(method) else InputMode.ENGLISH" in policy,
+        "InputModePolicy 只做中文态 / 英文态两态切换",
+        f"{rel(INPUT_MODE)} 切换策略缺失",
+    )
+
+    test = read(INPUT_MODE_TEST)
+    check(
+        "InputModePolicy.toggle(InputMode.WUBI, ChineseInputMethod.WUBI)" in test
+        and "InputModePolicy.toggle(InputMode.ENGLISH, ChineseInputMethod.WUBI)" in test
+        and "ChineseInputMethod.PINYIN" in test,
+        "回归测试覆盖默认五笔 / 默认拼音两条中英切换路径",
+        f"{rel(INPUT_MODE_TEST)} 缺少中英切换回归用例",
+    )
+
+    zh = _named_strings(STRINGS)
+    en = _named_strings(STRINGS_EN)
+    keys = (
+        "panel_chinese_input_method",
+        "panel_chinese_input_pinyin",
+        "panel_chinese_input_wubi",
+    )
+    missing = sorted(k for k in keys if k not in zh or k not in en)
+    check(
+        not missing,
+        "中文输入法内置面板文案中英各齐",
+        f"中英 strings.xml 缺中文输入法文案：{missing}",
+    )
+
+
+
+# ═════════════════════════════════════════════════════════════
+# 13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：纯函数 + 接线 + 写盘线程
+# ═════════════════════════════════════════════════════════════
+
+def check_phrase_learning() -> None:
+    service = read(SERVICE)
+    deriver = read(JAVA / "engine" / "PhraseCodeDeriver.kt")
+    tracker = read(JAVA / "engine" / "PhraseLearningTracker.kt")
+    wubi = read(JAVA / "engine" / "WubiEngine.kt")
+    check(
+        "internal object PhraseCodeDeriver" in deriver
+        and "fun derive(first: String, second: String" in deriver
+        and "fun isSingleCjk(text: String)" in deriver,
+        "PhraseCodeDeriver 为纯函数对象（无 Android 依赖）",
+        f"{rel(JAVA / 'engine' / 'PhraseCodeDeriver.kt')} 缺少纯函数判定入口",
+    )
+    check(
+        "android." not in tracker and "import com.ispeech.data.codePointLength" in tracker,
+        "PhraseLearningTracker 零 Android 依赖（可 JVM 单测）",
+        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 引入了 Android 依赖",
+    )
+    check(
+        "const val LEARN_WINDOW_MILLIS = 5_000L" in tracker
+        and "private val windowMillis: Long = LEARN_WINDOW_MILLIS" in tracker,
+        "时间窗 W 是构造参数（默认 5 s），非写死",
+        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 时间窗未参数化",
+    )
+    check(
+        "fun fullCodeOf(char: String): String?" in wubi and "fun hasWord(word: String): Boolean" in wubi,
+        "WubiEngine 提供 fullCodeOf / hasWord（推导与「系统已有不学」）",
+        f"{rel(JAVA / 'engine' / 'WubiEngine.kt')} 缺少反向索引接口",
+    )
+    check(
+        "phraseTracker.onCommit(text, source)" in service
+        and "phraseTracker.onInterrupt()" in service
+        and "phraseTracker.reset()" in service,
+        "服务侧三个 tracker 调用点（onCommit / onInterrupt / reset）齐全",
+        f"{rel(SERVICE)} 词组学习接线不全",
+    )
+    check(
+        "override fun onUpdateSelection(" in service
+        and "isSelfCausedSelectionChange(newSelStart, lastKnownCursor, selectionTolerance)" in service,
+        "AC-3.4 光标分支：新增 onUpdateSelection 并走自因过滤",
+        f"{rel(SERVICE)} 缺少 onUpdateSelection 覆写或自因过滤",
+    )
+    phrase_region = function_region(service, r"private fun learnPhrase\(decision: PhraseLearningDecision\)")
+    check(
+        "serviceScope.launch(Dispatchers.IO)" in phrase_region,
+        "AC-3.11 词组写盘走 Dispatchers.IO",
+        f"{rel(SERVICE)} learnPhrase 未走 IO 线程（主线程会 ANR）",
+    )
+    check(
+        "if (!settings.learning)" in phrase_region,
+        "AC-3.8 复用「用户词频学习」开关，未新增设置项",
+        f"{rel(SERVICE)} learnPhrase 未检查 settings.learning",
+    )
+    check(
+        "store.record(decision.code, decision.text, UserDictMode.WUBI)" in phrase_region,
+        "词组写入 wb 用户词库（复用 record，格式不变）",
+        f"{rel(SERVICE)} 词组未写入 wb 库",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
 
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
@@ -1655,6 +1804,12 @@ def main() -> int:
     check_user_dict_chain()
     print("-- 10. 分类词库（细胞词库）--")
     check_cell_dict_chain()
+    print("-- 11. 中文输入法（默认拼音 / 五笔 + 中英切换）--")
+    check_chinese_input_method()
+    print("-- 12. 候选条字重（VOCA-56）--")
+    check_candidate_style()
+    print("-- 13. 词组自学习（VOCA-65 条目 3）--")
+    check_phrase_learning()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

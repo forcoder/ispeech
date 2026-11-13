@@ -15,6 +15,7 @@
   3. layout XML 里带包名的自定义 View（<com.ispeech.xxx.Yyy>）在 Kotlin 里有同名 class
   4. Kotlin 源码括号配平（状态机处理字符串 / 原始字符串 / 字符字面量 / 注释）
   5. 出现「栈为空时的孤立 }」——即顶层多余的右花括号（一定会编译失败的手误）
+  6. 默认 `asrModelUrl` 与 `network_security_config.xml` 自洽：明文 http 源必须被放行
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -421,6 +422,69 @@ def check_isolated_braces() -> None:
         report("PASS", "孤立右花括号：未发现任何没有匹配 { 的顶层 }")
 
 
+def check_asr_model_config() -> None:
+    """默认模型源与网络安全配置必须自洽。
+
+    `ASR_MODEL_URL` 是编译期常量；Android 只对 `network_security_config.xml`
+    里放行的域名允许明文 HTTP。换源时只改其中一个（或把源换成未放行的
+    http 域名），客户端的模型下载会在建立连接前就被明文策略拒绝。
+    换源流程见 docs/model-host-runbook.md。
+    """
+    gradle = ROOT / "app" / "build.gradle.kts"
+    nsc = RES / "xml" / "network_security_config.xml"
+    if not gradle.is_file():
+        report("FAIL", f"缺少 {rel(gradle)}：无法核对默认模型源")
+        return
+
+    text = gradle.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"asrModelUrl: String\s*=.*?\?:\s*\"([^\"]+)\"", text, re.S)
+    if not m:
+        report(
+            "WARN",
+            f"{rel(gradle)} 里没解析到 asrModelUrl 的默认值（写法变了？），跳过配置核对",
+        )
+        return
+
+    url = m.group(1)
+    scheme, _, rest = url.partition("://")
+    host = rest.split("/", 1)[0].split(":", 1)[0].lower()
+    if scheme not in ("http", "https") or not host:
+        report("FAIL", f"默认 asrModelUrl 不是 http(s) URL：{url}")
+        return
+    if scheme == "https":
+        report("PASS", f"默认模型源 {host} 走 HTTPS（系统默认信任，无需放行明文）")
+        return
+
+    allowed: list[tuple[str, bool]] = []
+    if nsc.is_file():
+        try:
+            tree = ET.parse(nsc)
+        except ET.ParseError:
+            tree = None  # 已在第 1 项报 XML 解析失败
+        if tree is not None:
+            for cfg in tree.getroot().iter("domain-config"):
+                if (cfg.get("cleartextTrafficPermitted") or "").lower() != "true":
+                    continue
+                for dom in cfg.iter("domain"):
+                    name = (dom.text or "").strip().lower()
+                    sub = (dom.get("includeSubdomains") or "").lower() == "true"
+                    if name:
+                        allowed.append((name, sub))
+
+    hit = any(
+        host == name or (sub and host.endswith("." + name)) for name, sub in allowed
+    )
+    if hit:
+        report("PASS", f"默认模型源 {host} 为明文 HTTP，已在 network_security_config.xml 放行")
+    else:
+        report(
+            "FAIL",
+            f"默认模型源 {url} 是明文 HTTP，但 {rel(nsc)} 未放行 {host}"
+            f"（客户端会直接失败）——要么改用 HTTPS，要么在 domain-config 里加 "
+            f'<domain includeSubdomains="true">{host}</domain>',
+        )
+
+
 def main() -> int:
     print(f"== check_static.py == 仓库根：{ROOT}")
     check_xml_parse()
@@ -428,6 +492,7 @@ def main() -> int:
     check_custom_views()
     check_delimiters()
     check_isolated_braces()
+    check_asr_model_config()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

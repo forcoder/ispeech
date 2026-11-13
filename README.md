@@ -25,7 +25,10 @@
 
 - **五笔 86 输入**：内置 `wubi86.dict` 词库，支持单字 / 词组 / 简码，`z` 通配符
 - **候选上屏**：空格 / 回车上首选，数字键 1-9 直选，`-` `=`（或候选条翻页器）翻页
-- **中英切换**：英文态字母直接上屏，Shift 出大写；中文态 Shift+字母直接上屏大写英文
+- **中英切换**：只在「中文态 ⇄ 英文态」之间切换；从英文切回中文时按设置回到五笔或拼音。
+  英文态字母直接上屏，Shift 出大写；中文态 Shift+字母直接上屏大写英文
+- **中文输入法设置**（v1.5 新增）：设置页「键盘与输入 → 中文输入法」可选拼音 / 五笔（默认拼音）；
+  设为五笔后，「中/英」只在五笔与英文之间切换，切回中文仍是五笔，不会再落到拼音
 - **标点与全角**：中文标点 / 英文标点切换、全角 / 半角切换，引号成对输出 `“ ”` `‘ ’`
 - **编辑效率**：光标左移 / 右移、Tab、全选 / 复制 / 粘贴、撤销上一次上屏、清空组合、收起键盘
 - **词语联想**：上屏后按设置给出联想候选（词库词组 + 快捷短语 + 用户词），候选条显示「联想」
@@ -76,7 +79,7 @@
 
 ### 设置界面（全图形化，无需命令行）
 
-- **键盘与输入**：键盘高度、每页候选数（5 / 7 / 9）、震动反馈、中文标点、全角输出、词语联想、词频学习、用户词库管理
+- **键盘与输入**：中文输入法（拼音 / 五笔，默认拼音）、键盘高度、每页候选数（5 / 7 / 9）、震动反馈、中文标点、全角输出、词语联想、词频学习、用户词库管理
 - **引擎与词典**：词典统计与开关（启用快捷短语 / 远程规则 / 单字母防误触）
 - **快捷短语管理**：新增 / 编辑 / 删除规则
 - **csBaby 账号与同步**：登录、注册、立即同步
@@ -140,11 +143,12 @@ app/src/main/java/com/ispeech/
 
 ## 构建方法
 
-1. 用 **Android Studio** 打开本目录
-2. 等待 Gradle 同步完成（需 Android SDK 34+）
-3. 连接真机或模拟器，点击 Run
+1. 用 **Android Studio** 打开本目录（需 Android SDK 34+）。
+2. 首次构建前配置 SDK：复制 `local.properties.example` 为 `local.properties`，把 `sdk.dir` 指向本机 Android SDK；
+   或在环境变量里设置 `ANDROID_HOME`。`local.properties` 是机器本地配置，不提交。
+3. 连接真机或模拟器，点击 Run。
 
-命令行构建（本机已装 JDK 17 + Android SDK 时；JDK 17 现已装在本机，见下文）：
+命令行构建（JDK 17）：
 
 ```bash
 export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
@@ -152,22 +156,10 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 ./gradlew assembleRelease    # 检测到 keystore/keystore.properties 时自动签名
 ```
 
-### 远端构建机（本机缺 Android SDK 时）
+### 远端构建机（可选）
 
-开发机（本项目日常使用的那台 Mac）**已装 JDK 17（Temurin 17.0.20.1，2026-10-18 安装），但没有 Android SDK
-（`local.properties` 指向 `/opt/homebrew/share/android-commandlinetools`，本机无 brew）**，
-所以编译 / 装机 / 冒烟测试仍放在远端构建机上做：
-
-```bash
-./ispeech-remote.sh sync     # 本地源码 → 远端（排除 build/ .gradle/）
-./ispeech-remote.sh build    # 远端 assembleDebug
-./ispeech-remote.sh install  # 装到远端模拟器
-./ispeech-remote.sh test     # 选中智语输入法 + 截图
-./ispeech-remote.sh pull     # 取回 debug APK 到 dist/
-./ispeech-remote.sh sh       # 远端交互 shell
-```
-
-远端：`cookie@43.136.44.72:10010`，JDK 17 + Android SDK + `emulator-5554`（Android 14）。
+没有本地 Android SDK 时，在构建机上执行同样的 Gradle 命令即可。历史远端环境：
+`cookie@43.136.44.72:10010`，JDK 17 + Android SDK + `emulator-5554`（Android 14）。
 
 > 本轮（v1.5 四项修复 + 图标复刻）的编译与真机验证证据、可复现命令、以及踩到的坑
 > （重装后必须先 `ime enable` 再 `ime set`；`ImageView` 没有 `minWidth/minHeight`）
@@ -233,16 +225,18 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 - 快捷短语面板的文本筛选依赖硬件键盘（软键盘在面板打开时让位给列表）
 - 云端同步与 AI 回复需先在设置页登录 csBaby
 - 首次使用需手动启用输入法
-- **本机（这台 Mac）没有 Android SDK**（JDK 17 已装）：编译、装机、冒烟测试仍在远端构建机执行（见上文）；
-  本仓库里的 APK 与实测结论都产自远端环境
+- **构建依赖 JDK 17 + Android SDK 34**：`local.properties` 不入库，按「构建方法」配置本机 SDK 路径；
+  仓库 `dist/` 里的 APK 是历史交付包，重新构建请以 `assembleDebug` / `assembleRelease` 产物为准
 
 ## 文档
 
 - `docs/sogou-feature-matrix.md` — 搜狗五笔功能对照表（已实现 / 差异 / Roadmap）
+- `docs/keyboard-ui.md` — 键盘界面规格（字号 / 配色 / 间距 / 换行键，含搜狗同机实测像素）
 - `docs/t9-and-symbols.md` — 九宫格 T9、颜文字 / 更多符号、输入法切换（键位设计与服务侧接线）
 - `docs/stats-and-hanconversion.md` — 输入统计与简繁转换（数据来源、许可、接线）
 - `docs/quick-phrase-enhancement.md` — 快捷短语收藏 / 最近使用
 - `docs/voice-input.md` — 语音输入（搜狗对照 / 复刻义务清单 / 接线与已知差异）
+- `docs/model-host-runbook.md` — 离线模型托管源：可用性探测、换源 SOP、告警分级与回滚
 
 ## 校验脚本
 
@@ -254,12 +248,35 @@ for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger;
 done
 ```
 
-当前状态（v1.5）：`check_static 5/5`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
-`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 66/66`、`check_crosscut 138/138`、
-`check_quick_trigger 29/29(+1 known warn)`。**全部通过**；分类词库（细胞词库）第 10 节 24 项全绿。
+当前状态（v1.5 + 内置 `dtwsl`）：`check_static 6/6`、`check_input_logic 44/44`、
+`check_t9 91/91(+1 known warn)`、`check_stats 53/53`、`check_phrase_usage 31/31`、
+`check_pinyin 66/66`、`check_crosscut 151/151`、`check_quick_trigger 65/65(+1 known warn)`。
+**全部通过**；分类词库（细胞词库）第 10 节 24 项全绿，候选条字重（VOCA-56「候选词不加粗」）第 12 节 3 项全绿，
+内置 `dtwsl` 触发码（VOCA-75）正文逐字一致、写入器幂等全绿。
 另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）；
 `tools/verify/check_quick_trigger.py` 校验快捷短语「简写（触发码）」规则 —— 尤其防止**单字母简写误用
 prefix 模式导致静默失效**（见 `docs/quick-phrase-enhancement.md` 的「简写」一节）。
+
+模型托管源探测（**需联网**，退出码非 0 = 源不可用，可接 CI / 定时任务）：
+
+```bash
+python3 tools/verify/check_model_host.py                 # 探测 build.gradle.kts 的默认源
+python3 tools/verify/check_model_host.py <url> --sha256  # 换源验收：整包下载 + 摘要校验
+python3 tools/verify/check_model_host.py --self-test     # 不联网验证判定逻辑
+```
+
+处置流程与换源方案见 `docs/model-host-runbook.md`。
+
+内置规则的新增 / 改文案走写入器，别手工贴 tab 分隔行（正文换行必须转义成字面量 `\n`，手贴极易拆行）：
+
+```bash
+python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 \
+  --content-file tools/quick/phrases/dtwsl.txt --mode exact --weight 110 --kind a
+```
+
+有则更新、无则新增（重复执行不产生第二条，条目总数不增长），`--check` 只比对不写盘。
+正文源文件放 `tools/quick/phrases/<trigger>.txt`；内置 5 位码 `dtwsl` → 泡池须知的取舍与两种输入态差异
+见 `docs/quick-phrase-enhancement.md` 12.6。
 
 ## 品牌设计
 

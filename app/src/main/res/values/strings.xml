@@ -76,6 +76,19 @@
     <string name="quick_enabled">启用</string>
     <string name="quick_empty">暂无快捷短语，点击右下角按钮新增</string>
     <string name="quick_import_app">从快速应用导入</string>
+    <string name="quick_import_csv">导入 CSV</string>
+    <string name="quick_import_done">已导入 %1$d 条快捷短语（%2$s）；点「保存并同步」写入本地并上传</string>
+    <string name="quick_import_done_clean">已导入 %1$d 条快捷短语；点「保存并同步」写入本地并上传</string>
+    <string name="quick_import_empty">CSV 里没有可导入的短语：需要 INPUT_CODE（快捷字母）与 CONTENT（内容）两列</string>
+    <string name="quick_import_failed">导入失败：%1$s</string>
+    <string name="quick_import_detail_duplicate">同码合并 %1$d 条</string>
+    <string name="quick_import_detail_no_code">缺快捷字母 %1$d 条</string>
+    <string name="quick_import_detail_bad_code">快捷字母非法 %1$d 条</string>
+    <string name="quick_import_detail_deleted">源文件已删除 %1$d 条</string>
+    <string name="quick_import_detail_empty">内容为空 %1$d 条</string>
+    <string name="quick_import_detail_long">超 4 位 %1$d 条，五笔态打前 4 位即可命中</string>
+    <string name="quick_import_detail_single">1 位字母 %1$d 条，只能精确匹配、会抢五笔一级简码</string>
+    <string name="quick_import_detail_replaced">覆盖已有 %1$d 条</string>
     <string name="quick_saved">已保存</string>
     <string name="quick_user_file">本地文件：quick_phrases_user.txt</string>
     <string name="quick_source_files">本地：quick_phrases_user.txt · 远端：quick_phrases_remote.txt</string>
@@ -184,6 +197,9 @@
     <!-- 输入法内置配置面板 -->
     <string name="settings_panel_title">输入设置</string>
     <string name="settings_panel_more">更多设置</string>
+    <string name="panel_chinese_input_method">中文输入法</string>
+    <string name="panel_chinese_input_pinyin">拼音</string>
+    <string name="panel_chinese_input_wubi">五笔</string>
     <string name="panel_toggle_chinese_punct">中文标点</string>
     <string name="panel_toggle_full_width">全角输出</string>
     <string name="panel_toggle_association">词语联想</string>

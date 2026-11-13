@@ -1,10 +1,13 @@
 package com.ispeech.settings.quick
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ispeech.R
 import com.ispeech.data.CsBabyAuthStore
+import com.ispeech.data.PhraseCsvImport
+import com.ispeech.data.PhraseCsvImportResult
 import com.ispeech.data.PhraseMatch
 import com.ispeech.data.PhraseSearch
 import com.ispeech.data.PhraseUsageStore
@@ -179,6 +182,91 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
     /** 清空搜索栏。 */
     fun clearKeyword() {
         setKeyword("")
+    }
+
+    /**
+     * 导入「通用短语」CSV（GBK / UTF-8 自动识别）到本地快捷短语。
+     *
+     * 只改内存列表 + 标记 dirty，由用户点「保存并同步」统一落盘 / 上传（与手动新增同一套契约）；
+     * 同 trigger 的已有用户规则被导入条目覆盖，其余保留。导入条数 / 跳过原因如实提示，
+     * 因为源 CSV 里确实存在无快捷字母、同码重复、超 4 位的行。
+     */
+    fun importPhraseCsv(uri: Uri) {
+        viewModelScope.launch {
+            val parsed = runCatching {
+                withContext(Dispatchers.IO) {
+                    val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: error("无法读取所选文件")
+                    PhraseCsvImport.parse(PhraseCsvImport.decode(bytes))
+                }
+            }.getOrElse { throwable ->
+                _uiState.update {
+                    it.copy(
+                        tip = app.getString(
+                            R.string.quick_import_failed,
+                            throwable.message ?: "未知错误",
+                        )
+                    )
+                }
+                return@launch
+            }
+
+            val formatError = parsed.formatError
+            if (formatError != null) {
+                _uiState.update { it.copy(tip = app.getString(R.string.quick_import_failed, formatError)) }
+                return@launch
+            }
+            if (parsed.entries.isEmpty()) {
+                _uiState.update { it.copy(tip = app.getString(R.string.quick_import_empty)) }
+                return@launch
+            }
+
+            val imported = parsed.entries.map { it.copy(source = QuickSource.USER) }
+            val incomingTriggers = imported.mapTo(HashSet()) { it.trigger }
+            _uiState.update { state ->
+                val replaced = state.entries.count { it.trigger in incomingTriggers }
+                val kept = state.entries.filterNot { it.trigger in incomingTriggers }
+                state.copy(
+                    entries = kept + imported,
+                    dirty = true,
+                    tip = importTip(parsed, replaced),
+                ).withMatches()
+            }
+        }
+    }
+
+    /** 导入提示：条数 + 跳过 / 需知项（无跳过时用更短的文案）。 */
+    private fun importTip(result: PhraseCsvImportResult, replaced: Int): String {
+        val details = ArrayList<String>()
+        if (result.skippedDuplicateCode > 0) {
+            details.add(app.getString(R.string.quick_import_detail_duplicate, result.skippedDuplicateCode))
+        }
+        if (result.skippedNoCode > 0) {
+            details.add(app.getString(R.string.quick_import_detail_no_code, result.skippedNoCode))
+        }
+        if (result.skippedBadCode > 0) {
+            details.add(app.getString(R.string.quick_import_detail_bad_code, result.skippedBadCode))
+        }
+        if (result.skippedDeleted > 0) {
+            details.add(app.getString(R.string.quick_import_detail_deleted, result.skippedDeleted))
+        }
+        if (result.skippedEmptyContent > 0) {
+            details.add(app.getString(R.string.quick_import_detail_empty, result.skippedEmptyContent))
+        }
+        if (result.longCodeCount > 0) {
+            details.add(app.getString(R.string.quick_import_detail_long, result.longCodeCount))
+        }
+        if (result.singleLetterCount > 0) {
+            details.add(app.getString(R.string.quick_import_detail_single, result.singleLetterCount))
+        }
+        if (replaced > 0) {
+            details.add(app.getString(R.string.quick_import_detail_replaced, replaced))
+        }
+        return if (details.isEmpty()) {
+            app.getString(R.string.quick_import_done_clean, result.entries.size)
+        } else {
+            app.getString(R.string.quick_import_done, result.entries.size, details.joinToString("；"))
+        }
     }
 
     /** 新增或按触发词覆盖同一规则。 */
@@ -389,10 +477,14 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
             starredFlag = { id -> id in starredIds },
         )
         return copy(
+            // 管理页要能看到每一条规则：
+            // - 页头「共 N 条」直接取 matches.size，截断会把 224 条显示成 200 条；
+            // - 被截掉的规则用户既搜不到也删不掉。
+            // 输入法候选面板仍走 PhraseSearch.DEFAULT_LIMIT（200 条足够）。
             matches = search.search(
                 entries = merged.entries,
                 keyword = keyword,
-                limit = PhraseSearch.DEFAULT_LIMIT,
+                limit = Int.MAX_VALUE,
             ),
             remoteInfo = merged.infoById,
         )
