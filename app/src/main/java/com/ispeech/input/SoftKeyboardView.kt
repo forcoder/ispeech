@@ -1,6 +1,7 @@
 package com.ispeech.input
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -130,6 +131,16 @@ class SoftKeyboardView @JvmOverloads constructor(
     private val dangerText = Color.parseColor("#C0392B")
     private val hintColor = Color.parseColor("#8A9099")
     private val pageBarBg = Color.parseColor("#CFD4DB")
+
+    // 「换行」键：浅主色胶囊（浅蓝渐变底 + 1dp 主色描边 + 主色 ↵ 图标 / 小字标签），见 docs/keyboard-ui.md §4。
+    // 旧版是整块纯蓝 + 18sp 粗体白字：键宽 134px 里字面就占 120px（左右各只剩 2.5dp），
+    // 而且整块高饱和蓝是键盘上唯一的深色大色块，比字母键还抢眼。
+    private val enterTop = Color.parseColor("#EFF4FF")
+    private val enterBottom = Color.parseColor("#E1EAFE")
+    private val enterTopPressed = Color.parseColor("#E4EDFF")
+    private val enterBottomPressed = Color.parseColor("#D3E1FA")
+    private val enterStroke = Color.parseColor("#C5D7F8")
+    private val enterAccent = Color.parseColor("#2E5FD8")
 
     // ── 尺寸 ──
     private val keyMargin = 4
@@ -442,6 +453,13 @@ class SoftKeyboardView @JvmOverloads constructor(
         // 三种大写状态（未开 / 单击 / 锁定）在中文态与英文态下外观一致。
         val effectiveKey = key
 
+        // 「换行」键单独画：浅主色胶囊 + ↵ 图标 + 小字标签（见 [buildEnterKey]）
+        val enterView: View? = if (effectiveKey.action == KeyAction.ENTER) {
+            buildEnterKey(effectiveKey, heightPx)
+        } else {
+            null
+        }
+
         // 键面矢量图标：Shift 键用三态箭头（ic_shift / ic_shift_active / ic_shift_lock），
         // 其余带 [KeyDef.iconRes] 的键（工具栏、符号页光标键）用各自图标。改用矢量而不画字形
         // 的原因同 Shift：不同 ROM 把 ⌨ ☺ 🎤 ⚙ ⬅ ➡ 这些字形画得粗细不一，当文字渲染容易显得粗糙。
@@ -490,7 +508,7 @@ class SoftKeyboardView @JvmOverloads constructor(
             null
         }
 
-        val view: View = iconView ?: TextView(context).apply {
+        val view: View = enterView ?: iconView ?: TextView(context).apply {
             // 「中/英」键面走分色渲染；其余键面仍是纯文本（[keyLabel] 负责大小写）
             text = if (effectiveKey.action == KeyAction.MODE_SWITCH) {
                 modeSwitchLabel()
@@ -600,6 +618,57 @@ class SoftKeyboardView @JvmOverloads constructor(
         if (effectiveKey.action == KeyAction.SPACE) {
             installSpaceGesture(targetView, effectiveKey)
         }
+        return container
+    }
+
+    /**
+     * 「换行」键面：浅主色胶囊（垂直渐变底 + 1dp 描边）+ 主色 `↵` 图标。两种形态（docs/keyboard-ui.md §4）：
+     *
+     * - 26 键字母页 / 数字页：键面文案是「换行」→ `↵` 图标 15dp + 「换行」小字 11sp；
+     * - 九宫格 / 标点 / 颜文字底行：键面是 `↵` 字形（不是「换行」文案）→ 只画 24dp 图标。
+     *   把 `↵` 当文字渲染时，它在 300px 宽的键面里只有 26px，比旁边的 ⌫ / ☺ 小一大截；
+     *   而且「图标 ↵ + 文字 ↵」会重复。
+     */
+    private fun buildEnterKey(key: KeyDef, heightPx: Int): View {
+        val label = keyLabel(key)
+        val textKey = label.any { it.isLetterOrDigit() }
+        val container = LinearLayout(context).apply {
+            orientation = VERTICAL
+            gravity = Gravity.CENTER
+            // 子 View（图标 / 文字）不接点击，触控落到容器上，才能统一挂预览 / 回调
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (textKey) label else "换行"
+            background = enterKeySelector()
+            elevation = dp(1)
+            layoutParams = LayoutParams(0, heightPx, key.weight).apply {
+                setMargins(dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin))
+            }
+        }
+        val iconSize = dpInt(if (textKey) ENTER_ICON_DP else ENTER_GLYPH_ICON_DP)
+        container.addView(
+            ImageView(context).apply {
+                setImageResource(R.drawable.ic_enter)
+                imageTintList = ColorStateList.valueOf(enterAccent)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                layoutParams = LayoutParams(iconSize, iconSize)
+            },
+        )
+        if (!textKey) return container
+        container.addView(
+            TextView(context).apply {
+                text = label
+                textSize = ENTER_LABEL_TEXT_SIZE
+                setTextColor(enterAccent)
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                maxLines = 1
+            },
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dpInt(ENTER_ICON_GAP_DP)
+            },
+        )
         return container
     }
 
@@ -821,7 +890,9 @@ class SoftKeyboardView @JvmOverloads constructor(
 
     private fun textColorOf(style: KeyStyle): Int = when (style) {
         KeyStyle.ACCENT -> primary
-        KeyStyle.PRIMARY -> Color.WHITE
+        // PRIMARY（换行）由 [buildEnterKey] 单独渲染：文案键面用主色小字，
+        // 这里保留主色，避免将来回退成 TextView 时变回白字
+        KeyStyle.PRIMARY -> enterAccent
         KeyStyle.DANGER -> dangerText
         else -> textColor
     }
@@ -830,9 +901,39 @@ class SoftKeyboardView @JvmOverloads constructor(
         KeyStyle.SPECIAL -> keySelector(specialBg, specialBgPressed)
         KeyStyle.SPACE -> keySelector(keyBg, keyBgPressed)
         KeyStyle.ACCENT -> keySelector(accentBg, accentBgPressed)
-        KeyStyle.PRIMARY -> keySelector(primary, primaryPressed)
+        KeyStyle.PRIMARY -> enterKeySelector()
         KeyStyle.DANGER -> keySelector(dangerBg, dangerBgPressed)
         KeyStyle.LETTER, KeyStyle.PUNCT -> keySelector(keyBg, keyBgPressed)
+    }
+
+    /**
+     * 「换行」键背景：浅主色胶囊。
+     *
+     * 用渐变而不是平铺色，是为了和旁边白键的柔和阴影同一层次；
+     * 1dp 主色描边负责把「主操作」这件事说清楚（纯浅色底会显得像禁用键）。
+     */
+    private fun enterKeySelector(): StateListDrawable {
+        val normal = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(enterTop, enterBottom),
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(keyRadius)
+            setStroke(dpInt(1), enterStroke)
+        }
+        val pressed = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(enterTopPressed, enterBottomPressed),
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(keyRadius)
+            setStroke(dpInt(1), enterStroke)
+        }
+        return StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), pressed)
+            addState(intArrayOf(android.R.attr.state_selected), pressed)
+            addState(intArrayOf(), normal)
+        }
     }
 
     private fun keySelector(normalColor: Int, pressedColor: Int): StateListDrawable {
@@ -874,6 +975,14 @@ class SoftKeyboardView @JvmOverloads constructor(
         const val PREVIEW_HEIGHT_DP = 40
         const val ALT_KEY_WIDTH_DP = 40
         const val ALT_KEY_HEIGHT_DP = 40
+
+        /** 「换行」键图标边长 / 图标与文字的间距（dp）。 */
+        const val ENTER_ICON_DP = 15
+        const val ENTER_ICON_GAP_DP = 2
+
+        /** 「换行」键小字字号（sp）/ 九宫格页只有 `↵` 图标时的边长（dp）。 */
+        const val ENTER_LABEL_TEXT_SIZE = 11f
+        const val ENTER_GLYPH_ICON_DP = 24
 
         /** Shift 双击判定窗口（毫秒） */
         const val DOUBLE_TAP_MS = 320L

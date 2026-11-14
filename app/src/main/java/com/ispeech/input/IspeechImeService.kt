@@ -48,6 +48,7 @@ import com.ispeech.input.keyboard.T9Layouts
 import com.ispeech.settings.REQUEST_MIC_EXTRA
 import com.ispeech.settings.store.AsrEngine
 import com.ispeech.settings.store.AsrSettings
+import com.ispeech.settings.store.ChineseInputMethod
 import com.ispeech.settings.store.KeyboardSettings
 import com.ispeech.settings.store.SettingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -62,9 +63,9 @@ import kotlinx.coroutines.withContext
  * 智语 iSpeech 输入法服务。
  *
  * 输入状态机：
- * - [Mode.WUBI]：a-z 进五笔缓冲码（最多 4 位）→ 查询候选 → 空格 / 回车 / 数字键上屏
- * - [Mode.PINYIN]：a-z 进拼音组合串（最多 12 位）→ 拼音引擎（全拼 / 简拼）出候选；切换顺序见 [toggleMode]
- * - [Mode.ENGLISH]：字母直接上屏，Shift 出大写
+ * - [InputMode.WUBI]：a-z 进五笔缓冲码（最多 4 位）→ 查询候选 → 空格 / 回车 / 数字键上屏
+ * - [InputMode.PINYIN]：a-z 进拼音组合串（最多 12 位）→ 拼音引擎（全拼 / 简拼）出候选
+ * - [InputMode.ENGLISH]：字母直接上屏，Shift 出大写
  * - 数字 / 符号 / 表情布局：按键直接上屏（不经缓冲）
  * - 上屏后按设置给出「联想」候选（词库词组 + 快捷短语 + 用户词）
  *
@@ -134,12 +135,9 @@ class IspeechImeService : InputMethodService() {
     }
 
     /**
-     * 输入态：五笔 / 拼音 / 英文。
-     *
-     * 字母页左下角「中/英」键单击按 五笔 → 拼音 → 英文 → 五笔 循环（见 [toggleMode]）。
-     * 五笔与拼音都是「中文态」——字母进组合缓冲再由候选上屏；英文态字母直接上屏。
+     * 输入态：五笔 / 拼音 / 英文。定义见 [InputMode]；五笔与拼音都是「中文态」，
+     * 字母进组合缓冲再由候选上屏；英文态字母直接上屏。
      */
-    private enum class Mode { WUBI, PINYIN, ENGLISH }
 
     /** 当前展示的辅助面板 */
     private enum class Panel { NONE, QUICK_PHRASE, CLIPBOARD, SWITCH_IME, SETTINGS }
@@ -149,13 +147,16 @@ class IspeechImeService : InputMethodService() {
     /** 键盘设置（高度、候选数、标点、联想、学习…），随 DataStore 实时更新 */
     private var settings: KeyboardSettings = KeyboardSettings()
 
+    /** 中文输入法设置（拼音 / 五笔）：中文态默认用哪种，也是中/英切回中文的目标 */
+    private var chineseInputMethod: ChineseInputMethod = ChineseInputMethod.PINYIN
+
     /** 语音识别设置（引擎 / 语言 / 模型…），随 DataStore 实时更新 */
     private var asr: AsrSettings = AsrSettings()
 
     /** 标点转换器（内部有引号配对状态） */
     private val punctor = PunctuationConverter()
 
-    private var mode: Mode = Mode.WUBI
+    private var mode: InputMode = InputMode.WUBI
     private var panel: Panel = Panel.NONE
 
     /** 当前组合中的五笔编码，只含 a-z，最多 4 位 */
@@ -253,6 +254,7 @@ class IspeechImeService : InputMethodService() {
         engine = AppContainer.compositeEngine(this)
         settings = SettingsStore.keyboardSettings(this)
         asr = SettingsStore.asrSettings(this)
+        chineseInputMethod = SettingsStore.chineseInputMethod(this)
         // SpeechRecognizer 必须在主线程创建，onCreate 即在主线程
         voiceController = VoiceInputController(applicationContext)
         voskVoice = VoskSpeechEngine(applicationContext)
@@ -283,8 +285,8 @@ class IspeechImeService : InputMethodService() {
         keyboard.onSpaceLongPressEnd = { onVoicePressUp() }
         keyboard.keyHeightDp = settings.keyHeightDp
         keyboard.vibrate = settings.vibrate
-        keyboard.setEnglishMode(mode == Mode.ENGLISH)
-        keyboard.setPinyinMode(mode == Mode.PINYIN)
+        keyboard.setEnglishMode(mode == InputMode.ENGLISH)
+        keyboard.setPinyinMode(mode == InputMode.PINYIN)
         keyboard.setLayout(KeyboardLayoutKind.LETTER)
         softKeyboard = keyboard
 
@@ -318,6 +320,7 @@ class IspeechImeService : InputMethodService() {
         panelSettings.onOpenFullSettings = { launchSettingsActivity() }
         panelSettings.onToggle = { key, value -> applySettingsToggle(key, value) }
         panelSettings.onAsrChange = { next -> applyAsrChange(next) }
+        panelSettings.onChineseInputMethodChange = { next -> applyChineseInputMethodChange(next) }
         settingsPanel = panelSettings
 
         root.layoutParams = FrameLayout.LayoutParams(
@@ -339,6 +342,12 @@ class IspeechImeService : InputMethodService() {
         refreshEngineIfStale()
         // 空格长按进语音的阈值由设置页决定（0.5s / 1s），每次打开键盘时同步一次
         softKeyboard?.spaceLongPressMs = SettingsStore.voiceSpaceLongPressMs(this).toLong()
+        // 设置页「中文输入法」决定中文态默认输入法（默认五笔）；英文态是临时状态，不覆盖
+        chineseInputMethod = SettingsStore.chineseInputMethod(this)
+        if (mode != InputMode.ENGLISH) {
+            mode = InputModePolicy.chineseMode(chineseInputMethod)
+            softKeyboard?.setPinyinMode(mode == InputMode.PINYIN)
+        }
         punctor.reset()
         renderCandidateView()
     }
@@ -373,14 +382,28 @@ class IspeechImeService : InputMethodService() {
                 settings = latest
                 softKeyboard?.keyHeightDp = latest.keyHeightDp
                 softKeyboard?.vibrate = latest.vibrate
-                if (panel == Panel.SETTINGS) settingsPanel?.submit(latest, asr)
+                if (panel == Panel.SETTINGS) settingsPanel?.submit(latest, asr, chineseInputMethod)
                 refreshCandidates()
             }
         }
         serviceScope.launch {
             SettingsStore.asrSettingsFlow(this@IspeechImeService).collect { latest ->
                 asr = latest
-                if (panel == Panel.SETTINGS) settingsPanel?.submit(settings, latest)
+                if (panel == Panel.SETTINGS) settingsPanel?.submit(settings, latest, chineseInputMethod)
+            }
+        }
+        serviceScope.launch {
+            SettingsStore.chineseInputMethodFlow(this@IspeechImeService).collect { latest ->
+                val changed = latest != chineseInputMethod
+                chineseInputMethod = latest
+                if (panel == Panel.SETTINGS) {
+                    settingsPanel?.submit(settings, asr, chineseInputMethod)
+                }
+                // 中文态下立即切到新默认；英文态保持不变，下次切回中文时生效
+                if (changed && mode != InputMode.ENGLISH) {
+                    val target = InputModePolicy.chineseMode(chineseInputMethod)
+                    if (target != mode) enterMode(target)
+                }
             }
         }
     }
@@ -490,8 +513,8 @@ class IspeechImeService : InputMethodService() {
         }
         statusText = null
         if (kind == KeyboardLayoutKind.LETTER) {
-            softKeyboard?.setEnglishMode(mode == Mode.ENGLISH)
-            softKeyboard?.setPinyinMode(mode == Mode.PINYIN)
+            softKeyboard?.setEnglishMode(mode == InputMode.ENGLISH)
+            softKeyboard?.setPinyinMode(mode == InputMode.PINYIN)
         }
         softKeyboard?.setLayout(kind, page)
         renderCandidateView()
@@ -612,7 +635,7 @@ class IspeechImeService : InputMethodService() {
      */
     /** 当前输入态的组合串长度上限：拼音比五笔长（全拼 / 多字词）。 */
     private fun maxComposeLength(): Int =
-        if (mode == Mode.PINYIN) MAX_PINYIN_LENGTH else MAX_CODE_LENGTH
+        if (mode == InputMode.PINYIN) MAX_PINYIN_LENGTH else MAX_CODE_LENGTH
 
     private fun handleChar(raw: String) {
         if (raw.isEmpty()) return
@@ -631,7 +654,7 @@ class IspeechImeService : InputMethodService() {
         }
 
         val upper = softKeyboard?.shiftOn == true || softKeyboard?.capsLock == true
-        if (mode == Mode.ENGLISH || upper) {
+        if (mode == InputMode.ENGLISH || upper) {
             clearAssociation()
             if (buffer.isNotEmpty()) commitTop()
             val out = if (upper || ch.isUpperCase()) {
@@ -726,24 +749,25 @@ class IspeechImeService : InputMethodService() {
         commitDirect("\n", CommitType.PUNCTUATION)
     }
 
-    /** 输入态循环切换：五笔 → 拼音 → 英文 → 五笔（字母页左下角「中/英」键）。 */
+    /** 输入态切换：中文态 ⇄ 英文态；回到中文时用设置页选定的默认中文输入法（见 [InputModePolicy]）。 */
     private fun toggleMode() {
+        enterMode(InputModePolicy.toggle(mode, chineseInputMethod))
+    }
+
+    /** 落到指定输入态：落定未完成的组合，刷新键面 / 面板 / 状态。 */
+    private fun enterMode(target: InputMode) {
         if (buffer.isNotEmpty()) commitTop()
-        mode = when (mode) {
-            Mode.WUBI -> Mode.PINYIN
-            Mode.PINYIN -> Mode.ENGLISH
-            Mode.ENGLISH -> Mode.WUBI
-        }
+        mode = target
         softKeyboard?.resetShift()
-        softKeyboard?.setEnglishMode(mode == Mode.ENGLISH)
-        softKeyboard?.setPinyinMode(mode == Mode.PINYIN)
+        softKeyboard?.setEnglishMode(mode == InputMode.ENGLISH)
+        softKeyboard?.setPinyinMode(mode == InputMode.PINYIN)
         // 短语面板搜索框的「中/英」徽标复用同一个 mode，切换时同步刷新
-        quickPhrasePanel?.setInputLanguage(mode == Mode.ENGLISH)
+        quickPhrasePanel?.setInputLanguage(mode == InputMode.ENGLISH)
         clearAssociation()
         statusText = when (mode) {
-            Mode.PINYIN -> "拼音输入"
-            Mode.ENGLISH -> "英文输入"
-            Mode.WUBI -> null
+            InputMode.PINYIN -> "拼音输入"
+            InputMode.ENGLISH -> "英文输入"
+            InputMode.WUBI -> null
         }
         renderCandidateView()
     }
@@ -933,7 +957,7 @@ class IspeechImeService : InputMethodService() {
         dismissAiState()
         clearAssociation()
         // 中文标点只在中文态（五笔 / 拼音）生效：英文态字母页给的是半角标点，不该被翻成「，」「。」
-        val chinese = settings.chinesePunctuation && mode != Mode.ENGLISH
+        val chinese = settings.chinesePunctuation && mode != InputMode.ENGLISH
         val text = punctor.convert(raw, chinese, settings.fullWidth)
         commitDirect(text, CommitType.PUNCTUATION)
     }
@@ -1040,7 +1064,7 @@ class IspeechImeService : InputMethodService() {
      * 拼音词表缺失时回退复合引擎。
      */
     private fun lookupSource(): LookupEngine? {
-        if (mode != Mode.PINYIN) return engine
+        if (mode != InputMode.PINYIN) return engine
         val lookup = runCatching { AppContainer.pinyinLookupEngine(this) }.getOrNull()
         val hasDict = lookup?.engines?.any { it is PinyinEngine && it.available } == true
         return if (hasDict) lookup else engine
@@ -1189,7 +1213,7 @@ class IspeechImeService : InputMethodService() {
                 quickPhrasePanel?.setKeyword("")
                 quickPhrasePanel?.submit(emptyList())
                 // 搜索框复用键盘左下角「中/英」键的当前输入状态，并把输入焦点落在搜索框
-                quickPhrasePanel?.setInputLanguage(mode == Mode.ENGLISH)
+                quickPhrasePanel?.setInputLanguage(mode == InputMode.ENGLISH)
                 quickPhrasePanel?.requestSearchFocus()
                 statusText = "快捷短语 加载中…"
                 renderCandidateView()
@@ -1208,7 +1232,7 @@ class IspeechImeService : InputMethodService() {
                 refreshInputMethods()
             }
             Panel.SETTINGS -> {
-                settingsPanel?.submit(settings, asr)
+                settingsPanel?.submit(settings, asr, chineseInputMethod)
                 statusText = getString(R.string.settings_panel_title)
                 renderCandidateView()
             }
@@ -2083,5 +2107,10 @@ class IspeechImeService : InputMethodService() {
     /** 配置面板语音识别设置落盘（引擎 / 语言）。 */
     private fun applyAsrChange(next: AsrSettings) {
         serviceScope.launch { SettingsStore.setAsrSettings(this@IspeechImeService, next) }
+    }
+
+    /** 配置面板切换中文输入法落盘；输入态由 chineseInputMethodFlow 统一驱动。 */
+    private fun applyChineseInputMethodChange(next: ChineseInputMethod) {
+        serviceScope.launch { SettingsStore.setChineseInputMethod(this@IspeechImeService, next) }
     }
 }

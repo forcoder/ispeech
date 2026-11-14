@@ -2,9 +2,12 @@ package com.ispeech.settings.dictionary
 
 import android.app.Application
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ispeech.di.AppContainer
+import com.ispeech.data.CellDictImportResult
+import com.ispeech.data.CellDictInfo
 import com.ispeech.data.UserDictImportResult
 import com.ispeech.data.UserDictMode
 import com.ispeech.engine.WubiEngine
@@ -34,6 +37,9 @@ data class DictionaryUiState(
     val lastImport: UserDictImportResult? = null,
     val importError: String? = null,
     val exportError: String? = null,
+    val cellDicts: List<CellDictInfo> = emptyList(),
+    val lastCellImport: CellDictImportResult? = null,
+    val cellDictError: String? = null,
 )
 
 /** 引擎与词典页 ViewModel：加载引擎统计 + 读写三个规则开关。 */
@@ -48,6 +54,7 @@ class DictionaryViewModel(application: Application) : AndroidViewModel(applicati
         loadEngineStats()
         observeSwitches()
         refreshUserWordCount()
+        refreshCellDicts()
     }
 
     /** 解析内置五笔词典（assets/wubi86.dict），读取统计信息。 */
@@ -165,5 +172,78 @@ class DictionaryViewModel(application: Application) : AndroidViewModel(applicati
                 _uiState.update { it.copy(exportError = error.message ?: "导出失败") }
             }
         }
+    }
+
+    // —— 分类词库（细胞词库）安装 / 启停 / 删除（S3） ——
+
+    /** 读取已安装分类词库列表（初始化与每次增删 / 启停后刷新）。 */
+    private fun refreshCellDicts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = runCatching { AppContainer.cellDict(app).list() }.getOrDefault(emptyList())
+            _uiState.update { it.copy(cellDicts = list) }
+        }
+    }
+
+    /**
+     * 安装分类词库文本文件（每行「编码 + 词条」，与用户词库同一格式）。
+     *
+     * 显示名取文件选择器给的文件名（去扩展名）；安装后词库默认启用，
+     * 并立刻让查询引擎重建，输入法下一次查询就能用上新词。
+     */
+    fun addCellDict(uri: Uri) {
+        _uiState.update { it.copy(lastCellImport = null, cellDictError = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val text = app.contentResolver.openInputStream(uri)?.use { input ->
+                    input.readBytes().toString(Charsets.UTF_8)
+                } ?: error("无法读取所选文件")
+                AppContainer.cellDict(app).add(cellDictName(uri), text)
+            }.onSuccess { result ->
+                AppContainer.invalidateCellDict()
+                val list = runCatching { AppContainer.cellDict(app).list() }.getOrDefault(emptyList())
+                _uiState.update { it.copy(cellDicts = list, lastCellImport = result) }
+            }.onFailure { error ->
+                _uiState.update { it.copy(cellDictError = error.message ?: "词库安装失败") }
+            }
+        }
+    }
+
+    /** 删除分类词库（正文 + 索引项），并让查询引擎重建。 */
+    fun removeCellDict(id: String) {
+        _uiState.update { it.copy(lastCellImport = null, cellDictError = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { AppContainer.cellDict(app).remove(id) }
+                .onSuccess { AppContainer.invalidateCellDict() }
+                .onFailure { error ->
+                    _uiState.update { it.copy(cellDictError = error.message ?: "词库删除失败") }
+                }
+            val list = runCatching { AppContainer.cellDict(app).list() }.getOrDefault(emptyList())
+            _uiState.update { it.copy(cellDicts = list) }
+        }
+    }
+
+    /** 启用 / 停用分类词库；引擎缓存即时失效，无需重启输入法。 */
+    fun setCellDictEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { AppContainer.cellDict(app).setEnabled(id, enabled) }
+                .onSuccess { AppContainer.invalidateEngine() }
+                .onFailure { error ->
+                    _uiState.update { it.copy(cellDictError = error.message ?: "词库状态保存失败") }
+                }
+            val list = runCatching { AppContainer.cellDict(app).list() }.getOrDefault(emptyList())
+            _uiState.update { it.copy(cellDicts = list) }
+        }
+    }
+
+    /** 词库显示名：优先取文件选择器给的文件名（去扩展名），取不到再用 URI 末段。 */
+    private fun cellDictName(uri: Uri): String {
+        val fromProvider = runCatching {
+            app.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+            }
+        }.getOrNull()
+        val raw = fromProvider ?: uri.lastPathSegment.orEmpty().substringAfterLast('/')
+        return raw.substringBeforeLast('.', raw).trim()
     }
 }

@@ -2,6 +2,7 @@ package com.ispeech.input
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -131,6 +132,8 @@ class CandidateView @JvmOverloads constructor(
         val label = TextView(context).apply {
             text = candidate.display
             textSize = 18f
+            // 候选词常规字重：加粗会让候选条整体发沉，也压不住首选与非首选的字重差（VOCA-56）
+            typeface = Typeface.DEFAULT
             maxLines = 1
             gravity = Gravity.CENTER
             setTextColor(if (highlighted) primaryColor else TEXT_PRIMARY)

@@ -19,6 +19,7 @@ import com.ispeech.R
 import com.ispeech.settings.store.AsrEngine
 import com.ispeech.settings.store.AsrLanguage
 import com.ispeech.settings.store.AsrSettings
+import com.ispeech.settings.store.ChineseInputMethod
 import com.ispeech.settings.store.KeyboardSettings
 
 /**
@@ -46,6 +47,9 @@ class SettingsPanel @JvmOverloads constructor(
     /** 语音识别设置变更（引擎 / 语言）。 */
     var onAsrChange: ((AsrSettings) -> Unit)? = null
 
+    /** 中文输入法变更（拼音 / 五笔）：中文态默认输入法。 */
+    var onChineseInputMethodChange: ((ChineseInputMethod) -> Unit)? = null
+
     // ── 颜色（与 InputMethodPanel 保持同一套）──
     private val panelBg = Color.parseColor("#F4F5F7")
     private val textPrimary = Color.parseColor("#1A1A1A")
@@ -60,6 +64,7 @@ class SettingsPanel @JvmOverloads constructor(
     private val listContainer: LinearLayout = LinearLayout(context).apply { orientation = VERTICAL }
     private var keyboard: KeyboardSettings = KeyboardSettings()
     private var asr: AsrSettings = AsrSettings()
+    private var chineseInputMethod: ChineseInputMethod = ChineseInputMethod.PINYIN
 
     /** 渲染期间置位，避免 Switch 复原时反触发 onCheckedChange。 */
     private var rendering = false
@@ -74,9 +79,14 @@ class SettingsPanel @JvmOverloads constructor(
     private data class ToggleSpec(val key: String, val labelRes: Int, val checked: Boolean)
 
     /** 灌入当前设置并重建列表（服务侧在打开面板 / 设置变化时调用）。 */
-    fun submit(keyboard: KeyboardSettings, asr: AsrSettings) {
+    fun submit(
+        keyboard: KeyboardSettings,
+        asr: AsrSettings,
+        chineseInputMethod: ChineseInputMethod,
+    ) {
         this.keyboard = keyboard
         this.asr = asr
+        this.chineseInputMethod = chineseInputMethod
         render()
     }
 
@@ -165,6 +175,19 @@ class SettingsPanel @JvmOverloads constructor(
         toggles().forEach { spec -> listContainer.addView(buildToggleRow(spec), rowParams()) }
 
         listContainer.addView(createDividerView(), dividerParams())
+        // 中文输入法：中文态默认用哪种（也是中/英切回中文时的目标输入法）
+        listContainer.addView(
+            buildChoiceRow(
+                label = context.getString(R.string.panel_chinese_input_method),
+                value = chineseInputMethodLabel(chineseInputMethod),
+                onClick = {
+                    val entries = ChineseInputMethod.entries
+                    val next = entries[(entries.indexOf(chineseInputMethod) + 1) % entries.size]
+                    onChineseInputMethodChange?.invoke(next)
+                },
+            ),
+            rowParams(),
+        )
         listContainer.addView(
             buildChoiceRow(
                 label = context.getString(R.string.asr_engine_label),
@@ -270,6 +293,13 @@ class SettingsPanel @JvmOverloads constructor(
             )
         }
     }
+
+    private fun chineseInputMethodLabel(method: ChineseInputMethod): String = context.getString(
+        when (method) {
+            ChineseInputMethod.PINYIN -> R.string.panel_chinese_input_pinyin
+            ChineseInputMethod.WUBI -> R.string.panel_chinese_input_wubi
+        },
+    )
 
     private fun engineLabel(engine: AsrEngine): String = context.getString(
         when (engine) {
