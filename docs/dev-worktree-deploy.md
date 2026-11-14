@@ -99,7 +99,7 @@ tools/deploy/deploy.sh --merge-all --target auto  # 先 land-all 再部署
    `emulator -avd ispeech_test -no-snapshot -no-audio -no-boot-anim`（可用 `ISPEECH_AVD` 覆盖）并等 `sys.boot_completed=1`；
    无设备时打印 `adb devices` 与接真机命令后失败退出；
 7. `adb -s <serial> install -r <apk>`；
-8. `ime enable com.ispeech.ime/.input.IspeechImeService` → `ime set` → 回读 `settings get secure default_input_method`；
+8. `ime enable com.ispeech.ime/com.ispeech.input.IspeechImeService` → `ime set` → 回读 `settings get secure default_input_method`；
 9. 截图到 `dist/screenshots/deploy-<ts>-<serial>.png`；
 10. 全流程日志写 `dist/deploy-<ts>.log`。
 
@@ -149,7 +149,7 @@ adb -s <serial> install -r dist/ispeech-debug-v1.5-<旧时间戳>.apk   # 回装
 | `local.properties` 指向不存在的路径 | 该文件 gitignore、每机不同；`deploy.sh` 会自动按 `ANDROID_HOME`/常见路径修正 |
 | 多设备时 `adb` 报 `more than one device` | 一律带 `-s <serial>`；本仓脚本已处理 |
 | 输入法装好了但没生效 | **必须先 `ime enable` 再 `ime set`**，顺序反了会失败；之后回读 `settings get secure default_input_method` |
-| `ime enable` 报 `Unknown input method` | 包没装成功或 service 名不对（`com.ispeech.ime/.input.IspeechImeService`） |
+| `ime enable` 报 `Unknown input method` | 包没装成功或 service 名不对（`com.ispeech.ime/com.ispeech.input.IspeechImeService`） |
 | 模拟器起不来 / 卡在启动 | `emulator -list-avds` 确认 AVD 名；`-no-snapshot` 冷启动；看 `dist/emulator-<ts>.log` |
 | land 报冲突 | 回任务 worktree：`git rebase main` 解决后重新 land（脚本不会污染 main） |
 | 新任务分支缺少已 land 的改动 | 本地 main 领先 origin/main 时会以本地为基准；若仍异常，手动 `git rebase main` |
