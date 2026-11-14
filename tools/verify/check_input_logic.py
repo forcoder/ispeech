@@ -602,8 +602,18 @@ def check_punctuation() -> None:
 _KIND_ORDER = {"QUICKAPPLY": 0, "PHRASE": 1, "WUBI": 2, "WUBIPHRASE": 3}
 
 
+def candidate_tier(c) -> int:
+    """候选来源分组：0 快捷短语 → 1 单字 → 2 词组 / 句子（同 CandidateRanking.tier）。"""
+    if c["kind"] in ("PHRASE", "QUICKAPPLY"):
+        return 0
+    return 1 if len(c["insertText"]) <= 1 else 2
+
+
 def candidate_compare(inp: str):
     def cmp(a, b):
+        ta, tb = candidate_tier(a), candidate_tier(b)
+        if ta != tb:
+            return -1 if ta < tb else 1
         a_exact = a["code"].lower() == inp.lower()
         b_exact = b["code"].lower() == inp.lower()
         if a_exact != b_exact:
@@ -623,7 +633,7 @@ def candidate_compare(inp: str):
 
 def check_candidate_ranking() -> None:
     system = {"code": "wqiy", "display": "你", "insertText": "你", "weight": 1534, "kind": "WUBI"}
-    user = {"code": "wqiy", "display": "你（用户）", "insertText": "你（用户）", "weight": 130 + 100000, "kind": "WUBI"}
+    user = {"code": "wqiy", "display": "妳（用户）", "insertText": "妳", "weight": 130 + 100000, "kind": "WUBI"}
     pool = [system, user]
     pool.sort(key=functools.cmp_to_key(candidate_compare("wqiy")))
     order = [c["display"] for c in pool]
@@ -640,15 +650,16 @@ def check_candidate_ranking() -> None:
         {"code": "ab", "display": "短语A", "insertText": "x", "weight": 900, "kind": "PHRASE"},
         {"code": "ab", "display": "应用B", "insertText": "y", "weight": 10, "kind": "QUICKAPPLY"},
         {"code": "ab", "display": "五笔C", "insertText": "z", "weight": 65000, "kind": "WUBI"},
-        {"code": "ab", "display": "词库词组E", "insertText": "v", "weight": 64000, "kind": "WUBIPHRASE"},
+        {"code": "ab", "display": "词库词组E", "insertText": "词组", "weight": 64000, "kind": "WUBIPHRASE"},
         {"code": "abc", "display": "前缀五笔D", "insertText": "w", "weight": 99999, "kind": "WUBI"},
+        {"code": "abc", "display": "短语前缀F", "insertText": "长句内容", "weight": 1, "kind": "PHRASE"},
     ]
     cases.sort(key=functools.cmp_to_key(candidate_compare("ab")))
     got = [c["display"] for c in cases]
-    expected = ["应用B", "短语A", "五笔C", "词库词组E", "前缀五笔D"]
+    expected = ["应用B", "短语A", "短语前缀F", "五笔C", "前缀五笔D", "词库词组E"]
     report(
         "PASS" if got == expected else "FAIL",
-        f"候选排序（精确码优先→应用<短语<单字<词组→权重降序）：实际={got}（期望={expected}）",
+        f"候选排序（快捷短语→单字→词组/句子，组内精确码→档位→权重）：实际={got}（期望={expected}）",
     )
     check_candidate_rank_real_dict()
 

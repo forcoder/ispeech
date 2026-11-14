@@ -16,7 +16,7 @@ enum class KeyboardSize(val label: String, val heightDp: Int) {
 /** 输入法软键盘相关设置（DataStore 持久化，默认值即此处默认值）。 */
 data class KeyboardSettings(
     val keyHeightDp: Int = 52,
-    val candidatePageSize: Int = 9,     // 每页候选数：5 / 7 / 9
+    val candidatePageSize: Int = 9,     // 每屏候选数：5 / 7 / 9（候选条横向滑动浏览更多）
     val vibrate: Boolean = true,
     val chinesePunctuation: Boolean = true,  // 中文标点
     val fullWidth: Boolean = false,          // 全角输出
