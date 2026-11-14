@@ -95,6 +95,12 @@ fun AsrSettingsScreen(onBack: () -> Unit) {
                     onSelect = { viewModel.updateEngine(AsrEngine.CUSTOM) },
                 )
                 EngineOption(
+                    title = stringResource(R.string.asr_engine_funasr),
+                    desc = stringResource(R.string.asr_engine_funasr_desc),
+                    selected = state.draft.engine == AsrEngine.FUNASR,
+                    onSelect = { viewModel.updateEngine(AsrEngine.FUNASR) },
+                )
+                EngineOption(
                     title = stringResource(R.string.asr_engine_vosk),
                     desc = stringResource(R.string.asr_engine_vosk_desc),
                     selected = state.draft.engine == AsrEngine.VOSK,

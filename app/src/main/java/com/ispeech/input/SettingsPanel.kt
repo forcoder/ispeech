@@ -193,7 +193,9 @@ class SettingsPanel @JvmOverloads constructor(
                 label = context.getString(R.string.asr_engine_label),
                 value = engineLabel(asr.engine),
                 onClick = {
-                    val next = if (asr.engine == AsrEngine.SYSTEM) AsrEngine.CUSTOM else AsrEngine.SYSTEM
+                    // 五态循环：FunASR → 系统 → 自定义 → Vosk → FunASR
+                    val entries = AsrEngine.entries
+                    val next = entries[(entries.indexOf(asr.engine) + 1) % entries.size]
                     onAsrChange?.invoke(asr.copy(engine = next))
                 },
             ),
@@ -305,6 +307,7 @@ class SettingsPanel @JvmOverloads constructor(
         when (engine) {
             AsrEngine.SYSTEM -> R.string.asr_engine_system
             AsrEngine.CUSTOM -> R.string.asr_engine_custom
+            AsrEngine.FUNASR -> R.string.asr_engine_funasr
             AsrEngine.VOSK -> R.string.asr_engine_vosk
         },
     )

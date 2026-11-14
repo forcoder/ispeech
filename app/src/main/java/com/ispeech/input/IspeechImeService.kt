@@ -32,6 +32,7 @@ import com.ispeech.data.Punctuation
 import com.ispeech.data.PunctuationConverter
 import com.ispeech.data.UserDictStore
 import com.ispeech.data.UserDictMode
+import com.ispeech.data.FunAsrModelStore
 import com.ispeech.data.VoskModelStore
 import com.ispeech.di.AppContainer
 import com.ispeech.engine.CompositeEngine
@@ -239,11 +240,14 @@ class IspeechImeService : InputMethodService() {
     /** 系统语音识别封装（onCreate 主线程创建，onDestroy 释放） */
     private var voiceController: VoiceInputController? = null
 
-    /** 端侧离线识别（Vosk）引擎，与 [voiceController] 按「识别引擎」设置二选一 */
+    /** 内置 FunASR 离线识别引擎，与 [voskVoice] / [voiceController] 按「识别引擎」设置三选一 */
+    private var funasrVoice: FunAsrSpeechEngine? = null
+
+    /** 端侧离线识别（Vosk）引擎，与 [funasrVoice] / [voiceController] 按「识别引擎」设置三选一 */
     private var voskVoice: VoskSpeechEngine? = null
 
-    /** 离线模型是否正在下载（避免重复触发下载任务） */
-    private var voskDownloading: Boolean = false
+    /** 离线模型是否正在下载（FunASR / Vosk 共用同一把闸门，避免重复触发下载任务） */
+    private var offlineModelDownloading: Boolean = false
 
     /** 当前候选是否为语音识别结果（空格 / 点选上屏后复位） */
     private var voiceActive = false
@@ -257,6 +261,7 @@ class IspeechImeService : InputMethodService() {
         chineseInputMethod = SettingsStore.chineseInputMethod(this)
         // SpeechRecognizer 必须在主线程创建，onCreate 即在主线程
         voiceController = VoiceInputController(applicationContext)
+        funasrVoice = FunAsrSpeechEngine(applicationContext)
         voskVoice = VoskSpeechEngine(applicationContext)
         // 预热拼音引擎：切到拼音态后首键即用，避免首次上屏时在主线程加载拼音词表造成卡顿
         serviceScope.launch(Dispatchers.Default) {
@@ -369,6 +374,8 @@ class IspeechImeService : InputMethodService() {
     override fun onDestroy() {
         voiceController?.destroy()
         voiceController = null
+        funasrVoice?.destroy()
+        funasrVoice = null
         voskVoice?.destroy()
         voskVoice = null
         serviceScope.cancel()
@@ -475,10 +482,15 @@ class IspeechImeService : InputMethodService() {
     /**
      * 按住说话：按下开始收音（空格长按进语音走这里）。
      *
-     * 引擎选择沿用 [toggleVoiceInput] 的既有判定：离线识别（[AsrEngine.VOSK]）与系统识别
-     * 是两条完全不同的链路，这里只负责「开始」，结束交给 [onVoicePressUp]。
+     * 引擎选择沿用 [toggleVoiceInput] 的既有判定：内置离线识别（[AsrEngine.FUNASR] /
+     * [AsrEngine.VOSK]）与系统识别是完全不同的链路，这里只负责「开始」，结束交给 [onVoicePressUp]。
      */
     private fun onVoicePressDown() {
+        if (asr.engine == AsrEngine.FUNASR) {
+            if (funasrVoice?.isListening == true) return
+            toggleFunAsrVoice()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             if (voskVoice?.isListening == true) return
             toggleVoskVoice()
@@ -492,9 +504,14 @@ class IspeechImeService : InputMethodService() {
      * 按住说话：松手结束收音并上屏。
      *
      * 系统识别走 [VoiceInputController.finish]（保留回调，收尾结果仍经 onFinal 上屏）；
-     * Vosk 走 [VoskSpeechEngine.finish]（工作线程读 finalResult 后回调）。
+     * FunASR 走 [FunAsrSpeechEngine.finish]、Vosk 走 [VoskSpeechEngine.finish]
+     * （工作线程读最终结果后回调）。
      */
     private fun onVoicePressUp() {
+        if (asr.engine == AsrEngine.FUNASR) {
+            funasrVoice?.finish()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             voskVoice?.finish()
             return
@@ -1509,7 +1526,11 @@ class IspeechImeService : InputMethodService() {
      * 中间结果（partial）仍先作为候选实时展示。
      */
     private fun toggleVoiceInput() {
-        // 离线识别（Vosk）与系统识别是完全不同的链路，分开处理
+        // 内置离线识别（FunASR / Vosk）与系统识别是完全不同的链路，分开处理
+        if (asr.engine == AsrEngine.FUNASR) {
+            toggleFunAsrVoice()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             toggleVoskVoice()
             return
@@ -1622,10 +1643,61 @@ class IspeechImeService : InputMethodService() {
         commitDirect(text, CommitType.VOICE)
     }
 
-    // ── 离线识别（Vosk 端侧引擎）──
+    // ── 内置离线识别（FunASR / Vosk 端侧引擎）──
 
     /**
-     * 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
+     * FunASR 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
+     *
+     * FunASR 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
+     * 与 [FunAsrSpeechEngine] 的 [FunAsrSpeechEngine.finish] 语义一致。下载与就绪判定复用
+     * [FunAsrModelStore]（本 issue 只恢复接线，不改其下载 / 校验逻辑）。
+     */
+    private fun toggleFunAsrVoice() {
+        val engine = funasrVoice ?: return
+        if (!engine.isReady) {
+            startFunAsrModelDownload()
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            statusText = getString(R.string.voice_need_permission)
+            renderCandidateView()
+            requestMicPermission()
+            return
+        }
+        if (engine.isListening) {
+            engine.finish()
+            return
+        }
+        if (panel != Panel.NONE) closePanel()
+        commitPending()
+        clearAssociation()
+        dismissAiState()
+        voiceActive = true
+        statusText = getString(R.string.voice_listening)
+        codeOverride = "语音"
+        candidates = emptyList()
+        allCandidates = emptyList()
+        pageCount = 1
+        pageIndex = 0
+        renderCandidateView()
+        engine.start(
+            onPartial = { text -> showVoiceCandidate(text) },
+            onFinal = { text ->
+                statusText = null
+                commitVoiceText(text)
+            },
+            onError = { message ->
+                voiceActive = false
+                if (codeOverride == "语音") codeOverride = null
+                statusText = message
+                candidates = emptyList()
+                renderCandidateView()
+            },
+        )
+    }
+
+    /**
+     * Vosk 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
      *
      * Vosk 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
      * 与 [VoskSpeechEngine] 的 [VoskSpeechEngine.finish] 语义一致。
@@ -1674,10 +1746,27 @@ class IspeechImeService : InputMethodService() {
         )
     }
 
-    /** 首次使用离线识别时下载模型（约 42MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
+    /** 首次使用 FunASR 离线识别时下载模型（约 74MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
+    private fun startFunAsrModelDownload() {
+        if (offlineModelDownloading) return
+        offlineModelDownloading = true
+        statusText = getString(R.string.voice_model_downloading, 0)
+        renderCandidateView()
+        serviceScope.launch {
+            val ok = FunAsrModelStore.ensureModel(this@IspeechImeService) { percent ->
+                statusText = getString(R.string.voice_model_downloading, percent)
+                renderCandidateView()
+            }
+            offlineModelDownloading = false
+            statusText = getString(if (ok) R.string.voice_model_ready else R.string.voice_model_failed)
+            renderCandidateView()
+        }
+    }
+
+    /** 首次使用 Vosk 离线识别时下载模型（约 42MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
     private fun startVoskModelDownload() {
-        if (voskDownloading) return
-        voskDownloading = true
+        if (offlineModelDownloading) return
+        offlineModelDownloading = true
         statusText = getString(R.string.voice_model_downloading, 0)
         renderCandidateView()
         serviceScope.launch {
@@ -1685,7 +1774,7 @@ class IspeechImeService : InputMethodService() {
                 statusText = getString(R.string.voice_model_downloading, percent)
                 renderCandidateView()
             }
-            voskDownloading = false
+            offlineModelDownloading = false
             statusText = getString(if (ok) R.string.voice_model_ready else R.string.voice_model_failed)
             renderCandidateView()
         }
@@ -1694,6 +1783,7 @@ class IspeechImeService : InputMethodService() {
     /** 取消语音识别并复位语音状态（不负责渲染）。 */
     private fun cancelVoice() {
         if (voiceController?.isListening == true) voiceController?.stop()
+        funasrVoice?.cancel()
         voskVoice?.cancel()
         voiceActive = false
         if (codeOverride == "语音") codeOverride = null
@@ -2051,6 +2141,7 @@ class IspeechImeService : InputMethodService() {
         softKeyboard?.resetShift()
         dismissAiState()
         if (voiceController?.isListening == true) voiceController?.stop()
+        if (funasrVoice?.isListening == true) funasrVoice?.cancel()
         if (voskVoice?.isListening == true) voskVoice?.cancel()
         voiceActive = false
         if (codeOverride == "语音") codeOverride = null
