@@ -11,8 +11,8 @@
 
 - **多页布局**：字母页（中 / 英两套）、数字页、符号页 8 页（常用 2 + 数学 / 箭头 / 货币 / 单位 / 希腊 / 线框）、
   表情页 8 类（每类一屏 emoji）、颜文字 7 类（103 条）、九宫格 T9 2 页（数字 + 标点）
-- **工具栏（9 键）**：输入法切换 · 中/英 · 符号 · 表情 · 快捷短语 · 剪贴板 · AI · **语音** · 设置
-  （键序 `⌨ 中/英 符 ☺ 短语 剪贴 AI 语音 ⚙`；字母页底行另有「中/英」键；窄屏自动横滑，单键 ≥40dp）
+- **工具栏（8 键）**：输入法切换 · 符号 · 表情 · 快捷短语 · 剪贴板 · AI · **语音** · 设置
+  （键序 `⌨ 符 ☺ 短语 剪贴 AI 🎤 ⚙`；「中/英」由字母页左下角 Shift 键承担；窄屏自动横滑，单键 ≥40dp）
 - **页码条**：多页布局显示「符号 1/2 点此翻页」，点按即可翻页
 - **九宫格 T9**：数字页底行「9键」进入；`1` 标点页、`*` 符号页、`#` 更多符号、`☺` 颜文字直达页
 - **快捷切换系统输入法**（v1.5 新增）：工具栏第 1 键弹出输入法列表（当前项置顶），
@@ -25,10 +25,7 @@
 
 - **五笔 86 输入**：内置 `wubi86.dict` 词库，支持单字 / 词组 / 简码，`z` 通配符
 - **候选上屏**：空格 / 回车上首选，数字键 1-9 直选，`-` `=`（或候选条翻页器）翻页
-- **中英切换**：只在「中文态 ⇄ 英文态」之间切换；从英文切回中文时按设置回到五笔或拼音。
-  英文态字母直接上屏，Shift 出大写；中文态 Shift+字母直接上屏大写英文
-- **中文输入法设置**（v1.5 新增）：设置页「键盘与输入 → 中文输入法」可选拼音 / 五笔（默认拼音）；
-  设为五笔后，「中/英」只在五笔与英文之间切换，切回中文仍是五笔，不会再落到拼音
+- **中英切换**：英文态字母直接上屏，Shift 出大写；中文态 Shift+字母直接上屏大写英文
 - **标点与全角**：中文标点 / 英文标点切换、全角 / 半角切换，引号成对输出 `“ ”` `‘ ’`
 - **编辑效率**：光标左移 / 右移、Tab、全选 / 复制 / 粘贴、撤销上一次上屏、清空组合、收起键盘
 - **词语联想**：上屏后按设置给出联想候选（词库词组 + 快捷短语 + 用户词），候选条显示「联想」
@@ -39,10 +36,6 @@
   拼音态因此也能自造词与词频学习（对齐搜狗 `wb_dict_user` / `cn_dict_user`）
 - **词库导入 / 导出**（v1.5 新增）：词典页「用户词库导入 / 导出」，支持 `code<TAB>词条[<TAB>次数][<TAB>wb|cn]`
   与「编码 词条」两段式，走系统文件选择器（SAF），不申请存储权限
-- **分类词库（细胞词库）**（v1.5 新增）：词典页「添加词库」安装本地文本词库到 `filesDir/cell_dicts/`，
-  逐库启用 / 停用 / 删除（对齐搜狗 `InitializeWithMode:CateDictArray:` + `pfnAddDict` / `pfnDelDict`）；
-  正文格式与用户词库一致，可加 `# category: 分类名` 头；启用后并入候选，
-  权重 8 万——排在用户学到的词之后、系统词库之前，五笔态取 wb 码、拼音态取 cn 码
 - **拼音混输**（v1.5 新增）：`assets/pinyin86.dict`（71097 行：单字 15511 行 / 词组 55575 行，其中 26413 条
   由 jieba 高频词注音补全）+ `PinyinEngine`，全拼 / 简拼 / 前缀三层匹配，
   排在五笔之后做兜底（`nerf` 这类打不出五笔码的输入）；设置页开关
@@ -53,9 +46,8 @@
 - **字形过滤**（v1.5 新增）：候选展示前逐码点 `hasGlyph`，字体缺字形的生僻字（如 `wqiy` 的 `𠉎`）不再显示成豆腐块
 - **输入统计**（v1.5 新增）：`filesDir/input_stats.txt`，设置页「输入统计」看今日 / 累计字数、
   上屏次数、候选命中率与 Top 词（最多保留 400 天）
-- **语音输入**（v1.5 新增）：工具栏语音键（`ic_voice`）→ **按住说话 → 语音面板（实时文字 + 音量波形）→ 松手自动上屏**，
-  上滑进取消区丢弃；两种引擎同形态（FunASR 离线 / 系统 `SpeechRecognizer`）；未授权时拉起设置页弹系统授权框，
-  取消即销毁识别器释放麦克风
+- **语音输入**（v1.5 新增）：工具栏「🎤」→ 系统 `SpeechRecognizer`（默认普通话 zh-CN，支持实时中间结果），
+  识别文本进候选条，空格 / 点选上屏；未授权时拉起设置页弹系统授权框，取消失效即销毁识别器释放麦克风
 - **ASR 配置**（v1.5 新增）：设置页「ASR 模型配置」或输入法内置 ⌨ 面板可选引擎（系统 / 指定识别服务组件）、
   识别语言（普通话 / 繁中 / 粤语 / English / 日本語）、实时部分结果、优先离线、模型名透传
 
@@ -65,10 +57,6 @@
   点条目整段上屏；数据来自内置 `quick_phrases.txt`、csBaby 远端同步、用户自定义规则三处
 - **收藏与最近**（v1.5 新增）：面板顶部 ★ 收藏 / 最近胶囊（`filesDir/phrase_usage.txt`），
   条目右侧星标一键收藏，使用次数越多越靠前
-- **快捷字母**（自定义简写）：管理页新增 / 编辑短语时可指定 2–4 位小写字母（如 `ycsf` → 游泳池换水要收费的），
-  五笔态敲这串字母，该短语**直接排在候选第 1 位**，空格整段上屏；面板行内以角标显示快捷字母，保存后无需重启输入法
-- **远端短语可管**：csBaby 拉取的规则同样出现在列表里（角标「远端」），可查看内容并**给它设快捷字母**——
-  改动以「覆盖」形式写进本地用户规则（权重 +1000，排序必胜），随时「恢复默认」；远端文件本身不被修改，下次同步不会冲掉
 - **快速应用**：打字命中触发码时，候选条用「应用 / 短语」标签提示，选中后把详细内容整段上屏
 - **候选档位**：应用 < 短语 < 词库单字 < 词库词组 < 拼音；`wqiy` 首选是「你」、`trnt` 首选是「我」，
   词组（带「词」标签）用数字键选，符合五笔肌肉记忆
@@ -79,7 +67,7 @@
 
 ### 设置界面（全图形化，无需命令行）
 
-- **键盘与输入**：中文输入法（拼音 / 五笔，默认拼音）、键盘高度、每页候选数（5 / 7 / 9）、震动反馈、中文标点、全角输出、词语联想、词频学习、用户词库管理
+- **键盘与输入**：键盘高度、每页候选数（5 / 7 / 9）、震动反馈、中文标点、全角输出、词语联想、词频学习、用户词库管理
 - **引擎与词典**：词典统计与开关（启用快捷短语 / 远程规则 / 单字母防误触）
 - **快捷短语管理**：新增 / 编辑 / 删除规则
 - **csBaby 账号与同步**：登录、注册、立即同步
@@ -96,7 +84,6 @@ app/src/main/java/com/ispeech/
 │   ├── SyncRepository.kt          # 远端规则同步仓库
 │   ├── RemoteKeywordRule.kt       # 远端规则模型
 │   ├── UserDictStore.kt           # 用户词频 / 自造词存储
-│   ├── CellDictStore.kt           # 分类词库（细胞词库）安装 / 启停 / 索引（v1.5）
 │   ├── ClipboardHistory.kt        # 剪贴板历史
 │   ├── Punctuation.kt             # 中英标点映射 + 全角转换
 │   ├── PhraseUsageStore.kt        # 短语收藏 / 最近 / 使用计数（v1.5）
@@ -108,7 +95,6 @@ app/src/main/java/com/ispeech/
 │   ├── WubiEngine.kt              # 五笔引擎（含词语联想索引）
 │   ├── QuickPhraseEngine.kt       # 快捷短语引擎（含短语联想）
 │   ├── UserDictEngine.kt          # 用户词库引擎
-│   ├── CellDictEngine.kt          # 分类词库（细胞词库）引擎（v1.5）
 │   ├── PinyinEngine.kt            # 拼音引擎：全拼 / 简拼 / 前缀 / 模糊音（v1.5）
 │   ├── PinyinDictLoader.kt        # pinyin86.dict 加载与解析（v1.5）
 │   ├── CompositeEngine.kt         # 组合引擎（候选合并 + 联想合并）
@@ -143,12 +129,11 @@ app/src/main/java/com/ispeech/
 
 ## 构建方法
 
-1. 用 **Android Studio** 打开本目录（需 Android SDK 34+）。
-2. 首次构建前配置 SDK：复制 `local.properties.example` 为 `local.properties`，把 `sdk.dir` 指向本机 Android SDK；
-   或在环境变量里设置 `ANDROID_HOME`。`local.properties` 是机器本地配置，不提交。
-3. 连接真机或模拟器，点击 Run。
+1. 用 **Android Studio** 打开本目录
+2. 等待 Gradle 同步完成（需 Android SDK 34+）
+3. 连接真机或模拟器，点击 Run
 
-命令行构建（JDK 17）：
+命令行构建（本机已装 JDK 17 + Android SDK 时；JDK 17 现已装在本机，见下文）：
 
 ```bash
 export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
@@ -156,10 +141,22 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 ./gradlew assembleRelease    # 检测到 keystore/keystore.properties 时自动签名
 ```
 
-### 远端构建机（可选）
+### 远端构建机（本机缺 Android SDK 时）
 
-没有本地 Android SDK 时，在构建机上执行同样的 Gradle 命令即可。历史远端环境：
-`cookie@43.136.44.72:10010`，JDK 17 + Android SDK + `emulator-5554`（Android 14）。
+开发机（本项目日常使用的那台 Mac）**已装 JDK 17（Temurin 17.0.20.1，2026-10-18 安装），但没有 Android SDK
+（`local.properties` 指向 `/opt/homebrew/share/android-commandlinetools`，本机无 brew）**，
+所以编译 / 装机 / 冒烟测试仍放在远端构建机上做：
+
+```bash
+./ispeech-remote.sh sync     # 本地源码 → 远端（排除 build/ .gradle/）
+./ispeech-remote.sh build    # 远端 assembleDebug
+./ispeech-remote.sh install  # 装到远端模拟器
+./ispeech-remote.sh test     # 选中智语输入法 + 截图
+./ispeech-remote.sh pull     # 取回 debug APK 到 dist/
+./ispeech-remote.sh sh       # 远端交互 shell
+```
+
+远端：`cookie@43.136.44.72:10010`，JDK 17 + Android SDK + `emulator-5554`（Android 14）。
 
 > 本轮（v1.5 四项修复 + 图标复刻）的编译与真机验证证据、可复现命令、以及踩到的坑
 > （重装后必须先 `ime enable` 再 `ime set`；`ImageView` 没有 `minWidth/minHeight`）
@@ -184,8 +181,8 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 10. **面板自测**：工具栏「短语」打开 csBaby 快捷短语面板（分类胶囊 + ★收藏 / 最近 + 硬件键盘打字筛选）；
     「剪贴」打开剪贴板历史
 11. **AI 回复自测**：输入框写一句话 → 点「AI」键 → 候选条出现「AI回复」→ 空格 / 点击候选上屏（自动替换原文），需先登录 csBaby
-12. **语音输入自测**：**按住**工具栏语音键（未授权会拉起设置页弹麦克风授权，先授予）→ 语音面板出现「正在聆听」+ 波形，
-    朗读一句后**松手即上屏**；按住时上滑到取消区再松手 = 丢弃（面板提示「松开取消」）
+12. **语音输入自测**：点工具栏「🎤」（未授权会拉起设置页弹麦克风授权，先授予）→ 候选条显示「语音识别中…」，
+    朗读一句后空格 / 点选候选上屏；识别中再点「🎤」= 取消（候选条「语音已取消」）
 13. **设置**：候选条右侧齿轮、键盘工具栏齿轮，或桌面「智语」图标
 
 ## v1.5 真机实测记录（远端构建机 emulator-5554 / Android 14）
@@ -215,8 +212,8 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 ## 已知限制
 
 - **无双拼 / 手写 / 五笔 98 / 云词库**（缺对应码表或识别能力）；皮肤仅主题色
-- **语音输入**：两种引擎统一为搜狗式「按住说话 + 语音面板 + 松手上屏」；面板放在键盘**上方**（不替换键盘区域），
-  因为被按住的语音键一旦 GONE，系统会补发 `ACTION_CANCEL`，`ACTION_UP` 丢失就会「松手不上屏」。详见 `docs/voice-input.md`
+- **语音输入依赖系统识别器**：走 Android `SpeechRecognizer`（零第三方 SDK），转写准确率 / 离线能力取决于设备上的识别服务；
+  与搜狗语音面板（波形、松手自动上屏）的行为差异见 `docs/voice-input.md`
 - **拼音 / 模糊音 / 九宫格的范围**：拼音是「五笔查不到时的兜底档位」，不替代五笔；模糊音只做 7 组常见归一化
 - **九宫格没有音节切分**：靠字母组合枚举（单次上限 192 组、数字串上限 9 位），>6 位数字时候选会变少
 - **简繁是字符级转换**：不做词汇消歧（「后台」不会变成「後臺」）
@@ -225,18 +222,16 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 - 快捷短语面板的文本筛选依赖硬件键盘（软键盘在面板打开时让位给列表）
 - 云端同步与 AI 回复需先在设置页登录 csBaby
 - 首次使用需手动启用输入法
-- **构建依赖 JDK 17 + Android SDK 34**：`local.properties` 不入库，按「构建方法」配置本机 SDK 路径；
-  仓库 `dist/` 里的 APK 是历史交付包，重新构建请以 `assembleDebug` / `assembleRelease` 产物为准
+- **本机（这台 Mac）没有 Android SDK**（JDK 17 已装）：编译、装机、冒烟测试仍在远端构建机执行（见上文）；
+  本仓库里的 APK 与实测结论都产自远端环境
 
 ## 文档
 
 - `docs/sogou-feature-matrix.md` — 搜狗五笔功能对照表（已实现 / 差异 / Roadmap）
-- `docs/keyboard-ui.md` — 键盘界面规格（字号 / 配色 / 间距 / 换行键，含搜狗同机实测像素）
 - `docs/t9-and-symbols.md` — 九宫格 T9、颜文字 / 更多符号、输入法切换（键位设计与服务侧接线）
 - `docs/stats-and-hanconversion.md` — 输入统计与简繁转换（数据来源、许可、接线）
 - `docs/quick-phrase-enhancement.md` — 快捷短语收藏 / 最近使用
 - `docs/voice-input.md` — 语音输入（搜狗对照 / 复刻义务清单 / 接线与已知差异）
-- `docs/model-host-runbook.md` — 离线模型托管源：可用性探测、换源 SOP、告警分级与回滚
 
 ## 校验脚本
 
@@ -248,35 +243,12 @@ for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger;
 done
 ```
 
-当前状态（v1.5 + 内置 `dtwsl`）：`check_static 6/6`、`check_input_logic 44/44`、
-`check_t9 91/91(+1 known warn)`、`check_stats 53/53`、`check_phrase_usage 31/31`、
-`check_pinyin 66/66`、`check_crosscut 151/151`、`check_quick_trigger 65/65(+1 known warn)`。
-**全部通过**；分类词库（细胞词库）第 10 节 24 项全绿，候选条字重（VOCA-56「候选词不加粗」）第 12 节 3 项全绿，
-内置 `dtwsl` 触发码（VOCA-75）正文逐字一致、写入器幂等全绿。
+当前状态（v1.5）：`check_static 5/5`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
+`check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 64/64`、`check_crosscut 80/80`、
+`check_quick_trigger 5/5(+1 known warn)`。
 另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）；
 `tools/verify/check_quick_trigger.py` 校验快捷短语「简写（触发码）」规则 —— 尤其防止**单字母简写误用
 prefix 模式导致静默失效**（见 `docs/quick-phrase-enhancement.md` 的「简写」一节）。
-
-模型托管源探测（**需联网**，退出码非 0 = 源不可用，可接 CI / 定时任务）：
-
-```bash
-python3 tools/verify/check_model_host.py                 # 探测 build.gradle.kts 的默认源
-python3 tools/verify/check_model_host.py <url> --sha256  # 换源验收：整包下载 + 摘要校验
-python3 tools/verify/check_model_host.py --self-test     # 不联网验证判定逻辑
-```
-
-处置流程与换源方案见 `docs/model-host-runbook.md`。
-
-内置规则的新增 / 改文案走写入器，别手工贴 tab 分隔行（正文换行必须转义成字面量 `\n`，手贴极易拆行）：
-
-```bash
-python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 \
-  --content-file tools/quick/phrases/dtwsl.txt --mode exact --weight 110 --kind a
-```
-
-有则更新、无则新增（重复执行不产生第二条，条目总数不增长），`--check` 只比对不写盘。
-正文源文件放 `tools/quick/phrases/<trigger>.txt`；内置 5 位码 `dtwsl` → 泡池须知的取舍与两种输入态差异
-见 `docs/quick-phrase-enhancement.md` 12.6。
 
 ## 品牌设计
 

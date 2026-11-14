@@ -20,11 +20,6 @@
      -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
-10. 分类词库（细胞词库）：CellDictStore 目录 / 索引 / 正文解析复用用户词库 -> 稳定 id +
-     分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
-     词典页 SAF 安装 + 启停 / 删除 + 中英文案
-11. 候选条字重（VOCA-56）：候选词必须常规字重（不加粗），首选仍靠橙色 + 底色区分，
-     且类注释口径与实现一致
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -60,12 +55,9 @@ LOOKUP_ENGINE = JAVA / "engine" / "LookupEngine.kt"
 COMPOSITE_ENGINE = JAVA / "engine" / "CompositeEngine.kt"
 QUICK_LOCATOR = JAVA / "engine" / "QuickLocator.kt"
 PYINYIN_ENGINE = JAVA / "engine" / "PinyinEngine.kt"
-CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
 
 QUICK_SCREEN = JAVA / "settings" / "QuickPhrasesScreen.kt"
 SETTINGS_STORE = JAVA / "settings" / "store" / "SettingsStore.kt"
-CHINESE_INPUT_METHOD = JAVA / "settings" / "store" / "ChineseInputMethod.kt"
-INPUT_MODE = JAVA / "input" / "InputMode.kt"
 KEYBOARD_SETTINGS = JAVA / "settings" / "store" / "KeyboardSettings.kt"
 KEYBOARD_VM = JAVA / "settings" / "keyboard" / "KeyboardViewModel.kt"
 KEYBOARD_SCREEN = JAVA / "settings" / "KeyboardScreen.kt"
@@ -78,7 +70,6 @@ INPUT_STATS = JAVA / "data" / "InputStats.kt"
 PHRASE_USAGE = JAVA / "data" / "PhraseUsageStore.kt"
 USER_DICT_STORE = JAVA / "data" / "UserDictStore.kt"
 USER_DICT_ENGINE = JAVA / "engine" / "UserDictEngine.kt"
-CELL_DICT_STORE = JAVA / "data" / "CellDictStore.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
@@ -93,8 +84,6 @@ NAV_GRAPH = JAVA / "settings" / "nav" / "IspeechNavGraph.kt"
 HOME_SCREEN = JAVA / "settings" / "HomeScreen.kt"
 MAIN_ACTIVITY = JAVA / "settings" / "MainActivity.kt"
 BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
-
-INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VERIFY_DIR = ROOT / "tools" / "verify"
 
@@ -842,33 +831,14 @@ def check_voice_chain() -> None:
         f"{rel(KEYDEF)} 的 KeyAction 未声明 VOICE",
     )
     check(
-        "KeyAction.VOICE" in view and "ic_voice" in view,
-        "SoftKeyboardView 工具栏含 KeyAction.VOICE（图标 ic_voice）",
-        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE（ic_voice）",
+        "KeyAction.VOICE" in view and '"🎤"' in view,
+        "SoftKeyboardView 工具栏含 KeyAction.VOICE（「🎤」）",
+        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE「🎤」",
     )
     check(
         "KeyAction.VOICE -> toggleVoiceInput()" in service,
         "handleSoftKey 把 VOICE 接到 toggleVoiceInput()",
         f"{rel(SERVICE)} handleSoftKey 未把 VOICE 接到 toggleVoiceInput()",
-    )
-
-    # 8.1b 按住说话：两种引擎都要接线（系统引擎曾因早退直接失效）
-    gesture_tokens = (
-        "private fun onVoicePressDown()",
-        "private fun onVoicePressUp()",
-        "startFunAsrListening()",
-        "voiceController?.finish()",
-    )
-    missing = [t for t in gesture_tokens if t not in service]
-    check(
-        not missing,
-        "按住说话对两种引擎都接线：按下开始收音、抬起收尾上屏",
-        f"{rel(SERVICE)} 按住说话接线缺项：{missing}",
-    )
-    check(
-        "fun finish()" in controller and "stopListening()" in controller,
-        "VoiceInputController 提供 finish()：松手收尾但保留回调（结果仍要上屏）",
-        f"{rel(VOICE_CONTROLLER)} 缺少 finish()：系统引擎按松手无法收尾上屏",
     )
 
     # 8.2 VoiceInputController：系统识别器的关键约束
@@ -993,7 +963,7 @@ def check_voice_chain() -> None:
     en = _named_strings(STRINGS_EN)
     required = {
         "voice_listening", "voice_need_permission", "voice_no_match",
-        "voice_error_code", "voice_cancel", "voice_unavailable",
+        "voice_error", "voice_cancel", "voice_unavailable",
         "asr_title", "asr_description", "asr_engine_system", "asr_engine_custom",
         "asr_partial_desc", "asr_offline_desc", "asr_saved", "asr_save_failed",
     }
@@ -1323,395 +1293,6 @@ def check_user_dict_chain() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
-# 10. 分类词库（细胞词库）
-# ═════════════════════════════════════════════════════════════
-
-
-def _fnv1a64(text: str) -> str:
-    """复刻 CellDictStore.fnv1a64（FNV-1a 64 位，UTF-8 字节序，16 位小写十六进制）。"""
-    h = 0xCBF29CE484222325
-    for b in text.encode("utf-8"):
-        h ^= b
-        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return format(h, "016x")
-
-
-def _cell_dict_id(name: str, content: str) -> str:
-    """复刻 CellDictStore.cellDictId：`c1-` + FNV-1a64(显示名 + \\u0001 + 正文)。"""
-    return "c1-" + _fnv1a64(name + "\u0001" + content)
-
-
-def _parse_cell_index_line(line: str):
-    """复刻 CellDictStore.parseCellDictIndexLine → (id, name, category, enabled) 或 None。"""
-    trimmed = line.strip()
-    if not trimmed or trimmed.startswith("#"):
-        return None
-    fields = trimmed.split("\t")
-    if len(fields) < 4:
-        return None
-    cid = fields[0].strip()
-    if not cid:
-        return None
-    flag = fields[3].strip()
-    if flag not in ("0", "1"):
-        return None
-    return (
-        cid,
-        _user_dict_unescape(fields[1]).strip(),
-        _user_dict_unescape(fields[2]).strip(),
-        flag == "1",
-    )
-
-
-def _parse_cell_category(text: str):
-    """复刻 CellDictStore.parseCellDictCategory → 分类名或 None（认 `# category: X`）。"""
-    for line in text.split("\n"):
-        trimmed = line.strip()
-        if not trimmed.startswith("#"):
-            continue
-        body = trimmed[1:].strip()
-        if not body.lower().startswith("category"):
-            continue
-        rest = body[len("category"):].strip().lstrip(":：").strip()
-        if not rest:
-            continue
-        return rest[:32]
-    return None
-
-
-def check_cell_dict_chain() -> None:
-    cell_store = read(CELL_DICT_STORE)
-    cell_engine = read(CELL_DICT_ENGINE)
-    locator = read(QUICK_LOCATOR)
-    container = read(APP_CONTAINER)
-    dictionary_vm = read(DICTIONARY_VM)
-    dictionary_screen = read(DICTIONARY_SCREEN)
-
-    # 10.1 存储：目录 / 索引文件 / 正文解析复用用户词库（不做第二套解析）
-    check(
-        "class CellDictStore private constructor" in cell_store
-        and 'INDEX_FILE_NAME = "index.txt"' in cell_store,
-        "CellDictStore 以 cell_dicts/index.txt 为唯一索引",
-        f"{rel(CELL_DICT_STORE)} 缺少索引文件声明",
-    )
-    check(
-        "parseUserDictLine(rawLine, UserDictMode.WUBI)" in cell_store
-        and "internal fun parseUserDictLine" not in cell_store,
-        "分类词库正文复用用户词库行解析（无第二套规则）",
-        f"{rel(CELL_DICT_STORE)} 未复用 parseUserDictLine（解析规则会漂移）",
-    )
-    check(
-        all(
-            marker in cell_store
-            for marker in (
-                "fun list(): List<CellDictInfo>",
-                "fun entries(enabledOnly: Boolean = true)",
-                "fun add(name: String, content: String)",
-                "fun remove(id: String): Boolean",
-                "fun setEnabled(id: String, enabled: Boolean): Boolean",
-            )
-        ),
-        "CellDictStore 提供 列表 / 取词条 / 安装 / 删除 / 启停",
-        f"{rel(CELL_DICT_STORE)} 缺少安装 / 启停 / 删除接口",
-    )
-
-    # 10.2 索引行解析：合法 4 列可读；注释 / 列数不足 / 启用位非法一律跳过（复刻断言）
-    good = _parse_cell_index_line("c1-0123456789abcdef\t医学词库\t医学\t1")
-    disabled = _parse_cell_index_line("c1-0123456789abcdef\t医学词库\t医学\t0")
-    commented = _parse_cell_index_line("# 分类词库（细胞词库）索引")
-    short = _parse_cell_index_line("c1-abcdef\t医学词库\t医学")
-    bad_flag = _parse_cell_index_line("c1-abcdef\t医学词库\t医学\t2")
-    blank_id = _parse_cell_index_line("\t医学词库\t医学\t1")
-    check(
-        good == ("c1-0123456789abcdef", "医学词库", "医学", True),
-        "索引行解析出 id / 显示名 / 分类 / 启用",
-        f"索引行解析错误：{good}",
-    )
-    check(
-        disabled is not None and disabled[3] is False,
-        "启用位 0 解析为停用",
-        f"启用位 0 解析错误：{disabled}",
-    )
-    check(
-        commented is None and short is None and bad_flag is None and blank_id is None,
-        "注释 / 缺列 / 非法启用位 / 空 id 的索引行全部跳过（孤儿行不炸）",
-        f"坏索引行未被跳过：{commented}, {short}, {bad_flag}, {blank_id}",
-    )
-
-    # 10.3 稳定 id：同名同正文重复安装命中同 id，正文不同则不同 id
-    same_a = _cell_dict_id("医学词库", "xie\t血\twb\n")
-    same_b = _cell_dict_id("医学词库", "xie\t血\twb\n")
-    other = _cell_dict_id("医学词库", "xue\t血\tcn\n")
-    check(
-        same_a == same_b and same_a.startswith("c1-") and len(same_a) == 19 and same_a != other,
-        "词库 id = c1- + FNV-1a64(名 + \\u0001 + 正文)（重复安装幂等，不同正文不撞号）",
-        f"id 计算错误：{same_a} / {same_b} / {other}",
-    )
-    check(
-        '"c1-" + fnv1a64(name + "\\u0001" + content)' in cell_store
-        and "internal fun cellDictId(name: String, content: String)" in cell_store,
-        "id 生成只有一处实现（cellDictId）",
-        f"{rel(CELL_DICT_STORE)} 缺少 cellDictId 单一实现",
-    )
-
-    # 10.4 分类头：`# category: 医学` 可读，读不到回落界面文案
-    check(
-        _parse_cell_category("# category: 医学\nxie\t血") == "医学"
-        and _parse_cell_category("xie\t血") is None
-        and 'CATEGORY_KEY = "category"' in cell_store,
-        "分类头 `# category: X` 解析一致（读不到返回 null）",
-        "分类头解析与实现不一致",
-    )
-    check(
-        "if (enabledOnly && !meta.enabled) continue" in cell_store,
-        "entries(enabledOnly) 真的过滤掉停用词库",
-        f"{rel(CELL_DICT_STORE)} 未按启用位过滤词条",
-    )
-
-    # 10.5 引擎：LookupEngine + AssociationSource，按模式过滤，权重固定 8 万
-    check(
-        "class CellDictEngine(" in cell_engine
-        and ": LookupEngine, AssociationSource" in cell_engine,
-        "CellDictEngine 实现 LookupEngine + AssociationSource",
-        f"{rel(CELL_DICT_ENGINE)} 未实现查询 / 联想接口",
-    )
-    check(
-        cell_engine.count("if (entry.mode != mode) continue") == 2,
-        "CellDictEngine 查询与联想都按模式过滤（wb / cn 编码空间隔离）",
-        f"{rel(CELL_DICT_ENGINE)} 未按模式过滤（查到 {cell_engine.count('if (entry.mode != mode) continue')} 处）",
-    )
-    check(
-        "internal const val CELL_DICT_WEIGHT = 80_000" in cell_engine
-        and "UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE" in cell_engine
-        and "UserDictMode.PINYIN -> LookupKind.PINYIN" in cell_engine,
-        "权重 8 万（让位用户词 / 压过系统词），档位与用户词库一致",
-        f"{rel(CELL_DICT_ENGINE)} 权重或档位映射缺失",
-    )
-    check(
-        100_000 > 80_000 > 65_535 > 9_999,
-        "权重关系自洽：用户词(10万) > 分类词库(8万) > 系统五笔词(65535) > 拼音词(9999)",
-        "权重关系不自洽",
-    )
-
-    # 10.6 接线：QuickLocator 组装 + AppContainer 单例与引擎重建
-    check(
-        "includeCellDicts: Boolean = true" in locator
-        and "cellDict: CellDictStore? = null" in locator
-        and "CellDictEngine(cells, userDictMode)" in locator,
-        "QuickLocator.buildComposite 并入已启用的分类词库",
-        f"{rel(QUICK_LOCATOR)} 未组装分类词库引擎",
-    )
-    check(
-        'CELL_DICT_DIR_NAME = "cell_dicts"' in container
-        and "fun cellDict(context: Context): CellDictStore" in container
-        and "fun invalidateCellDict()" in container,
-        "AppContainer 提供 cellDict 单例与 invalidateCellDict",
-        f"{rel(APP_CONTAINER)} 缺少分类词库单例",
-    )
-    check(
-        "cellDict = cellDict(ctx)" in container
-        and "CellDictEngine(cells, UserDictMode.PINYIN)" in container,
-        "五笔态（buildEngineFromSettings）与拼音态（pinyinLookupEngine）都接上分类词库",
-        f"{rel(APP_CONTAINER)} 分类词库未接入引擎构建",
-    )
-    check(
-        "invalidateEngine()" in function_region(container, r"fun invalidateCellDict\(\)"),
-        "invalidateCellDict 同时让查询引擎重建（装了词库立刻生效）",
-        f"{rel(APP_CONTAINER)} invalidateCellDict 未失效引擎缓存",
-    )
-
-    # 10.7 词典页：SAF 安装 + 启停 / 删除 + 引擎重建
-    check(
-        "fun addCellDict(uri: Uri)" in dictionary_vm
-        and "fun removeCellDict(id: String)" in dictionary_vm
-        and "fun setCellDictEnabled(id: String, enabled: Boolean)" in dictionary_vm,
-        "DictionaryViewModel 提供 安装 / 删除 / 启停",
-        f"{rel(DICTIONARY_VM)} 缺少分类词库操作",
-    )
-    check(
-        "AppContainer.cellDict(app).add(cellDictName(uri), text)" in dictionary_vm
-        and "contentResolver.openInputStream(uri)" in dictionary_vm
-        and "AppContainer.invalidateCellDict()" in dictionary_vm,
-        "词典页走 contentResolver 读文件并落库 + 失效缓存",
-        f"{rel(DICTIONARY_VM)} 未接线分类词库安装",
-    )
-    check(
-        "cellAddLauncher" in dictionary_screen
-        and "viewModel.addCellDict(it)" in dictionary_screen
-        and "viewModel.setCellDictEnabled(info.id, it)" in dictionary_screen
-        and "viewModel.removeCellDict(info.id)" in dictionary_screen,
-        "词典页接上 SAF 安装入口与每库开关 / 删除",
-        f"{rel(DICTIONARY_SCREEN)} 未接分类词库 UI",
-    )
-    check(
-        "private fun CellDictRow(" in dictionary_screen
-        and "R.string.dict_cell_add" in dictionary_screen,
-        "词典页新增分类词库行（名称 / 分类 / 词条数 + 开关）",
-        f"{rel(DICTIONARY_SCREEN)} 缺少分类词库行",
-    )
-    zh = _named_strings(STRINGS)
-    en = _named_strings(STRINGS_EN)
-    cell_keys = (
-        "dict_cell_title",
-        "dict_cell_hint",
-        "dict_cell_add",
-        "dict_cell_empty",
-        "dict_cell_entry_count",
-        "dict_cell_category_unknown",
-        "dict_cell_added",
-        "dict_cell_updated",
-        "dict_cell_add_failed",
-        "dict_cell_remove",
-    )
-    missing_cell = sorted(k for k in cell_keys if k not in zh or k not in en)
-    check(
-        not missing_cell,
-        f"分类词库文案中英各齐 {len(cell_keys)} 项",
-        f"中英 strings.xml 缺分类词库文案：{missing_cell}",
-    )
-    unused_cell = sorted(k for k in cell_keys if f"R.string.{k}" not in dictionary_screen)
-    check(
-        not unused_cell,
-        f"分类词库文案全部接线（{len(cell_keys)} 项无孤儿）",
-        f"分类词库文案定义了但没人用：{unused_cell}",
-    )
-
-
-# ═════════════════════════════════════════════════════════════
-# 11. 候选条字重（VOCA-56）：候选词不加粗
-# ═════════════════════════════════════════════════════════════
-
-def check_candidate_style() -> None:
-    view = read(CANDIDATE_VIEW)
-    item_region = function_region(view, r"private fun createItemView\(")
-
-    # 11.1 候选文本用常规字重（Typeface.DEFAULT），不能再回到 DEFAULT_BOLD
-    check(
-        "typeface = Typeface.DEFAULT_BOLD" not in item_region
-        and "typeface = Typeface.DEFAULT" in item_region,
-        "候选词文本常规字重（createItemView 用 Typeface.DEFAULT）",
-        f"{rel(CANDIDATE_VIEW)} createItemView 仍把候选词设为粗体"
-        "（VOCA-56 要求候选词不加粗）",
-    )
-
-    # 11.2 首选 / 非首选只靠颜色 + 底色区分，字重保持一致
-    check(
-        "setTextColor(if (highlighted) PICKED_TEXT else TEXT_PRIMARY)" in item_region,
-        "首选与非首选靠颜色 / 底色区分（字重一致）",
-        f"{rel(CANDIDATE_VIEW)} 候选高亮不再走颜色区分（首选识别会退化）",
-    )
-
-    # 11.3 KDoc 口径：注释里不能仍声明候选「加粗」，否则下一次改样式会被误导
-    #（允许否定句「不加粗」——它记录的是这次的决定本身）
-    kdoc = view.split("class CandidateView", 1)[0]
-    bold_claims = [ln for ln in kdoc.splitlines() if "加粗" in ln and "不加粗" not in ln]
-    check(
-        not bold_claims,
-        "CandidateView 类注释已去掉「加粗」口径",
-        f"{rel(CANDIDATE_VIEW)} 类注释仍声明候选「加粗」，与实现不符：{bold_claims}",
-    )
-
-
-# ═════════════════════════════════════════════════════════════
-
-def check_chinese_input_method() -> None:
-    """新增中文输入法设置：设置项 -> 持久化 -> UI / 内置面板 -> 中英切换策略。"""
-    enum_src = read(CHINESE_INPUT_METHOD)
-    check(
-        "enum class ChineseInputMethod" in enum_src
-        and 'PINYIN("拼音")' in enum_src
-        and 'WUBI("五笔")' in enum_src
-        and "?: PINYIN" in enum_src,
-        "ChineseInputMethod 枚举含拼音 / 五笔，未知值回落拼音",
-        f"{rel(CHINESE_INPUT_METHOD)} 枚举或默认值缺失",
-    )
-
-    store = read(SETTINGS_STORE)
-    check(
-        'stringPreferencesKey("input_method_mode")' in store
-        and "fun chineseInputMethodFlow(" in store
-        and "ChineseInputMethod.parse(" in store
-        and "fun setChineseInputMethod(" in store
-        and "fun chineseInputMethod(" in store,
-        "SettingsStore 提供中文输入法 flow / 阻塞读取 / 写入（沿用旧 key）",
-        f"{rel(SETTINGS_STORE)} 中文输入法持久化未闭环",
-    )
-
-    vm = read(KEYBOARD_VM)
-    check(
-        "chineseInputMethodFlow(app)" in vm
-        and "val chineseInputMethod" in vm
-        and "fun setChineseInputMethod(" in vm,
-        "KeyboardViewModel 订阅并暴露中文输入法设置",
-        f"{rel(KEYBOARD_VM)} 未接中文输入法状态",
-    )
-
-    screen = read(KEYBOARD_SCREEN)
-    check(
-        'KeyboardCardTitle("中文输入法")' in screen
-        and "ChineseInputMethod.entries" in screen
-        and "viewModel.setChineseInputMethod(it)" in screen,
-        "设置页新增「中文输入法」卡片并接单选",
-        f"{rel(KEYBOARD_SCREEN)} 缺少中文输入法卡片",
-    )
-
-    panel = read(SETTINGS_PANEL)
-    check(
-        "onChineseInputMethodChange" in panel
-        and "R.string.panel_chinese_input_method" in panel
-        and "ChineseInputMethod.entries" in panel,
-        "键盘内置设置面板新增中文输入法切换行",
-        f"{rel(SETTINGS_PANEL)} 未接中文输入法行",
-    )
-
-    service = read(SERVICE)
-    check(
-        "InputModePolicy.toggle(mode, chineseInputMethod)" in service
-        and "InputModePolicy.chineseMode(chineseInputMethod)" in service
-        and "applyChineseInputMethodChange" in service,
-        "输入法服务按设置做「中文 ⇄ 英文」两态切换",
-        f"{rel(SERVICE)} 未接 InputModePolicy",
-    )
-    check(
-        "InputMode.WUBI -> InputMode.PINYIN" not in service,
-        "旧的三态循环（五笔 → 拼音 → 英文）已移除",
-        f"{rel(SERVICE)} 仍保留三态循环",
-    )
-
-    policy = read(INPUT_MODE)
-    check(
-        "enum class InputMode" in policy
-        and "object InputModePolicy" in policy
-        and "if (current == InputMode.ENGLISH) chineseMode(method) else InputMode.ENGLISH" in policy,
-        "InputModePolicy 只做中文态 / 英文态两态切换",
-        f"{rel(INPUT_MODE)} 切换策略缺失",
-    )
-
-    test = read(INPUT_MODE_TEST)
-    check(
-        "InputModePolicy.toggle(InputMode.WUBI, ChineseInputMethod.WUBI)" in test
-        and "InputModePolicy.toggle(InputMode.ENGLISH, ChineseInputMethod.WUBI)" in test
-        and "ChineseInputMethod.PINYIN" in test,
-        "回归测试覆盖默认五笔 / 默认拼音两条中英切换路径",
-        f"{rel(INPUT_MODE_TEST)} 缺少中英切换回归用例",
-    )
-
-    zh = _named_strings(STRINGS)
-    en = _named_strings(STRINGS_EN)
-    keys = (
-        "panel_chinese_input_method",
-        "panel_chinese_input_pinyin",
-        "panel_chinese_input_wubi",
-    )
-    missing = sorted(k for k in keys if k not in zh or k not in en)
-    check(
-        not missing,
-        "中文输入法内置面板文案中英各齐",
-        f"中英 strings.xml 缺中文输入法文案：{missing}",
-    )
-
-
-# ═════════════════════════════════════════════════════════════
 
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
@@ -1733,12 +1314,6 @@ def main() -> int:
     check_voice_chain()
     print("-- 9. 用户词库（模式 / 自造词 / 拼音态）--")
     check_user_dict_chain()
-    print("-- 10. 分类词库（细胞词库）--")
-    check_cell_dict_chain()
-    print("-- 11. 中文输入法（默认拼音 / 五笔 + 中英切换）--")
-    check_chinese_input_method()
-    print("-- 12. 候选条字重（VOCA-56）--")
-    check_candidate_style()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

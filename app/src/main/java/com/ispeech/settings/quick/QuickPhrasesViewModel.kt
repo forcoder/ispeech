@@ -1,26 +1,19 @@
 package com.ispeech.settings.quick
 
 import android.app.Application
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ispeech.R
 import com.ispeech.data.CsBabyAuthStore
-import com.ispeech.data.PhraseCsvImport
-import com.ispeech.data.PhraseCsvImportResult
 import com.ispeech.data.PhraseMatch
 import com.ispeech.data.PhraseSearch
 import com.ispeech.data.PhraseUsageStore
-import com.ispeech.data.RemoteKeywordRule
 import com.ispeech.data.SyncRepository
 import com.ispeech.data.unescapeLineText
 import com.ispeech.di.AppContainer
 import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickMatchMode
-import com.ispeech.engine.QuickOverride
-import com.ispeech.engine.QuickSource
-import com.ispeech.data.remote.RuleUpsertRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,23 +21,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-
-/** 远端规则的展示信息：原始远端条目 + 用户覆盖的快捷字母（未覆盖为 null）。 */
-data class RemoteRuleInfo(
-    val original: QuickEntry,
-    val overrideTrigger: String?,
-)
 
 /** 快捷短语页界面状态。 */
 data class QuickPhrasesUiState(
     val loading: Boolean = true,
-    /** 用户规则：唯一会被保存 / 同步的列表。 */
     val entries: List<QuickEntry> = emptyList(),
-    /** 远端拉取规则：只读展示，绝不会写回用户文件。 */
-    val remoteEntries: List<QuickEntry> = emptyList(),
-    /** 远端展示 id -> 原始条目 / 覆盖快捷字母，用于来源角标与「恢复默认」。 */
-    val remoteInfo: Map<String, RemoteRuleInfo> = emptyMap(),
     /** 搜索栏关键词；空串表示不过滤（列表按使用频次 / 收藏 / 权重排序）。 */
     val keyword: String = "",
     /** 搜索 + 智能联想后的结果（与 [entries] 同源，仅排序 / 过滤不同）。 */
@@ -78,100 +59,31 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
     /** 已收藏 id 集合，[load] 时读盘，供联想排序使用。 */
     private var starredIds: Set<String> = emptySet()
 
-    private companion object {
-        /** 覆盖条目相对远端规则的权重加成，保证候选排序时压过原远端条目。 */
-        const val REMOTE_OVERRIDE_WEIGHT_BONUS = 1000
-    }
-
     init {
         load()
     }
 
-    /** 读取用户文件 / 远端文件与使用记录；文件不存在时对应来源为空。 */
+    /** 读取用户文件与使用记录；文件不存在时展示空列表。 */
     fun load() {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
-                val user = parseFile(AppContainer.quickPhrasesUserFile(app))
-                    .map { it.copy(source = QuickSource.USER) }
-                val remote = parseFile(AppContainer.quickPhrasesRemoteFile(app))
-                    .map { it.copy(source = QuickSource.REMOTE) }
+                val entries = runCatching {
+                    val file = AppContainer.quickPhrasesUserFile(app)
+                    if (file.exists()) QuickPhraseCodec.parse(file.readText()) else emptyList()
+                }.getOrElse { emptyList() }
                 // 使用记录只在这里读一次：之后每次输入关键词都只做纯计算
                 val store = AppContainer.phraseUsage(app)
-                val merged = mergeForDisplay(user, remote)
-                val ids = HashSet<String>()
-                user.forEach { ids.add(PhraseUsageStore.idOf(it)) }
-                remote.forEach { ids.add(PhraseUsageStore.idOf(it)) }
-                merged.entries.forEach { ids.add(PhraseUsageStore.idOf(it)) }
-                val counts = HashMap<String, Int>()
-                for (id in ids) {
-                    val count = store.countOf(id)
-                    if (count > 0) counts[id] = count
-                }
+                val ids = entries.map { PhraseUsageStore.idOf(it) }
+                val counts = ids.associateWith { store.countOf(it) }.filterValues { it > 0 }
                 val starred = ids.filterTo(HashSet()) { store.isStarred(it) }
-                // 覆盖后 trigger 变了、id 也随之变化：把原远端规则的次数 / 收藏并到新 id
-                for ((displayId, originalId) in merged.originalIdById) {
-                    val count = maxOf(counts[displayId] ?: 0, counts[originalId] ?: 0)
-                    if (count > 0) counts[displayId] = count
-                    if (originalId in starred) starred.add(displayId)
-                }
-                LoadedPhrases(user, remote, counts, starred)
+                Triple(entries, counts, starred as Set<String>)
             }
-            usageCounts = loaded.usage
-            starredIds = loaded.starred
+            usageCounts = loaded.second
+            starredIds = loaded.third
             _uiState.update {
-                it.copy(
-                    entries = loaded.user,
-                    remoteEntries = loaded.remote,
-                    loading = false,
-                ).withMatches()
+                it.copy(entries = loaded.first, loading = false).withMatches()
             }
         }
-    }
-
-    /** 读取规则文件；不存在或解析失败返回空列表（单个来源损坏不影响另一个来源）。 */
-    private fun parseFile(file: File): List<QuickEntry> = runCatching {
-        if (file.exists()) QuickPhraseCodec.parse(file.readText()) else emptyList()
-    }.getOrElse { emptyList() }
-
-    /**
-     * 合并用户 / 远端规则用于展示。
-     *
-     * 用户文件里 label + content 与某条远端规则相同的条目视为该规则的「快捷字母覆盖」：
-     * 用覆盖条目的 trigger / mode / kind 替换远端条目展示，并从用户卡片中移除，避免同一条短语
-     * 出现两次；返回的 [DisplayMerge.infoById] 以展示 id 为键，供 UI 判断来源与「恢复默认」。
-     * 没匹配到远端的用户条目（普通规则 / 远端已删除后遗留的覆盖）照常展示。
-     */
-    private fun mergeForDisplay(
-        user: List<QuickEntry>,
-        remote: List<QuickEntry>,
-    ): DisplayMerge {
-        val overrides = HashMap<Pair<String, String>, ArrayDeque<QuickEntry>>()
-        user.forEach { entry ->
-            overrides.getOrPut(entry.label to entry.content) { ArrayDeque() }.addLast(entry)
-        }
-        val display = ArrayList<QuickEntry>(user.size + remote.size)
-        val infoById = LinkedHashMap<String, RemoteRuleInfo>()
-        val originalIdById = LinkedHashMap<String, String>()
-        val consumed = HashSet<String>()
-        remote.forEach { rule ->
-            val override = overrides[rule.label to rule.content]?.removeFirstOrNull()
-            val effective = if (override == null) {
-                rule
-            } else {
-                consumed.add(override.trigger)
-                rule.copy(
-                    trigger = override.trigger,
-                    mode = override.mode,
-                    kind = override.kind,
-                )
-            }
-            val displayId = PhraseUsageStore.idOf(effective)
-            infoById[displayId] = RemoteRuleInfo(rule, override?.trigger)
-            originalIdById[displayId] = PhraseUsageStore.idOf(rule)
-            display.add(effective)
-        }
-        display.addAll(user.filterNot { it.trigger in consumed })
-        return DisplayMerge(display, infoById, originalIdById)
     }
 
     /** 搜索栏输入：实时过滤 + 联想。 */
@@ -184,102 +96,16 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
         setKeyword("")
     }
 
-    /**
-     * 导入「通用短语」CSV（GBK / UTF-8 自动识别）到本地快捷短语。
-     *
-     * 只改内存列表 + 标记 dirty，由用户点「保存并同步」统一落盘 / 上传（与手动新增同一套契约）；
-     * 同 trigger 的已有用户规则被导入条目覆盖，其余保留。导入条数 / 跳过原因如实提示，
-     * 因为源 CSV 里确实存在无快捷字母、同码重复、超 4 位的行。
-     */
-    fun importPhraseCsv(uri: Uri) {
-        viewModelScope.launch {
-            val parsed = runCatching {
-                withContext(Dispatchers.IO) {
-                    val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: error("无法读取所选文件")
-                    PhraseCsvImport.parse(PhraseCsvImport.decode(bytes))
-                }
-            }.getOrElse { throwable ->
-                _uiState.update {
-                    it.copy(
-                        tip = app.getString(
-                            R.string.quick_import_failed,
-                            throwable.message ?: "未知错误",
-                        )
-                    )
-                }
-                return@launch
-            }
-
-            val formatError = parsed.formatError
-            if (formatError != null) {
-                _uiState.update { it.copy(tip = app.getString(R.string.quick_import_failed, formatError)) }
-                return@launch
-            }
-            if (parsed.entries.isEmpty()) {
-                _uiState.update { it.copy(tip = app.getString(R.string.quick_import_empty)) }
-                return@launch
-            }
-
-            val imported = parsed.entries.map { it.copy(source = QuickSource.USER) }
-            val incomingTriggers = imported.mapTo(HashSet()) { it.trigger }
-            _uiState.update { state ->
-                val replaced = state.entries.count { it.trigger in incomingTriggers }
-                val kept = state.entries.filterNot { it.trigger in incomingTriggers }
-                state.copy(
-                    entries = kept + imported,
-                    dirty = true,
-                    tip = importTip(parsed, replaced),
-                ).withMatches()
-            }
-        }
-    }
-
-    /** 导入提示：条数 + 跳过 / 需知项（无跳过时用更短的文案）。 */
-    private fun importTip(result: PhraseCsvImportResult, replaced: Int): String {
-        val details = ArrayList<String>()
-        if (result.skippedDuplicateCode > 0) {
-            details.add(app.getString(R.string.quick_import_detail_duplicate, result.skippedDuplicateCode))
-        }
-        if (result.skippedNoCode > 0) {
-            details.add(app.getString(R.string.quick_import_detail_no_code, result.skippedNoCode))
-        }
-        if (result.skippedBadCode > 0) {
-            details.add(app.getString(R.string.quick_import_detail_bad_code, result.skippedBadCode))
-        }
-        if (result.skippedDeleted > 0) {
-            details.add(app.getString(R.string.quick_import_detail_deleted, result.skippedDeleted))
-        }
-        if (result.skippedEmptyContent > 0) {
-            details.add(app.getString(R.string.quick_import_detail_empty, result.skippedEmptyContent))
-        }
-        if (result.longCodeCount > 0) {
-            details.add(app.getString(R.string.quick_import_detail_long, result.longCodeCount))
-        }
-        if (result.singleLetterCount > 0) {
-            details.add(app.getString(R.string.quick_import_detail_single, result.singleLetterCount))
-        }
-        if (replaced > 0) {
-            details.add(app.getString(R.string.quick_import_detail_replaced, replaced))
-        }
-        return if (details.isEmpty()) {
-            app.getString(R.string.quick_import_done_clean, result.entries.size)
-        } else {
-            app.getString(R.string.quick_import_done, result.entries.size, details.joinToString("；"))
-        }
-    }
-
     /** 新增或按触发词覆盖同一规则。 */
     fun upsert(entry: QuickEntry) {
-        val userEntry = entry.copy(source = QuickSource.USER)
         _uiState.update { state ->
             val list = state.entries.toMutableList()
-            val index = list.indexOfFirst { it.trigger == userEntry.trigger }
-            if (index >= 0) list[index] = userEntry else list.add(userEntry)
+            val index = list.indexOfFirst { it.trigger == entry.trigger }
+            if (index >= 0) list[index] = entry else list.add(entry)
             state.copy(
                 entries = list,
                 dirty = true,
-                tip = "已更新「${userEntry.trigger}」，点击右上角「保存并同步」写入并上传",
+                tip = "已更新「${entry.trigger}」，点击右上角「保存并同步」写入并上传",
             ).withMatches()
         }
     }
@@ -291,52 +117,6 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
                 entries = state.entries.filterNot { it.trigger == entry.trigger },
                 dirty = true,
                 tip = "已删除「${entry.trigger}」，点击右上角「保存并同步」写入并上传",
-            ).withMatches()
-        }
-    }
-
-    /**
-     * 给远端规则设置快捷字母：不改远端文件，而是在用户规则里写一条覆盖条目。
-     *
-     * 覆盖条目复制远端的 label / content / kind，trigger 换成用户选的快捷字母，
-     * weight 比远端高 [REMOTE_OVERRIDE_WEIGHT_BONUS]，确保 [CompositeEngine] 全局排序后
-     * 先于原远端条目被按 display 去重。mode 固定 prefix：快捷字母按前缀输入即可命中，
-     * 不能沿用远端的 regex / contains 语义（trigger 是字母，不是正则 / 中文关键词）。
-     */
-    fun setRemoteShortcut(original: QuickEntry, trigger: String) {
-        val shortcut = trigger.trim().lowercase()
-        // 防御性校验：正常入口已在弹窗里禁用非法输入
-        if (shortcut.length !in 2..4 || shortcut.any { it !in 'a'..'z' }) return
-        val override = QuickEntry(
-            trigger = shortcut,
-            label = original.label,
-            content = original.content,
-            weight = original.weight + REMOTE_OVERRIDE_WEIGHT_BONUS,
-            mode = QuickMatchMode.PREFIX,
-            kind = original.kind,
-            source = QuickSource.USER,
-        )
-        _uiState.update { state ->
-            // 同一条远端规则只保留一条覆盖；重新设置时直接替换。
-            // 同时按 trigger 覆盖已有用户规则，避免用户文件出现同 trigger 两行（解析时后者会吞掉前者）
-            val cleaned = state.entries.filterNot {
-                QuickOverride.matches(it, original) || it.trigger == shortcut
-            }
-            state.copy(
-                entries = cleaned + override,
-                dirty = true,
-                tip = app.getString(R.string.quick_remote_override_set, shortcut),
-            ).withMatches()
-        }
-    }
-
-    /** 删除远端规则的本地覆盖条目，恢复远端默认快捷字母。 */
-    fun removeRemoteOverride(original: QuickEntry) {
-        _uiState.update { state ->
-            state.copy(
-                entries = state.entries.filterNot { QuickOverride.matches(it, original) },
-                dirty = true,
-                tip = app.getString(R.string.quick_remote_override_restored),
             ).withMatches()
         }
     }
@@ -470,40 +250,18 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
 
     /** 按当前关键词重算过滤 + 联想结果（纯计算，不碰磁盘）。 */
     private fun QuickPhrasesUiState.withMatches(): QuickPhrasesUiState {
-        // 用户条目（含覆盖）与远端条目一起搜索：搜索 / 智能联想对两种来源都生效
-        val merged = mergeForDisplay(entries, remoteEntries)
         val search = PhraseSearch(
             usageCount = { id -> usageCounts[id] ?: 0 },
             starredFlag = { id -> id in starredIds },
         )
         return copy(
-            // 管理页要能看到每一条规则：
-            // - 页头「共 N 条」直接取 matches.size，截断会把 224 条显示成 200 条；
-            // - 被截掉的规则用户既搜不到也删不掉。
-            // 输入法候选面板仍走 PhraseSearch.DEFAULT_LIMIT（200 条足够）。
             matches = search.search(
-                entries = merged.entries,
+                entries = entries,
                 keyword = keyword,
-                limit = Int.MAX_VALUE,
-            ),
-            remoteInfo = merged.infoById,
+                limit = PhraseSearch.DEFAULT_LIMIT,
+            )
         )
     }
-
-    /** [load] 的 IO 结果：用户 / 远端规则与使用数据快照。 */
-    private data class LoadedPhrases(
-        val user: List<QuickEntry>,
-        val remote: List<QuickEntry>,
-        val usage: Map<String, Int>,
-        val starred: Set<String>,
-    )
-
-    /** 展示合并结果：展示条目 + 远端展示信息 + 覆盖前的原始 id（用于沿用使用记录）。 */
-    private data class DisplayMerge(
-        val entries: List<QuickEntry>,
-        val infoById: Map<String, RemoteRuleInfo>,
-        val originalIdById: Map<String, String>,
-    )
 }
 
 /**

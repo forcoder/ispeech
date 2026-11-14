@@ -21,10 +21,8 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import com.ispeech.R
 import com.ispeech.data.ClipboardHistory
-import com.ispeech.data.AiLearningStore
 import com.ispeech.data.CommitType
 import com.ispeech.data.CsBabyAuthStore
-import com.ispeech.data.DirectLlmClient
 import com.ispeech.data.HanConversion
 import com.ispeech.data.InputStats
 import com.ispeech.data.PhraseUsageStore
@@ -32,7 +30,7 @@ import com.ispeech.data.Punctuation
 import com.ispeech.data.PunctuationConverter
 import com.ispeech.data.UserDictStore
 import com.ispeech.data.UserDictMode
-import com.ispeech.data.FunAsrModelStore
+import com.ispeech.data.VoskModelStore
 import com.ispeech.di.AppContainer
 import com.ispeech.engine.CompositeEngine
 import com.ispeech.engine.LookupCandidate
@@ -46,10 +44,8 @@ import com.ispeech.input.keyboard.KeyDef
 import com.ispeech.input.keyboard.KeyboardLayoutKind
 import com.ispeech.input.keyboard.T9Layouts
 import com.ispeech.settings.REQUEST_MIC_EXTRA
-import com.ispeech.input.FunAsrSpeechEngine
 import com.ispeech.settings.store.AsrEngine
 import com.ispeech.settings.store.AsrSettings
-import com.ispeech.settings.store.ChineseInputMethod
 import com.ispeech.settings.store.KeyboardSettings
 import com.ispeech.settings.store.SettingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -64,9 +60,9 @@ import kotlinx.coroutines.withContext
  * 智语 iSpeech 输入法服务。
  *
  * 输入状态机：
- * - [InputMode.WUBI]：a-z 进五笔缓冲码（最多 4 位）→ 查询候选 → 空格 / 回车 / 数字键上屏
- * - [InputMode.PINYIN]：a-z 进拼音组合串（最多 12 位）→ 拼音引擎（全拼 / 简拼）出候选；中/英切换见 [toggleMode]
- * - [InputMode.ENGLISH]：字母直接上屏，Shift 出大写
+ * - [Mode.WUBI]：a-z 进五笔缓冲码（最多 4 位）→ 查询候选 → 空格 / 回车 / 数字键上屏
+ * - [Mode.PINYIN]：a-z 进拼音组合串（最多 12 位）→ 拼音引擎（全拼 / 简拼）出候选；切换顺序见 [toggleMode]
+ * - [Mode.ENGLISH]：字母直接上屏，Shift 出大写
  * - 数字 / 符号 / 表情布局：按键直接上屏（不经缓冲）
  * - 上屏后按设置给出「联想」候选（词库词组 + 快捷短语 + 用户词）
  *
@@ -81,7 +77,6 @@ import kotlinx.coroutines.withContext
 class IspeechImeService : InputMethodService() {
 
     companion object {
-
         private const val TAG = "IspeechIme"
 
         /** 五笔编码最长 4 位 */
@@ -103,12 +98,6 @@ class IspeechImeService : InputMethodService() {
 
         /** AI 生成时从输入框读取的最大字符数 */
         private const val AI_MAX_MESSAGE_CHARS = 1000
-
-        /** 打开快捷短语面板时，从输入框带进搜索框的最大字数。 */
-        private const val PANEL_SEED_MAX_CHARS = 20
-
-        /** AI 键命中快捷短语时最多展示几条建议回复 */
-        private const val QUICK_REPLY_LIMIT = 20
 
         /** 只有较短的词才写进用户词库；长文本说明是快捷短语内容 */
         private const val MAX_LEARN_TEXT_LENGTH = 8
@@ -139,18 +128,21 @@ class IspeechImeService : InputMethodService() {
         }
     }
 
-    // 输入态定义见 InputMode / InputModePolicy：中文态（五笔 / 拼音）与英文态两态切换。
+    /**
+     * 输入态：五笔 / 拼音 / 英文。
+     *
+     * 字母页左下角「中/英」键单击按 五笔 → 拼音 → 英文 → 五笔 循环（见 [toggleMode]）。
+     * 五笔与拼音都是「中文态」——字母进组合缓冲再由候选上屏；英文态字母直接上屏。
+     */
+    private enum class Mode { WUBI, PINYIN, ENGLISH }
 
     /** 当前展示的辅助面板 */
-    private enum class Panel { NONE, QUICK_PHRASE, CLIPBOARD, SWITCH_IME, SETTINGS, VOICE, AI_REPLY }
+    private enum class Panel { NONE, QUICK_PHRASE, CLIPBOARD, SWITCH_IME, SETTINGS }
 
     private var engine: CompositeEngine? = null
 
     /** 键盘设置（高度、候选数、标点、联想、学习…），随 DataStore 实时更新 */
     private var settings: KeyboardSettings = KeyboardSettings()
-
-    /** 中文输入法设置（拼音 / 五笔）：中文态默认用哪种，也是中/英切回中文的目标。 */
-    private var chineseInputMethod: ChineseInputMethod = ChineseInputMethod.PINYIN
 
     /** 语音识别设置（引擎 / 语言 / 模型…），随 DataStore 实时更新 */
     private var asr: AsrSettings = AsrSettings()
@@ -158,8 +150,7 @@ class IspeechImeService : InputMethodService() {
     /** 标点转换器（内部有引号配对状态） */
     private val punctor = PunctuationConverter()
 
-    /** 当前输入态；默认拼音（设置页「中文输入法」的初始选择）。 */
-    private var mode: InputMode = InputMode.PINYIN
+    private var mode: Mode = Mode.WUBI
     private var panel: Panel = Panel.NONE
 
     /** 当前组合中的五笔编码，只含 a-z，最多 4 位 */
@@ -225,12 +216,6 @@ class IspeechImeService : InputMethodService() {
     /** 请求序号：用户继续输入 / 切换输入框后使旧结果失效 */
     private var aiRequestSeq = 0
 
-    /** 当前候选是否由大模型生成（快捷短语命中的不算，不上报采纳率） */
-    private var aiReplyFromModel = false
-
-    /** 建议回复的本地学习库：记录采纳的回复 + 采纳率统计 */
-    private val aiLearning by lazy { AiLearningStore(this) }
-
     /** 候选条编码区状态提示（如「AI 生成中…」），非空时优先展示 */
     private var statusText: String? = null
 
@@ -242,20 +227,11 @@ class IspeechImeService : InputMethodService() {
     /** 系统语音识别封装（onCreate 主线程创建，onDestroy 释放） */
     private var voiceController: VoiceInputController? = null
 
-    /** FunASR 离线识别引擎，与 [voiceController] 按「识别引擎」设置二选一 */
-    private var funasrVoice: FunAsrSpeechEngine? = null
+    /** 端侧离线识别（Vosk）引擎，与 [voiceController] 按「识别引擎」设置二选一 */
+    private var voskVoice: VoskSpeechEngine? = null
 
     /** 离线模型是否正在下载（避免重复触发下载任务） */
-    private var funasrDownloading: Boolean = false
-
-    /** 语音面板（搜狗风格：波形 + 实时文字 + 上滑取消） */
-    private var voicePanel: VoicePanelView? = null
-
-    /** AI 参考结果列表（一行一条，超过 10 条可滚动） */
-    private var aiReplyPanel: AiReplyPanel? = null
-
-    /** 语音键是否已上滑进入取消区（松手时据此丢弃而非上屏）。 */
-    private var voiceCancelArmed: Boolean = false
+    private var voskDownloading: Boolean = false
 
     /** 当前候选是否为语音识别结果（空格 / 点选上屏后复位） */
     private var voiceActive = false
@@ -263,30 +239,15 @@ class IspeechImeService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         engineGeneration = AppContainer.engineGeneration()
+        engine = AppContainer.compositeEngine(this)
         settings = SettingsStore.keyboardSettings(this)
         asr = SettingsStore.asrSettings(this)
-        chineseInputMethod = SettingsStore.chineseInputMethod(this)
-        // 引擎构建是纯 CPU 解析（五笔词库 + 拼音词表 + 内置/远端/用户全部快捷规则），
-        // 必须放到后台线程：在主线程做会阻塞输入事件分发，**首次弹出键盘就 ANR**
-        // （实测华为 ALN-AL00：Input dispatching timed out，等待 MotionEvent 超 5s）。
-        // 引擎就绪后补一次刷新，用户在等待期打的字不会丢（buffer 留着）。
-        serviceScope.launch {
-            val built = withContext(Dispatchers.Default) {
-                runCatching { AppContainer.compositeEngine(this@IspeechImeService) }.getOrNull()
-            }
-            // 期间设置又改过：以最新代次为准，本次结果丢弃（与 refreshEngineIfStale 同规则）
-            if (built == null || engineGeneration != AppContainer.engineGeneration()) return@launch
-            engine = built
-            if (buffer.isNotEmpty()) refreshCandidates() else renderCandidateView()
-        }
         // SpeechRecognizer 必须在主线程创建，onCreate 即在主线程
         voiceController = VoiceInputController(applicationContext)
-        funasrVoice = FunAsrSpeechEngine(applicationContext)
-        // 预热拼音引擎（含拼音态复合引擎）：切到拼音态后首键即用，
-        // 否则首个拼音键会在主线程建索引，同样卡输入
+        voskVoice = VoskSpeechEngine(applicationContext)
+        // 预热拼音引擎：切到拼音态后首键即用，避免首次上屏时在主线程加载拼音词表造成卡顿
         serviceScope.launch(Dispatchers.Default) {
             runCatching { AppContainer.pinyinEngine(this@IspeechImeService) }
-            runCatching { AppContainer.pinyinLookupEngine(this@IspeechImeService) }
         }
         observeSettings()
     }
@@ -306,21 +267,10 @@ class IspeechImeService : InputMethodService() {
         // 软键盘
         val keyboard = root.findViewById<SoftKeyboardView>(R.id.soft_keyboard)
         keyboard.onKey = { key -> handleSoftKey(key) }
-        // 语音键走「按住说话」手势：按下开始、松手上屏、上滑取消（搜狗语义）
-        keyboard.onVoicePress = { pressed ->
-            if (pressed) onVoicePressDown() else onVoicePressUp()
-        }
-        keyboard.onVoiceCancelArmed = { armed ->
-            voiceCancelArmed = armed
-            voicePanel?.setCancelArmed(armed)
-        }
-        // 空格键按住 ≥1s 直接进入语音输入：与语音键共用同一套按下 / 抬起语义
-        keyboard.onSpaceLongPress = { onVoicePressDown() }
-        keyboard.onSpaceLongPressEnd = { onVoicePressUp() }
         keyboard.keyHeightDp = settings.keyHeightDp
         keyboard.vibrate = settings.vibrate
-        keyboard.setEnglishMode(mode == InputMode.ENGLISH)
-        keyboard.setPinyinMode(mode == InputMode.PINYIN)
+        keyboard.setEnglishMode(mode == Mode.ENGLISH)
+        keyboard.setPinyinMode(mode == Mode.PINYIN)
         keyboard.setLayout(KeyboardLayoutKind.LETTER)
         softKeyboard = keyboard
 
@@ -354,15 +304,7 @@ class IspeechImeService : InputMethodService() {
         panelSettings.onOpenFullSettings = { launchSettingsActivity() }
         panelSettings.onToggle = { key, value -> applySettingsToggle(key, value) }
         panelSettings.onAsrChange = { next -> applyAsrChange(next) }
-        panelSettings.onChineseInputMethodChange = { next -> applyChineseInputMethodChange(next) }
         settingsPanel = panelSettings
-
-        // 语音面板（搜狗风格）：收音期间显示波形与实时文字
-        val replyPanel = root.findViewById<AiReplyPanel>(R.id.ai_reply_panel)
-        replyPanel.onPick = { index -> commitAiReply(index) }
-        replyPanel.onClose = { closePanel() }
-        aiReplyPanel = replyPanel
-        voicePanel = root.findViewById(R.id.voice_panel)
 
         root.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -381,14 +323,6 @@ class IspeechImeService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         refreshEngineIfStale()
-        softKeyboard?.spaceLongPressMs = SettingsStore.voiceSpaceLongPressMs(this).toLong()
-        // 设置页「中文输入法」决定中文态默认输入法（默认拼音）；英文态是临时状态，不覆盖。
-        // 从英文切回中文时由 toggleMode 依据同一设置回到五笔 / 拼音。
-        chineseInputMethod = SettingsStore.chineseInputMethod(this)
-        if (mode != InputMode.ENGLISH) {
-            mode = InputModePolicy.chineseMode(chineseInputMethod)
-            softKeyboard?.setPinyinMode(mode == InputMode.PINYIN)
-        }
         punctor.reset()
         renderCandidateView()
     }
@@ -410,8 +344,8 @@ class IspeechImeService : InputMethodService() {
     override fun onDestroy() {
         voiceController?.destroy()
         voiceController = null
-        funasrVoice?.destroy()
-        funasrVoice = null
+        voskVoice?.destroy()
+        voskVoice = null
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -423,28 +357,14 @@ class IspeechImeService : InputMethodService() {
                 settings = latest
                 softKeyboard?.keyHeightDp = latest.keyHeightDp
                 softKeyboard?.vibrate = latest.vibrate
-                if (panel == Panel.SETTINGS) settingsPanel?.submit(latest, asr, chineseInputMethod)
+                if (panel == Panel.SETTINGS) settingsPanel?.submit(latest, asr)
                 refreshCandidates()
             }
         }
         serviceScope.launch {
             SettingsStore.asrSettingsFlow(this@IspeechImeService).collect { latest ->
                 asr = latest
-                if (panel == Panel.SETTINGS) settingsPanel?.submit(settings, latest, chineseInputMethod)
-            }
-        }
-        serviceScope.launch {
-            SettingsStore.chineseInputMethodFlow(this@IspeechImeService).collect { latest ->
-                val changed = latest != chineseInputMethod
-                chineseInputMethod = latest
-                if (panel == Panel.SETTINGS) {
-                    settingsPanel?.submit(settings, asr, chineseInputMethod)
-                }
-                // 中文态下立即切到新默认；英文态保持不变，下次切回中文时生效。
-                if (changed && mode != InputMode.ENGLISH) {
-                    val target = InputModePolicy.chineseMode(chineseInputMethod)
-                    if (target != mode) enterMode(target)
-                }
+                if (panel == Panel.SETTINGS) settingsPanel?.submit(settings, latest)
             }
         }
     }
@@ -458,15 +378,16 @@ class IspeechImeService : InputMethodService() {
         // 快捷短语面板：软键盘与面板同屏，字母进筛选框、退格删字符、空格上屏第一条。
         // 其余动作（MODE_SWITCH / LAYOUT / 面板键等）放行到下方原有逻辑。
         if (panel == Panel.QUICK_PHRASE) {
-            // 组合中（有拼音 / 五笔缓冲）时，退格和空格是「删码 / 选首选字」，交给主流程；
-            // 只有没有组合时才当作面板语义：删搜索词 / 上屏第一条匹配。
-            val composing = buffer.isNotEmpty() || t9Digits.isNotEmpty()
-            when {
-                !composing && key.action == KeyAction.BACKSPACE -> {
+            when (key.action) {
+                KeyAction.CHAR -> {
+                    setPanelKeyword(panelKeyword + key.output)
+                    return
+                }
+                KeyAction.BACKSPACE -> {
                     backspacePanelKeyword()
                     return
                 }
-                !composing && key.action == KeyAction.SPACE -> {
+                KeyAction.SPACE -> {
                     insertPanelFirstMatch()
                     return
                 }
@@ -523,8 +444,8 @@ class IspeechImeService : InputMethodService() {
         }
         statusText = null
         if (kind == KeyboardLayoutKind.LETTER) {
-            softKeyboard?.setEnglishMode(mode == InputMode.ENGLISH)
-            softKeyboard?.setPinyinMode(mode == InputMode.PINYIN)
+            softKeyboard?.setEnglishMode(mode == Mode.ENGLISH)
+            softKeyboard?.setPinyinMode(mode == Mode.PINYIN)
         }
         softKeyboard?.setLayout(kind, page)
         renderCandidateView()
@@ -645,7 +566,7 @@ class IspeechImeService : InputMethodService() {
      */
     /** 当前输入态的组合串长度上限：拼音比五笔长（全拼 / 多字词）。 */
     private fun maxComposeLength(): Int =
-        if (mode == InputMode.PINYIN) MAX_PINYIN_LENGTH else MAX_CODE_LENGTH
+        if (mode == Mode.PINYIN) MAX_PINYIN_LENGTH else MAX_CODE_LENGTH
 
     private fun handleChar(raw: String) {
         if (raw.isEmpty()) return
@@ -664,7 +585,7 @@ class IspeechImeService : InputMethodService() {
         }
 
         val upper = softKeyboard?.shiftOn == true || softKeyboard?.capsLock == true
-        if (mode == InputMode.ENGLISH || upper) {
+        if (mode == Mode.ENGLISH || upper) {
             clearAssociation()
             if (buffer.isNotEmpty()) commitTop()
             val out = if (upper || ch.isUpperCase()) {
@@ -759,25 +680,24 @@ class IspeechImeService : InputMethodService() {
         commitDirect("\n", CommitType.PUNCTUATION)
     }
 
-    /** 输入态切换：中文态 ⇄ 英文态；回到中文时用设置页选定的默认中文输入法。 */
+    /** 输入态循环切换：五笔 → 拼音 → 英文 → 五笔（字母页左下角「中/英」键）。 */
     private fun toggleMode() {
-        enterMode(InputModePolicy.toggle(mode, chineseInputMethod))
-    }
-
-    /** 落到指定输入态：落定未完成的组合，刷新键面 / 面板 / 状态。 */
-    private fun enterMode(target: InputMode) {
         if (buffer.isNotEmpty()) commitTop()
-        mode = target
+        mode = when (mode) {
+            Mode.WUBI -> Mode.PINYIN
+            Mode.PINYIN -> Mode.ENGLISH
+            Mode.ENGLISH -> Mode.WUBI
+        }
         softKeyboard?.resetShift()
-        softKeyboard?.setEnglishMode(mode == InputMode.ENGLISH)
-        softKeyboard?.setPinyinMode(mode == InputMode.PINYIN)
+        softKeyboard?.setEnglishMode(mode == Mode.ENGLISH)
+        softKeyboard?.setPinyinMode(mode == Mode.PINYIN)
         // 短语面板搜索框的「中/英」徽标复用同一个 mode，切换时同步刷新
-        quickPhrasePanel?.setInputLanguage(mode == InputMode.ENGLISH)
+        quickPhrasePanel?.setInputLanguage(mode == Mode.ENGLISH)
         clearAssociation()
         statusText = when (mode) {
-            InputMode.PINYIN -> "拼音输入"
-            InputMode.ENGLISH -> "英文输入"
-            InputMode.WUBI -> null
+            Mode.PINYIN -> "拼音输入"
+            Mode.ENGLISH -> "英文输入"
+            Mode.WUBI -> null
         }
         renderCandidateView()
     }
@@ -932,12 +852,6 @@ class IspeechImeService : InputMethodService() {
     /** 上屏文本，清空组合状态；[allowAssociation] 为真时接着给联想候选 */
     private fun commit(text: String, allowAssociation: Boolean = true) {
         if (text.isEmpty()) return
-        // 快捷短语面板打开时，选中的候选（汉字 / 英文）写入面板搜索框而不是宿主输入框：
-        // 这样中文可以正常输入，也不会把临时搜索词带进聊天框。
-        if (panel == Panel.QUICK_PHRASE) {
-            setPanelKeyword(panelKeyword + text)
-            return
-        }
         val out = convertHan(text)
         currentInputConnection?.commitText(out, 1)
         buffer = ""
@@ -959,10 +873,6 @@ class IspeechImeService : InputMethodService() {
     /** 直接上屏（不经过组合），用于英文、标点、符号、emoji、空格、换行 */
     private fun commitDirect(text: String, type: CommitType = CommitType.PUNCTUATION) {
         if (text.isEmpty()) return
-        if (panel == Panel.QUICK_PHRASE) {
-            setPanelKeyword(panelKeyword + text)
-            return
-        }
         val out = convertHan(text)
         currentInputConnection?.commitText(out, 1)
         lastCommit = out
@@ -977,7 +887,7 @@ class IspeechImeService : InputMethodService() {
         dismissAiState()
         clearAssociation()
         // 中文标点只在中文态（五笔 / 拼音）生效：英文态字母页给的是半角标点，不该被翻成「，」「。」
-        val chinese = settings.chinesePunctuation && mode != InputMode.ENGLISH
+        val chinese = settings.chinesePunctuation && mode != Mode.ENGLISH
         val text = punctor.convert(raw, chinese, settings.fullWidth)
         commitDirect(text, CommitType.PUNCTUATION)
     }
@@ -1084,7 +994,7 @@ class IspeechImeService : InputMethodService() {
      * 拼音词表缺失时回退复合引擎。
      */
     private fun lookupSource(): LookupEngine? {
-        if (mode != InputMode.PINYIN) return engine
+        if (mode != Mode.PINYIN) return engine
         val lookup = runCatching { AppContainer.pinyinLookupEngine(this) }.getOrNull()
         val hasDict = lookup?.engines?.any { it is PinyinEngine && it.available } == true
         return if (hasDict) lookup else engine
@@ -1175,8 +1085,7 @@ class IspeechImeService : InputMethodService() {
     /** 点击候选条第 [index] 项：上屏其 insertText */
     private fun pickCandidate(index: Int) {
         if (aiReplyActive) {
-            // AI 回复允许多条（快捷短语命中时最多 3 条），点哪条就上屏哪条
-            commitAiReply(index)
+            if (index == 0) commitAiReply()
             return
         }
         val candidate = candidates.getOrNull(index) ?: return
@@ -1194,9 +1103,7 @@ class IspeechImeService : InputMethodService() {
 
     /** 同步候选条：高亮组合码 + 候选列表 + 分页信息 */
     private fun renderCandidateView() {
-        // codeOverride（「联想」「语音」「快捷短语」「AI回复」等）仍作为状态机参与上屏判断，
-        // 但不再渲染到候选条左侧，避免候选区出现来源标识。
-        val code = statusText ?: buffer
+        val code = statusText ?: codeOverride ?: buffer
         candidateView?.update(code, candidates, pageIndex, pageCount)
     }
 
@@ -1233,17 +1140,10 @@ class IspeechImeService : InputMethodService() {
         updatePanelVisibility()
         when (target) {
             Panel.QUICK_PHRASE -> {
-                // 把光标前刚输入的文字直接当作搜索词（最多 20 字），打开面板即可看到相关结果
-                val seed = currentInputConnection
-                    ?.getTextBeforeCursor(PANEL_SEED_MAX_CHARS, 0)
-                    ?.toString()
-                    ?.trim()
-                    .orEmpty()
-                panelKeyword = seed
-                quickPhrasePanel?.setKeyword(seed)
+                quickPhrasePanel?.setKeyword("")
                 quickPhrasePanel?.submit(emptyList())
                 // 搜索框复用键盘左下角「中/英」键的当前输入状态，并把输入焦点落在搜索框
-                quickPhrasePanel?.setInputLanguage(mode == InputMode.ENGLISH)
+                quickPhrasePanel?.setInputLanguage(mode == Mode.ENGLISH)
                 quickPhrasePanel?.requestSearchFocus()
                 statusText = "快捷短语 加载中…"
                 renderCandidateView()
@@ -1262,18 +1162,11 @@ class IspeechImeService : InputMethodService() {
                 refreshInputMethods()
             }
             Panel.SETTINGS -> {
-                settingsPanel?.submit(settings, asr, chineseInputMethod)
+                settingsPanel?.submit(settings, asr)
                 statusText = getString(R.string.settings_panel_title)
                 renderCandidateView()
             }
-            Panel.AI_REPLY -> {
-                aiReplyPanel?.submit(emptyList())
-                aiReplyPanel?.setStatus("AI 生成中…")
-                statusText = null
-                renderCandidateView()
-            }
             Panel.NONE -> Unit
-            else -> Unit
         }
     }
 
@@ -1282,30 +1175,21 @@ class IspeechImeService : InputMethodService() {
         panel = Panel.NONE
         panelKeyword = ""
         quickPhrasePanel?.setKeyword("")
-        quickPhrasePanel?.clearSearchFocus()
         statusText = null
         updatePanelVisibility()
         renderCandidateView()
     }
 
-    /** 各内容视图显示切换：快捷短语 / 语音面板与软键盘同屏，其余面板独占内容区 */
+    /** 各内容视图显示切换：快捷短语面板与软键盘同屏，其余面板独占内容区 */
     private fun updatePanelVisibility() {
-        // 快捷短语面板打开时保持软键盘可见（面板在上、键盘在下），以便用软键盘在面板内搜索。
-        //
-        // **语音面板（[Panel.VOICE]）同样必须保持软键盘可见**：语音键是「按住说话」，
-        // 手指按下的那一刻收音开始，松手才结束。若此时把软键盘（连同被按住的那个按键 View）
-        // 设为 GONE，系统会立刻给这个手势补发 ACTION_CANCEL，ACTION_UP 永远不会到达，
-        // 表现就是「按下有波形、松手什么都不上屏」。把面板放在键盘**上方**即可避开这个陷阱。
-        //
-        // 剪贴板 / 切换输入法 / 配置面板打开时隐藏软键盘（维持原行为）。
-        val showKeyboard = panel == Panel.NONE || panel == Panel.QUICK_PHRASE || panel == Panel.VOICE
+        // 快捷短语面板打开时保持软键盘可见（面板在上、键盘在下），以便用软键盘在面板内搜索；
+        // 剪贴板 / 切换输入法面板打开时隐藏软键盘（维持原行为）。
+        val showKeyboard = panel == Panel.NONE || panel == Panel.QUICK_PHRASE
         softKeyboard?.visibility = if (showKeyboard) View.VISIBLE else View.GONE
         quickPhrasePanel?.visibility = if (panel == Panel.QUICK_PHRASE) View.VISIBLE else View.GONE
         clipboardPanel?.visibility = if (panel == Panel.CLIPBOARD) View.VISIBLE else View.GONE
         inputMethodPanel?.visibility = if (panel == Panel.SWITCH_IME) View.VISIBLE else View.GONE
         settingsPanel?.visibility = if (panel == Panel.SETTINGS) View.VISIBLE else View.GONE
-        voicePanel?.visibility = if (panel == Panel.VOICE) View.VISIBLE else View.GONE
-        aiReplyPanel?.visibility = if (panel == Panel.AI_REPLY) View.VISIBLE else View.GONE
     }
 
     /** 读取全部快捷规则（内置 + csBaby 远端 + 用户），IO 线程解析后交给面板渲染 */
@@ -1316,12 +1200,10 @@ class IspeechImeService : InputMethodService() {
                     val enableQuick = SettingsStore.enableQuickPhrasesFlow(this@IspeechImeService).first()
                     val enableRemote = SettingsStore.enableRemoteRulesFlow(this@IspeechImeService).first()
                     val singleNoTrigger = SettingsStore.singleLetterNoTriggerFlow(this@IspeechImeService).first()
-                    val includeLocal = if (chineseInputMethod == ChineseInputMethod.WUBI) false else enableQuick
-                    val includeRemote = if (chineseInputMethod == ChineseInputMethod.WUBI) false else enableRemote
                     QuickLocator.loadAll(
                         this@IspeechImeService,
-                        includeLocal = includeLocal,
-                        includeRemote = includeRemote,
+                        includeLocal = enableQuick,
+                        includeRemote = enableRemote,
                         includeUser = true,
                         minTriggerLength = if (singleNoTrigger) 2 else 1,
                     )
@@ -1557,9 +1439,9 @@ class IspeechImeService : InputMethodService() {
      * 中间结果（partial）仍先作为候选实时展示。
      */
     private fun toggleVoiceInput() {
-        // 离线识别（FunASR）与系统识别是完全不同的链路，分开处理
-        if (asr.engine == AsrEngine.FUNASR) {
-            toggleFunAsrVoice()
+        // 离线识别（Vosk）与系统识别是完全不同的链路，分开处理
+        if (asr.engine == AsrEngine.VOSK) {
+            toggleVoskVoice()
             return
         }
         val controller = voiceController
@@ -1595,15 +1477,8 @@ class IspeechImeService : InputMethodService() {
         commitPending()
         clearAssociation()
         dismissAiState()
-        // 与 FunASR 同形态：语音面板占据键盘上方，实时文字与波形都在面板里。
-        // 软键盘必须保持可见——被按住的那个语音键 View 一旦 GONE，系统会立刻补发
-        // ACTION_CANCEL，ACTION_UP 永远到不了，表现就是「松手什么都不上屏」。
-        panel = Panel.VOICE
-        voiceCancelArmed = false
-        voicePanel?.reset()
-        updatePanelVisibility()
         voiceActive = true
-        statusText = null
+        statusText = getString(R.string.voice_listening)
         codeOverride = "语音"
         candidates = emptyList()
         allCandidates = emptyList()
@@ -1615,16 +1490,16 @@ class IspeechImeService : InputMethodService() {
             // 宿主应用包名：输入法自身不是宿主，部分 ROM 的识别服务据此归属录音会话与结果，
             // 缺失时会立刻回 ERROR_CLIENT（表现为「点语音键没反应」）
             callingPackage = currentInputEditorInfo?.packageName,
-            onPartial = { text -> voicePanel?.setListeningText(text) },
+            onPartial = { text -> showVoiceCandidate(text) },
             onFinal = { text ->
                 // 最终结果直接上屏（见 [commitVoiceText]），不再等用户按空格
-                closeVoicePanel()
+                statusText = null
                 commitVoiceText(text)
             },
             onError = { message ->
-                closeVoicePanel()
+                voiceActive = false
+                if (codeOverride == "语音") codeOverride = null
                 statusText = message
-                codeOverride = null
                 candidates = emptyList()
                 renderCandidateView()
             },
@@ -1677,18 +1552,18 @@ class IspeechImeService : InputMethodService() {
         commitDirect(text, CommitType.VOICE)
     }
 
-    // ── FunASR 离线识别（sherpa-onnx + Paraformer-zh-small）──
+    // ── 离线识别（Vosk 端侧引擎）──
 
     /**
-     * FunASR 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
+     * 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
      *
-     * FunASR 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
-     * 与 [FunAsrSpeechEngine] 的 [FunAsrSpeechEngine.finish] 语义一致。
+     * Vosk 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
+     * 与 [VoskSpeechEngine] 的 [VoskSpeechEngine.finish] 语义一致。
      */
-    private fun toggleFunAsrVoice() {
-        val engine = funasrVoice ?: return
+    private fun toggleVoskVoice() {
+        val engine = voskVoice ?: return
         if (!engine.isReady) {
-            startFunAsrModelDownload()
+            startVoskModelDownload()
             return
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -1729,127 +1604,18 @@ class IspeechImeService : InputMethodService() {
         )
     }
 
-    // ── 语音键「按住说话」手势（搜狗语义）──
-
-    /**
-     * 语音键按下：开始收音（已是收音态则不重启）。
-     *
-     * 两个引擎同形态——都是「按住说话 + 语音面板 + 松手自动上屏」：
-     * FunASR 走离线识别；系统引擎走 [toggleVoiceInput] 的开始分支。
-     * 系统引擎曾经在这里直接 return，而语音键的触摸事件已被 [SoftKeyboardView] 的
-     * 手势消费、点击回调又被置空，结果就是「设置里切到系统识别后，按语音键毫无反应」。
-     */
-    private fun onVoicePressDown() {
-        if (asr.engine == AsrEngine.FUNASR) {
-            if (funasrVoice?.isListening == true) return
-            startFunAsrListening()
-            return
-        }
-        if (voiceController?.isListening == true) return
-        toggleVoiceInput()
-    }
-
-    /**
-     * 语音键抬起：松手上屏（搜狗「按住说话」语义）。
-     *
-     * 上滑到取消区 → 丢弃本次识别；其余情况一律结束收音，最终结果直接上屏到光标处。
-     */
-    private fun onVoicePressUp() {
-        if (voiceCancelArmed) {
-            voiceCancelArmed = false
-            voicePanel?.setCancelArmed(false)
-            abortVoiceListening()
-            return
-        }
-        if (asr.engine == AsrEngine.FUNASR) {
-            funasrVoice?.finish()
-            return
-        }
-        // 系统识别：stopListening() 保留回调，收尾结果仍经 onFinal 上屏
-        voiceController?.finish()
-    }
-
-    /** 丢弃本次识别（上滑取消 / 手势被打断）。 */
-    private fun abortVoiceListening() {
-        if (asr.engine == AsrEngine.FUNASR) funasrVoice?.cancel() else voiceController?.stop()
-        closeVoicePanel()
-        statusText = getString(R.string.voice_cancel)
-        codeOverride = null
-        renderCandidateView()
-    }
-
-    /** 打开语音面板并开始收音（模型未就绪先下载，未授权先引导授权）。 */
-    private fun startFunAsrListening() {
-        val engine = funasrVoice ?: return
-        if (!engine.isReady) {
-            startFunAsrModelDownload()
-            return
-        }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            statusText = getString(R.string.voice_need_permission)
-            renderCandidateView()
-            requestMicPermission()
-            return
-        }
-        if (panel != Panel.VOICE) {
-            if (panel != Panel.NONE) closePanel()
-            panel = Panel.VOICE
-            voiceCancelArmed = false
-            voicePanel?.reset()
-            updatePanelVisibility()
-        }
-        commitPending()
-        clearAssociation()
-        dismissAiState()
-        voiceActive = true
-        statusText = null
-        codeOverride = "语音"
-        candidates = emptyList()
-        allCandidates = emptyList()
-        pageCount = 1
-        pageIndex = 0
-        renderCandidateView()
-        engine.start(
-            // 伪实时文字：分段解码的结果直接刷新面板大字
-            onPartial = { text -> voicePanel?.setListeningText(text) },
-            onFinal = { text ->
-                closeVoicePanel()
-                commitVoiceText(text)
-            },
-            onError = { message ->
-                closeVoicePanel()
-                statusText = message
-                codeOverride = null
-                renderCandidateView()
-            },
-            onLevel = { level -> voicePanel?.setLevel(level) },
-        )
-    }
-
-
-    /** 关闭语音面板并复位语音状态。 */
-    private fun closeVoicePanel() {
-        voiceActive = false
-        voicePanel?.setLevel(0f)
-        if (panel == Panel.VOICE) {
-            panel = Panel.NONE
-            updatePanelVisibility()
-        }
-        renderCandidateView()
-    }
-
-    /** 首次使用 FunASR 离线识别时下载模型（约 74MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
-    private fun startFunAsrModelDownload() {
-        if (funasrDownloading) return
-        funasrDownloading = true
+    /** 首次使用离线识别时下载模型（约 42MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
+    private fun startVoskModelDownload() {
+        if (voskDownloading) return
+        voskDownloading = true
         statusText = getString(R.string.voice_model_downloading, 0)
         renderCandidateView()
         serviceScope.launch {
-            val ok = FunAsrModelStore.ensureModel(this@IspeechImeService) { percent ->
+            val ok = VoskModelStore.ensureModel(this@IspeechImeService) { percent ->
                 statusText = getString(R.string.voice_model_downloading, percent)
                 renderCandidateView()
             }
-            funasrDownloading = false
+            voskDownloading = false
             statusText = getString(if (ok) R.string.voice_model_ready else R.string.voice_model_failed)
             renderCandidateView()
         }
@@ -1858,15 +1624,8 @@ class IspeechImeService : InputMethodService() {
     /** 取消语音识别并复位语音状态（不负责渲染）。 */
     private fun cancelVoice() {
         if (voiceController?.isListening == true) voiceController?.stop()
-        funasrVoice?.cancel()
+        voskVoice?.cancel()
         voiceActive = false
-        // 语音面板可能在收音中被切走输入框 / 重置状态，一并收起，避免残留
-        voicePanel?.setLevel(0f)
-        if (panel == Panel.VOICE) {
-            panel = Panel.NONE
-            voiceCancelArmed = false
-            updatePanelVisibility()
-        }
         if (codeOverride == "语音") codeOverride = null
         candidates = emptyList()
         allCandidates = emptyList()
@@ -1896,10 +1655,7 @@ class IspeechImeService : InputMethodService() {
     /** 点击 AI 键：以输入框当前文本为消息，调用后端生成回复候选。 */
     private fun startAiReply() {
         if (aiBusy) return
-        // 参考结果用独立列表面板展示（一行一条、超 10 条可滚动），候选条行为保持不变
-        if (panel != Panel.AI_REPLY) openPanel(Panel.AI_REPLY)
-        aiReplyPanel?.submit(emptyList())
-        aiReplyPanel?.setStatus("AI 生成中…")
+        if (panel != Panel.NONE) closePanel()
         commitPending()
         clearAssociation()
         val message = currentInputConnection
@@ -1907,7 +1663,6 @@ class IspeechImeService : InputMethodService() {
             ?.toString()
             .orEmpty()
         if (message.isBlank()) {
-            aiReplyPanel?.setStatus("请先输入要回复的内容")
             statusText = "请先输入要回复的内容"
             candidates = emptyList()
             aiReplyActive = false
@@ -1922,111 +1677,30 @@ class IspeechImeService : InputMethodService() {
         val seq = ++aiRequestSeq
         serviceScope.launch {
             try {
-                // 1. 先找快捷短语：命中就直接当建议回复展示，不再调后端
-                val phrases = matchQuickPhrases(message)
-                if (seq != aiRequestSeq) return@launch
-                if (phrases.isNotEmpty()) {
-                    aiSourceText = message
-                    aiSourceLen = message.length
-                    aiReplyActive = true
-                    // 快捷短语命中：不是模型产出，不计入采纳率与学习语料
-                    aiReplyFromModel = false
-                    statusText = null
-                    codeOverride = "快捷短语"
-                    allCandidates = emptyList()
-                    pageCount = 1
-                    pageIndex = 0
-                    candidates = phrases
-                    aiReplyPanel?.submit(phrases.map { it.insertText })
-                    renderCandidateView()
-                    return@launch
-                }
-                // 2. 没命中：按设置调用大模型生成建议回复
-                val aiSettings = SettingsStore.aiSettingsFlow(this@IspeechImeService).first()
-                if (!aiSettings.isReady()) {
+                val auth = CsBabyAuthStore.load(this@IspeechImeService)
+                if (auth == null) {
                     if (seq == aiRequestSeq) {
-                        statusText = if (aiSettings.provider.isDirect) {
-                            "请先在设置页配置大模型"
-                        } else {
-                            "未登录：请先在设置页登录 csBaby"
-                        }
-                        aiReplyPanel?.setStatus(statusText.orEmpty())
-                        candidates = emptyList()
+                        statusText = "未登录：请先在设置页登录 csBaby"
                         renderCandidateView()
                     }
                     return@launch
                 }
-                // 2.5 学习复用：这次输入与某条已采纳的回复高度相似时，直接用那条。
-                // 命中率高（是用户自己写过的），零延迟零成本；相似度不够还是走模型。
-                if (aiSettings.learning) {
-                    val reusable = withContext(Dispatchers.IO) { aiLearning.findReusable(message) }
-                    if (seq != aiRequestSeq) return@launch
-                    if (reusable != null) {
-                        withContext(Dispatchers.IO) { aiLearning.recordGenerated() }
-                        aiSourceText = message
-                        aiSourceLen = message.length
-                        aiReplyActive = true
-                        // 复用历史回复同样计入采纳统计（用来强化高频回复）
-                        aiReplyFromModel = true
-                        statusText = null
-                        codeOverride = "常用回复"
-                        allCandidates = emptyList()
-                        pageCount = 1
-                        pageIndex = 0
-                        candidates = listOf(
-                            LookupCandidate(
-                                code = "learned",
-                                display = preview(reusable.reply),
-                                insertText = reusable.reply,
-                                weight = 0,
-                                kind = LookupKind.QUICKAPPLY,
-                            ),
-                        )
-                        renderCandidateView()
-                        return@launch
-                    }
-                }
-                val reply = if (aiSettings.provider.isDirect) {
-                    // 学习用户输入：把过去采纳过的回复作为 few-shot 例子带进提示词
-                    val examples = if (aiSettings.learning) {
-                        withContext(Dispatchers.IO) {
-                            aiLearning.examples(DirectLlmClient.MAX_FEW_SHOT, message)
-                        }
-                    } else {
-                        emptyList()
-                    }
-                    DirectLlmClient(this@IspeechImeService).generate(aiSettings, message, examples)
-                } else {
-                    val auth = CsBabyAuthStore.load(this@IspeechImeService)
-                    if (auth == null) {
-                        if (seq == aiRequestSeq) {
-                            statusText = "未登录：请先在设置页登录 csBaby"
-                            candidates = emptyList()
-                            renderCandidateView()
-                        }
-                        return@launch
-                    }
-                    AppContainer.csBabyClient(this@IspeechImeService)
-                        .generateReply(auth, message)
-                        .reply
-                }
+                val result = AppContainer.csBabyClient(this@IspeechImeService)
+                    .generateReply(auth, message)
                 if (seq != aiRequestSeq) return@launch
-                withContext(Dispatchers.IO) { aiLearning.recordGenerated() }
                 aiSourceText = message
                 aiSourceLen = message.length
                 aiReplyActive = true
-                aiReplyFromModel = true
                 statusText = null
                 codeOverride = "AI回复"
                 allCandidates = emptyList()
                 pageCount = 1
                 pageIndex = 0
-                aiReplyPanel?.submit(listOf(reply))
                 candidates = listOf(
                     LookupCandidate(
                         code = "ai",
-                        display = preview(reply),
-                        insertText = reply,
+                        display = preview(result.reply),
+                        insertText = result.reply,
                         weight = 0,
                         kind = LookupKind.QUICKAPPLY,
                     ),
@@ -2035,8 +1709,6 @@ class IspeechImeService : InputMethodService() {
             } catch (e: Exception) {
                 if (seq == aiRequestSeq) {
                     statusText = "AI失败：" + shortText(e.message ?: "未知错误", 60)
-                    aiReplyPanel?.submit(emptyList())
-                    aiReplyPanel?.setStatus(shortText(statusText.orEmpty(), 30))
                     candidates = emptyList()
                     renderCandidateView()
                 }
@@ -2046,58 +1718,9 @@ class IspeechImeService : InputMethodService() {
         }
     }
 
-    /**
-     * 在快捷短语里找与 [message] 相关的条目（内置 + 远端 + 用户）。
-     *
-     * 双向包含：短语正文出现在用户输入里（输入提到「发票」→ 发票类短语），
-     * 或用户输入是短语正文的一段（话没说完也先给出整句）。
-     * 单字正文（如「好」）几乎能命中任何句子，会造成噪声，直接排除。
-     *
-     * 读规则文件是 IO 活，必须离开主线程：本方法自带 [Dispatchers.IO]。
-     */
-    private suspend fun matchQuickPhrases(message: String): List<LookupCandidate> =
-        withContext(Dispatchers.IO) {
-            val needle = message.trim().lowercase()
-            if (needle.isEmpty()) return@withContext emptyList()
-            val entries = runCatching {
-                val enableQuick = SettingsStore.enableQuickPhrasesFlow(this@IspeechImeService).first()
-                val enableRemote = SettingsStore.enableRemoteRulesFlow(this@IspeechImeService).first()
-                val singleNoTrigger = SettingsStore.singleLetterNoTriggerFlow(this@IspeechImeService).first()
-                QuickLocator.loadAll(
-                    this@IspeechImeService,
-                    includeLocal = enableQuick,
-                    includeRemote = enableRemote,
-                    includeUser = true,
-                    minTriggerLength = if (singleNoTrigger) 2 else 1,
-                )
-            }.getOrElse { emptyList() }
-            if (entries.isEmpty()) return@withContext emptyList()
-            entries.asSequence()
-                .filter { it.content.length >= 2 }
-                .filter { entry ->
-                    val content = entry.content.lowercase()
-                    val label = entry.label.lowercase()
-                    content.contains(needle) || needle.contains(content) ||
-                        label.contains(needle) || needle.contains(label)
-                }
-                .sortedByDescending { it.weight }
-                .distinctBy { it.content }
-                .take(QUICK_REPLY_LIMIT)
-                .map { entry ->
-                    LookupCandidate(
-                        code = entry.trigger,
-                        display = preview(entry.content),
-                        insertText = entry.content,
-                        weight = entry.weight,
-                        kind = LookupKind.QUICKAPPLY,
-                    )
-                }
-                .toList()
-        }
-
     /** 上屏 AI 回复；若输入框仍是生成前原文，先删除原文（替换语义）。 */
-    private fun commitAiReply(index: Int = 0) {
-        val candidate = candidates.getOrNull(index) ?: return
+    private fun commitAiReply() {
+        val candidate = candidates.firstOrNull() ?: return
         val ic = currentInputConnection
         if (ic != null && aiSourceLen > 0) {
             val before = ic.getTextBeforeCursor(aiSourceLen, 0)?.toString().orEmpty()
@@ -2107,19 +1730,9 @@ class IspeechImeService : InputMethodService() {
         }
         ic?.commitText(candidate.insertText, 1)
         lastCommit = candidate.insertText
-        // 用户采纳了模型建议：本地记一条「输入 → 采纳的回复」，下次作为 few-shot
-        if (aiReplyFromModel) {
-            val source = aiSourceText
-            val reply = candidate.insertText
-            serviceScope.launch(Dispatchers.IO) {
-                runCatching { aiLearning.recordAccepted(source, reply) }
-            }
-        }
         dismissAiState()
         buffer = ""
         candidates = emptyList()
-        // 上屏后收起参考结果面板，回到键盘
-        if (panel == Panel.AI_REPLY) closePanel()
         renderCandidateView()
     }
 
@@ -2129,14 +1742,11 @@ class IspeechImeService : InputMethodService() {
             aiRequestSeq++
         }
         statusText = null
-        if (codeOverride == "AI回复" || codeOverride == "快捷短语" || codeOverride == "常用回复") {
-            codeOverride = null
-        }
+        if (codeOverride == "AI回复") codeOverride = null
         if (aiReplyActive) {
             candidates = emptyList()
         }
         aiReplyActive = false
-        aiReplyFromModel = false
         aiSourceText = ""
         aiSourceLen = 0
     }
@@ -2233,7 +1843,7 @@ class IspeechImeService : InputMethodService() {
         softKeyboard?.resetShift()
         dismissAiState()
         if (voiceController?.isListening == true) voiceController?.stop()
-        if (funasrVoice?.isListening == true) funasrVoice?.cancel()
+        if (voskVoice?.isListening == true) voskVoice?.cancel()
         voiceActive = false
         if (codeOverride == "语音") codeOverride = null
         punctor.reset()
@@ -2289,10 +1899,5 @@ class IspeechImeService : InputMethodService() {
     /** 配置面板语音识别设置落盘（引擎 / 语言）。 */
     private fun applyAsrChange(next: AsrSettings) {
         serviceScope.launch { SettingsStore.setAsrSettings(this@IspeechImeService, next) }
-    }
-
-    /** 配置面板切换中文输入法落盘；输入态由 chineseInputMethodFlow 统一驱动。 */
-    private fun applyChineseInputMethodChange(next: ChineseInputMethod) {
-        serviceScope.launch { SettingsStore.setChineseInputMethod(this@IspeechImeService, next) }
     }
 }

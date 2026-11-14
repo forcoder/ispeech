@@ -14,19 +14,17 @@ enum class AsrEngine {
     CUSTOM,
 
     /**
-     * FunASR 离线识别：基于 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 运行时，
-     * 使用 [FunASR](https://github.com/alibaba-damo-academy/FunASR) 训练并导出的 Paraformer-zh-small 模型，
-     * 完全离线、不联网、中文准确率更高。
+     * 内置端侧识别：[Vosk](https://alphacephei.com/vosk/) 中文小模型，完全离线、不联网。
      *
-     * 不经过任何系统 [android.speech.RecognitionService]：模型（约 74MB）首次使用时下载到
+     * 不经过任何系统 [android.speech.RecognitionService]：模型（约 42MB）首次使用时下载到
      * `filesDir`，之后本机识别，无网也能用。此时「识别语言」设置不生效（模型是普通话）。
      */
-    FUNASR;
+    VOSK;
 
     companion object {
-        /** 解析持久化值，未存过或无法识别时回落 [FUNASR]（内置离线识别的默认引擎）。 */
+        /** 解析持久化值，无法识别时回落 [SYSTEM]。 */
         fun parse(raw: String?): AsrEngine =
-            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: FUNASR
+            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: SYSTEM
     }
 }
 
@@ -53,8 +51,7 @@ enum class AsrLanguage(val tag: String, val label: String) {
  * @param model 模型名 / 变体，经 [ASR_MODEL_EXTRA] 透传给识别服务；不支持的服务会忽略。
  */
 data class AsrSettings(
-    /** 默认走内置 FunASR 离线识别：中文识别开箱即用，不依赖设备是否预置可用的系统识别服务。 */
-    val engine: AsrEngine = AsrEngine.FUNASR,
+    val engine: AsrEngine = AsrEngine.SYSTEM,
     val serviceComponent: String = "",
     val model: String = "",
     val language: AsrLanguage = AsrLanguage.ZH_CN,
