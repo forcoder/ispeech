@@ -20,9 +20,9 @@
      -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
-10. 分类词库（细胞词库）：CellDictStore 目录 / 索引 / 正文解析复用用户词库 -> 稳定 id +
-     分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
-     词典页 SAF 安装 + 启停 / 删除 + 中英文案
+10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
+11. 中文输入法（默认拼音 / 五笔 + 中英切换）：枚举 -> 持久化 -> 设置页 / 内置面板 -> 服务两态切换
+12. 候选条字重（VOCA-56）：候选词常规字重、首选靠颜色 / 底色区分、类注释口径一致
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -58,7 +58,6 @@ LOOKUP_ENGINE = JAVA / "engine" / "LookupEngine.kt"
 COMPOSITE_ENGINE = JAVA / "engine" / "CompositeEngine.kt"
 QUICK_LOCATOR = JAVA / "engine" / "QuickLocator.kt"
 PYINYIN_ENGINE = JAVA / "engine" / "PinyinEngine.kt"
-CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
 
 QUICK_SCREEN = JAVA / "settings" / "QuickPhrasesScreen.kt"
 SETTINGS_STORE = JAVA / "settings" / "store" / "SettingsStore.kt"
@@ -74,7 +73,12 @@ INPUT_STATS = JAVA / "data" / "InputStats.kt"
 PHRASE_USAGE = JAVA / "data" / "PhraseUsageStore.kt"
 USER_DICT_STORE = JAVA / "data" / "UserDictStore.kt"
 USER_DICT_ENGINE = JAVA / "engine" / "UserDictEngine.kt"
+
 CELL_DICT_STORE = JAVA / "data" / "CellDictStore.kt"
+CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
+CHINESE_INPUT_METHOD = JAVA / "settings" / "store" / "ChineseInputMethod.kt"
+INPUT_MODE = JAVA / "input" / "InputMode.kt"
+INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
@@ -836,9 +840,9 @@ def check_voice_chain() -> None:
         f"{rel(KEYDEF)} 的 KeyAction 未声明 VOICE",
     )
     check(
-        "KeyAction.VOICE" in view and "ic_voice" in view,
-        "SoftKeyboardView 工具栏含 KeyAction.VOICE（图标 ic_voice）",
-        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE（ic_voice）",
+        "KeyAction.VOICE" in view and '"🎤"' in view,
+        "SoftKeyboardView 工具栏含 KeyAction.VOICE（「🎤」）",
+        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE「🎤」",
     )
     check(
         "KeyAction.VOICE -> toggleVoiceInput()" in service,
@@ -847,16 +851,25 @@ def check_voice_chain() -> None:
     )
 
     # 8.1b 按住说话：两种引擎都要接线（系统引擎曾因早退直接失效）
-    gesture_tokens = (
-        "private fun onVoicePressDown()",
-        "private fun onVoicePressUp()",
-        "startFunAsrListening()",
+    #       引擎已由 FunASR 换成 VOSK（07214d6）：按下按 asr.engine 分派到
+    #       VoskSpeechEngine / VoiceInputController，松手由各自 finish() 收尾。
+    down = function_region(service, r"private fun onVoicePressDown\(")
+    up = function_region(service, r"private fun onVoicePressUp\(")
+    down_tokens = (
+        "if (asr.engine == AsrEngine.VOSK)",
+        "toggleVoskVoice()",
+        "toggleVoiceInput()",
+    )
+    up_tokens = (
+        "if (asr.engine == AsrEngine.VOSK)",
+        "voskVoice?.finish()",
         "voiceController?.finish()",
     )
-    missing = [t for t in gesture_tokens if t not in service]
+    missing = [f"按下缺 {t}" for t in down_tokens if t not in down]
+    missing += [f"松手缺 {t}" for t in up_tokens if t not in up]
     check(
         not missing,
-        "按住说话对两种引擎都接线：按下开始收音、抬起收尾上屏",
+        "按住说话对两种引擎都接线（VOSK / 系统识别）：按下开始收音、抬起收尾上屏",
         f"{rel(SERVICE)} 按住说话接线缺项：{missing}",
     )
     check(
@@ -987,7 +1000,7 @@ def check_voice_chain() -> None:
     en = _named_strings(STRINGS_EN)
     required = {
         "voice_listening", "voice_need_permission", "voice_no_match",
-        "voice_error_code", "voice_cancel", "voice_unavailable",
+        "voice_error", "voice_cancel", "voice_unavailable",
         "asr_title", "asr_description", "asr_engine_system", "asr_engine_custom",
         "asr_partial_desc", "asr_offline_desc", "asr_saved", "asr_save_failed",
     }
@@ -1572,6 +1585,145 @@ def check_cell_dict_chain() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
+# 11. 中文输入法（默认拼音 / 五笔 + 中英切换）
+# ═════════════════════════════════════════════════════════════
+
+def check_chinese_input_method() -> None:
+    """新增中文输入法设置：设置项 -> 持久化 -> UI / 内置面板 -> 中英切换策略。"""
+    enum_src = read(CHINESE_INPUT_METHOD)
+    check(
+        "enum class ChineseInputMethod" in enum_src
+        and 'PINYIN("拼音")' in enum_src
+        and 'WUBI("五笔")' in enum_src
+        and "?: PINYIN" in enum_src,
+        "ChineseInputMethod 枚举含拼音 / 五笔，未知值回落拼音",
+        f"{rel(CHINESE_INPUT_METHOD)} 枚举或默认值缺失",
+    )
+
+    store = read(SETTINGS_STORE)
+    check(
+        'stringPreferencesKey("input_method_mode")' in store
+        and "fun chineseInputMethodFlow(" in store
+        and "ChineseInputMethod.parse(" in store
+        and "fun setChineseInputMethod(" in store
+        and "fun chineseInputMethod(" in store,
+        "SettingsStore 提供中文输入法 flow / 阻塞读取 / 写入（沿用旧 key）",
+        f"{rel(SETTINGS_STORE)} 中文输入法持久化未闭环",
+    )
+
+    vm = read(KEYBOARD_VM)
+    check(
+        "chineseInputMethodFlow(app)" in vm
+        and "val chineseInputMethod" in vm
+        and "fun setChineseInputMethod(" in vm,
+        "KeyboardViewModel 订阅并暴露中文输入法设置",
+        f"{rel(KEYBOARD_VM)} 未接中文输入法状态",
+    )
+
+    screen = read(KEYBOARD_SCREEN)
+    check(
+        'KeyboardCardTitle("中文输入法")' in screen
+        and "ChineseInputMethod.entries" in screen
+        and "viewModel.setChineseInputMethod(it)" in screen,
+        "设置页新增「中文输入法」卡片并接单选",
+        f"{rel(KEYBOARD_SCREEN)} 缺少中文输入法卡片",
+    )
+
+    panel = read(SETTINGS_PANEL)
+    check(
+        "onChineseInputMethodChange" in panel
+        and "R.string.panel_chinese_input_method" in panel
+        and "ChineseInputMethod.entries" in panel,
+        "键盘内置设置面板新增中文输入法切换行",
+        f"{rel(SETTINGS_PANEL)} 未接中文输入法行",
+    )
+
+    service = read(SERVICE)
+    check(
+        "InputModePolicy.toggle(mode, chineseInputMethod)" in service
+        and "InputModePolicy.chineseMode(chineseInputMethod)" in service
+        and "applyChineseInputMethodChange" in service,
+        "输入法服务按设置做「中文 ⇄ 英文」两态切换",
+        f"{rel(SERVICE)} 未接 InputModePolicy",
+    )
+    check(
+        "InputMode.WUBI -> InputMode.PINYIN" not in service,
+        "旧的三态循环（五笔 → 拼音 → 英文）已移除",
+        f"{rel(SERVICE)} 仍保留三态循环",
+    )
+
+    policy = read(INPUT_MODE)
+    check(
+        "enum class InputMode" in policy
+        and "object InputModePolicy" in policy
+        and "if (current == InputMode.ENGLISH) chineseMode(method) else InputMode.ENGLISH" in policy,
+        "InputModePolicy 只做中文态 / 英文态两态切换",
+        f"{rel(INPUT_MODE)} 切换策略缺失",
+    )
+
+    test = read(INPUT_MODE_TEST)
+    check(
+        "InputModePolicy.toggle(InputMode.WUBI, ChineseInputMethod.WUBI)" in test
+        and "InputModePolicy.toggle(InputMode.ENGLISH, ChineseInputMethod.WUBI)" in test
+        and "ChineseInputMethod.PINYIN" in test,
+        "回归测试覆盖默认五笔 / 默认拼音两条中英切换路径",
+        f"{rel(INPUT_MODE_TEST)} 缺少中英切换回归用例",
+    )
+
+    zh = _named_strings(STRINGS)
+    en = _named_strings(STRINGS_EN)
+    keys = (
+        "panel_chinese_input_method",
+        "panel_chinese_input_pinyin",
+        "panel_chinese_input_wubi",
+    )
+    missing = sorted(k for k in keys if k not in zh or k not in en)
+    check(
+        not missing,
+        "中文输入法内置面板文案中英各齐",
+        f"中英 strings.xml 缺中文输入法文案：{missing}",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
+# 12. 候选条字重（VOCA-56）：候选词不加粗
+# ═════════════════════════════════════════════════════════════
+
+def check_candidate_style() -> None:
+    view = read(CANDIDATE_VIEW)
+    item_region = function_region(view, r"private fun createItemView\(")
+
+    # 11.1 候选文本用常规字重（Typeface.DEFAULT），不能再回到 DEFAULT_BOLD
+    check(
+        "typeface = Typeface.DEFAULT_BOLD" not in item_region
+        and "typeface = Typeface.DEFAULT" in item_region,
+        "候选词文本常规字重（createItemView 用 Typeface.DEFAULT）",
+        f"{rel(CANDIDATE_VIEW)} createItemView 仍把候选词设为粗体"
+        "（VOCA-56 要求候选词不加粗）",
+    )
+
+    # 11.2 首选 / 非首选只靠颜色 + 底色区分，字重保持一致。
+    #      首选色跟随主题色（primaryColor 由 ispeech_primary 解析，非固定搜狗橙）——
+    #      这是「主题外观（浅色 / 深色 / 跟随系统）」引入后的有意差异，见 docs/keyboard-ui.md。
+    check(
+        "setTextColor(if (highlighted) primaryColor else TEXT_PRIMARY)" in item_region
+        and "primaryColor: Int = resolvePrimaryColor()" in view
+        and 'COLOR_ISPEECH_PRIMARY = "ispeech_primary"' in view,
+        "首选与非首选靠颜色 / 底色区分（字重一致，首选走主题色）",
+        f"{rel(CANDIDATE_VIEW)} 候选高亮不再走颜色区分（首选识别会退化），"
+        "或首选色未跟随主题解析",
+    )
+
+    # 11.3 KDoc 口径：注释里不能仍声明候选「加粗」，否则下一次改样式会被误导
+    #（允许否定句「不加粗」——它记录的是这次的决定本身）
+    kdoc = view.split("class CandidateView", 1)[0]
+    bold_claims = [ln for ln in kdoc.splitlines() if "加粗" in ln and "不加粗" not in ln]
+    check(
+        not bold_claims,
+        "CandidateView 类注释已去掉「加粗」口径",
+        f"{rel(CANDIDATE_VIEW)} 类注释仍声明候选「加粗」，与实现不符：{bold_claims}",
+    )
+
 
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
@@ -1595,6 +1747,10 @@ def main() -> int:
     check_user_dict_chain()
     print("-- 10. 分类词库（细胞词库）--")
     check_cell_dict_chain()
+    print("-- 11. 中文输入法（默认拼音 / 五笔 + 中英切换）--")
+    check_chinese_input_method()
+    print("-- 12. 候选条字重（VOCA-56）--")
+    check_candidate_style()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

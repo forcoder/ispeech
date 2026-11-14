@@ -36,20 +36,21 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ispeech.data.UserDictEntry
 import com.ispeech.settings.keyboard.KeyboardViewModel
+import com.ispeech.settings.store.ChineseInputMethod
 import com.ispeech.settings.store.KeyboardSettings
 import com.ispeech.settings.store.KeyboardSize
-import com.ispeech.settings.store.SettingsStore
 
 /** 用户词库列表最多展示的条数，避免长列表拖慢页面。 */
 private const val MAX_VISIBLE_USER_WORDS = 50
 
-/** 键盘与输入页：键盘高度、候选数量、联想开关 + 用户词库管理。 */
+/** 键盘与输入页：中文输入法、键盘高度、候选数量、联想开关 + 用户词库管理。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KeyboardScreen(onBack: () -> Unit) {
     val viewModel: KeyboardViewModel = viewModel()
     val settings by viewModel.settings.collectAsState()
     val userWords by viewModel.userWords.collectAsState()
+    val chineseInputMethod by viewModel.chineseInputMethod.collectAsState()
 
     LaunchedEffect(Unit) { viewModel.refreshUserWords() }
 
@@ -77,6 +78,11 @@ fun KeyboardScreen(onBack: () -> Unit) {
                 text = "调整软键盘的外观与输入行为，修改后立即生效。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            ChineseInputMethodCard(
+                current = chineseInputMethod,
+                onSelect = { viewModel.setChineseInputMethod(it) },
             )
 
             KeyboardSizeCard(
@@ -149,11 +155,6 @@ fun KeyboardScreen(onBack: () -> Unit) {
                         currentMs = viewModel.spaceLongPressMs.collectAsState().value,
                         onSelect = { viewModel.setSpaceLongPressMs(it) },
                     )
-                    HorizontalDivider()
-                    KeyboardMethodModeRow(
-                        currentMode = viewModel.inputMethodMode.collectAsState().value,
-                        onSelect = { viewModel.setInputMethodMode(it) },
-                    )
                 }
             }
 
@@ -162,6 +163,36 @@ fun KeyboardScreen(onBack: () -> Unit) {
                 onRemove = { viewModel.removeUserWord(it) },
                 onClear = { viewModel.clearUserWords() },
             )
+        }
+    }
+}
+
+/** 中文输入法卡片：中文态默认用拼音还是五笔，决定「中/英」切回中文时落到哪一种。 */
+@Composable
+private fun ChineseInputMethodCard(
+    current: ChineseInputMethod,
+    onSelect: (ChineseInputMethod) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            KeyboardCardTitle("中文输入法")
+            Text(
+                text = "中文状态下默认使用的输入法。设为五笔后，「中/英」只在五笔与英文之间切换，切回中文仍是五笔。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+            ChineseInputMethod.entries.forEach { method ->
+                KeyboardOptionRow(
+                    selected = current == method,
+                    title = method.label,
+                    detail = when (method) {
+                        ChineseInputMethod.PINYIN -> "全拼 / 简拼"
+                        ChineseInputMethod.WUBI -> "86 版五笔"
+                    },
+                    onClick = { onSelect(method) },
+                )
+            }
         }
     }
 }
@@ -376,49 +407,6 @@ private fun SpaceLongPressRow(
                 RadioButton(selected = currentMs == ms, onClick = { onSelect(ms) })
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(text = label, style = MaterialTheme.typography.bodyLarge)
-            }
-        }
-    }
-}
-
-/** 输入法模式选择行：拼音 / 五笔，默认拼音。 */
-@Composable
-private fun KeyboardMethodModeRow(
-    currentMode: SettingsStore.InputMethodMode,
-    onSelect: (SettingsStore.InputMethodMode) -> Unit,
-) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Text(
-            text = "输入法模式",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "中文场景下，默认使用拼音输入；可切换为五笔输入（五笔模式下不加载任何词库）",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        SettingsStore.InputMethodMode.entries.forEach { mode ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onSelect(mode) }
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RadioButton(
-                    selected = currentMode == mode,
-                    onClick = { onSelect(mode) },
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = when (mode) {
-                        SettingsStore.InputMethodMode.PINYIN -> "拼音"
-                        SettingsStore.InputMethodMode.WUBI -> "五笔"
-                    },
-                    style = MaterialTheme.typography.bodyLarge,
-                )
             }
         }
     }

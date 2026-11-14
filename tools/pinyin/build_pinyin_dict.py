@@ -15,14 +15,10 @@
     其中 4 字及以上词条要求 jieba 词频 >= LONG_WORD_MIN_FREQ（jieba 的 4 字词条
     频次中位数只有 3，绝大多数是极低频成语；阈值 20 可砍掉约 4/5 长词、节省约 0.5 MiB）
   * 权重：jieba 词频对数压缩到 1..9999，仅用于同层排序；无词频的词条按 1 处理
-  * 注音补全：(3) 中词频 >= SYNTHESIS_MIN_FREQ 的 2-4 字词，若 (2) 未收录，则用 (1) 的
-    单字读音合成词条，补齐 (2) 漏收的常用词（如 酒店、基础设施）。4 字词同样只走合成：
-    phrase-pinyin-data 基本不收录 4 字词读音，仅靠 (2) 会让「基础设施 / 人工智能」这类
-    常用长词整批缺失，导致输入简拼 `jcss` 时无候选可联想。多音字按语料证据定音：声明多个
+  * 注音补全：(3) 中词频 >= SYNTHESIS_MIN_FREQ 的 2-3 字词，若 (2) 未收录，则用 (1) 的
+    单字读音合成词条，补齐 (2) 漏收的常用词（如 酒店）。多音字按语料证据定音：声明多个
     读音、但 (2) 语料只出现其中一个时采用该读音（如 明 = ming/meng，语料只有 ming）；
-    2-3 字词若语料中某读音占比 >= SYNTHESIS_MIN_SHARE 则采用该读音，否则跳过；4 字词仍
-    要求语料只佐证一个读音。少数语料被书面语带偏的常用字按 PREFERRED_READINGS 取现代
-    常用读音
+    语料佐证两个读音的（如 行 = hang/xing）跳过，避免写出错误拼音
 
 用法:
   python3 tools/pinyin/build_pinyin_dict.py            # 下载并生成
@@ -39,7 +35,6 @@ import re
 import sys
 import tempfile
 import urllib.request
-from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -56,8 +51,6 @@ SOURCES = {
         "path": "pinyin.txt",
         "urls": [
             "https://cdn.jsdelivr.net/gh/mozillazg/pinyin-data@{commit}/pinyin.txt",
-            "https://fastly.jsdelivr.net/gh/mozillazg/pinyin-data@{commit}/pinyin.txt",
-            "https://gcore.jsdelivr.net/gh/mozillazg/pinyin-data@{commit}/pinyin.txt",
             "https://raw.githubusercontent.com/mozillazg/pinyin-data/{commit}/pinyin.txt",
         ],
         "sha256": "621f8ca9eff8519f47e2b17b564fd318161e13bca07eea8c8e04993cd5d3b52e",
@@ -70,8 +63,6 @@ SOURCES = {
         "path": "pinyin.txt",
         "urls": [
             "https://cdn.jsdelivr.net/gh/mozillazg/phrase-pinyin-data@{commit}/pinyin.txt",
-            "https://fastly.jsdelivr.net/gh/mozillazg/phrase-pinyin-data@{commit}/pinyin.txt",
-            "https://gcore.jsdelivr.net/gh/mozillazg/phrase-pinyin-data@{commit}/pinyin.txt",
             "https://raw.githubusercontent.com/mozillazg/phrase-pinyin-data/{commit}/pinyin.txt",
         ],
         "sha256": "dcc769607c220b312fea3e71cb63421298b4b891b1f7356a95ab58f2c96fff81",
@@ -84,8 +75,6 @@ SOURCES = {
         "path": "jieba/dict.txt",
         "urls": [
             "https://cdn.jsdelivr.net/gh/fxsjy/jieba@{commit}/jieba/dict.txt",
-            "https://fastly.jsdelivr.net/gh/fxsjy/jieba@{commit}/jieba/dict.txt",
-            "https://gcore.jsdelivr.net/gh/fxsjy/jieba@{commit}/jieba/dict.txt",
             "https://raw.githubusercontent.com/fxsjy/jieba/{commit}/jieba/dict.txt",
         ],
         "sha256": "7197c3211ddd98962b036cdf40324d1ea2bfaa12bd028e68faa70111a88e12a8",
@@ -113,52 +102,9 @@ WEIGHT_MAX = 9999
 LONG_WORD_LEN = 4
 LONG_WORD_MIN_FREQ = 20
 
-# 注音补全：jieba 高频词中 phrase-pinyin-data 漏收的 2-4 字词，用单字读音合成
+# 注音补全：jieba 高频词中 phrase-pinyin-data 漏收的 2-3 字词，用单字读音合成
 SYNTHESIS_MIN_FREQ = 50
-SYNTHESIS_MAX_LEN = 4
-# 2-3 字词放宽多音字定音：语料中该读音占比达到阈值才采用；4 字词仍要求唯一读音
-SYNTHESIS_MIN_SHARE = 0.75
-SYNTHESIS_RELAXED_MAX_LEN = 3
-
-# 语料以书面语为主，个别常用字的读音分布偏离现代通用读音。
-# 仅对补音合成的 2-3 字词生效；已收录词条仍以 phrase-pinyin-data 读音为准。
-PREFERRED_READINGS = {
-    "还": "hai",
-    "都": "dou",
-    "了": "le",
-    "地": "di",
-    "得": "de",
-    "色": "se",
-    "行": "xing",
-    "率": "lv",
-    "省": "sheng",
-    "卡": "ka",
-    "系": "xi",
-    "传": "chuan",
-    "遗": "yi",
-    "盛": "sheng",
-    "陆": "lu",
-    "阿": "a",
-    "顿": "dun",
-    "没": "mei",
-    "血": "xue",
-    "校": "xiao",
-    "角": "jiao",
-    "给": "gei",
-    "露": "lu",
-    "参": "can",
-    "降": "jiang",
-    "劲": "jin",
-    "朴": "pu",
-    "和": "he",
-    "称": "cheng",
-    "模": "mo",
-    "削": "xue",
-    "剥": "bo",
-    "薄": "bo",
-    "便": "bian",
-    "落": "luo",
-}
+SYNTHESIS_MAX_LEN = 3
 
 
 def is_cjk(text: str) -> bool:
@@ -277,32 +223,18 @@ class Quantizer:
         return max(1, round(WEIGHT_MAX * math.log1p(max(1, freq)) / self.top))
 
 
-def synth_reading(
-    declared: list[str],
-    attested: Counter[str] | None,
-    min_share: float = 1.0,
-    preferred: str | None = None,
-) -> str | None:
-    """给「词表未收录的词」里的一个字定音。
+def synth_reading(declared: list[str], attested: set[str]) -> str | None:
+    """给「词表未收录的词」里的一个字定音，只在读音唯一时给出，否则返回 None。
 
     declared 是 pinyin-data 声明的全部读音；attested 是 phrase-pinyin-data 语料里这个字
-    各读音的出现次数。单音字直接采用；preferred 是语料被书面语带偏时的现代常用读音；
-    多音字在语料读音占比 >= min_share 时采用占比最高的读音，否则返回 None。
-    4 字词传入 min_share=1.0，等价于「语料只佐证一个读音才采用」。
+    实际出现过的读音。单音字直接采用；多音字只在语料只佐证一个读音时采用（如 明 声明
+    ming/meng、语料只有 ming），语料佐证多个读音时视为无法定音，跳过。
     """
     unique = list(dict.fromkeys(declared))
     if len(unique) == 1:
         return unique[0]
-    if preferred is not None and preferred in unique:
-        return preferred
-    if not attested:
-        return None
-    counts = {syllable: attested.get(syllable, 0) for syllable in unique}
-    total = sum(counts.values())
-    if total == 0:
-        return None
-    best = max(counts, key=counts.get)
-    return best if counts[best] / total >= min_share else None
+    filter_ = [syllable for syllable in unique if syllable in attested]
+    return filter_[0] if len(filter_) == 1 else None
 
 
 def build(out_path: Path, cache: Path) -> dict:
@@ -321,10 +253,10 @@ def build(out_path: Path, cache: Path) -> dict:
     quantize = Quantizer(max_freq)
 
     # 注音补全：phrase-pinyin-data 漏收的常用词，用 jieba 词频 x 单字读音补齐。
-    attested: dict[str, Counter[str]] = {}
+    attested: dict[str, set[str]] = {}
     for word, syllables in word_readings:
         for char, syllable in zip(word, syllables):
-            attested.setdefault(char, Counter())[syllable] += 1
+            attested.setdefault(char, set()).add(syllable)
     known_words = {word for word, _ in word_readings}
     synthesized_words: list[tuple[str, list[str]]] = []
     for word, freq in word_freq.items():
@@ -332,15 +264,8 @@ def build(out_path: Path, cache: Path) -> dict:
             continue
         if word in known_words or not all(is_cjk(ch) for ch in word):
             continue
-        relaxed = len(word) <= SYNTHESIS_RELAXED_MAX_LEN
         syllables = [
-            synth_reading(
-                char_readings.get(ch, []),
-                attested.get(ch),
-                SYNTHESIS_MIN_SHARE if relaxed else 1.0,
-                PREFERRED_READINGS.get(ch) if relaxed else None,
-            )
-            for ch in word
+            synth_reading(char_readings.get(ch, []), attested.get(ch) or set()) for ch in word
         ]
         if any(syllable is None for syllable in syllables):
             continue

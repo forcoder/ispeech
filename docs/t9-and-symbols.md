@@ -8,7 +8,7 @@
 | `app/src/main/java/com/ispeech/input/keyboard/KaomojiData.kt` | 新增 | 颜文字 7 类（103 条）+ 更多符号 6 类（150 个） |
 | `app/src/main/java/com/ispeech/input/keyboard/KeyDef.kt` | 修改 | `KeyboardLayoutKind.T9` + `KeyAction.SWITCH_IME`（枚举末尾） |
 | `app/src/main/java/com/ispeech/input/keyboard/KeyboardLayouts.kt` | 修改 | `pages()` 加 T9 分支；符号页/表情页末尾追加；数字页加「9键」 |
-| `app/src/main/java/com/ispeech/input/SoftKeyboardView.kt` | 修改 | 工具栏 9 键（含「EN/拼/五」输入法切换）+ `HorizontalScrollView` 兜底最小宽度 |
+| `app/src/main/java/com/ispeech/input/SoftKeyboardView.kt` | 修改 | 工具栏 8 键 + `HorizontalScrollView` 兜底最小宽度 |
 
 校验：`python3 tools/verify/check_t9.py` → 87 PASS / 0 FAIL / 1 WARN（退出码 0）；
 `python3 tools/verify/check_static.py` → 5/5（退出码 0）。
@@ -43,7 +43,8 @@
 ### 1.3 颜文字 / 更多符号页（追加式）
 
 - `T9Layouts.kaomojiPages()`：每个 `KaomojiData.categories` 分类一页，每行 3 条，页标题 `颜·分类名`（避开表情页已有的「动物」）；
-  键宽权重 2f 让 `SoftKeyboardView.keyTextSize`（`SoftKeyboardView.kt:335-339`）走 `weight > 1.4f` 分支用 18sp，长颜文字才放得下。
+  键宽权重 2f 让 `SoftKeyboardView.keyTextSize` 对 `weight > 1.4f` 的键降一档字号（九宫格布局 18sp，
+  26 键布局 15sp），长颜文字才放得下。字号 / 键面规格见 `docs/keyboard-ui.md`。
 - `T9Layouts.moreSymbolPages()`：每个 `KaomojiData.symbolCategories` 分类一页，每行 8 个单字符。
 - 两者都追加在**各自布局的末尾**：`KeyboardLayouts.symbols()` 追加更多符号、`KeyboardLayouts.emoji()` 追加颜文字，
   页码条（`SoftKeyboardView.buildPageBar`）会自动显示「颜·开心 9/15 点此翻页」。
@@ -63,28 +64,31 @@
 底行本来就是布局切换区（`ABC` 在左），把 `9键` 插在 `ABC` 右侧，切换入口相邻、手指不用换位置。
 代价是底行从 3 键变 4 键，空格占比从 4/7 降到 4/8.5 ≈ 47%（仍然最宽）。
 
-### 1.5 工具栏：9 键
+### 1.5 工具栏：8 键
 
 ```
-[短语] [AI] [输] [当前态] [符] [☺] [剪贴] [语音] [⚙]
- 1.3f   1.1f  1.0f     1.0f   1.0f 1.0f  1.2f   1.1f  1.0f   ← 权重和 9.8
+[⌨] [符] [☺] [短语] [剪贴] [AI] [🎤] [⚙]
+ 1.0  1.0  1.0  1.3    1.2   1.1  1.1  1.0   ← 权重和 8.8
 ```
 
-- 第 1、2 键固定为快捷短语与 AI（最常用，放最左，窄屏横向滚动时也优先可见）。
-- 第 3 键 `KeyAction.SWITCH_IME`：切系统其它输入法（服务侧实现），键面固定「输」。
-- 第 4 键 `KeyAction.MODE_SWITCH`（`statusLabel = true`）：显示**当前输入态**——拼音 `拼`、
-  英文 `EN`、五笔 `五`（`imeSwitchLabel()`），点击循环切换拼音 / 英文 / 五笔。
-  字母页底行还有同名 action 的「中/英」键，走 `modeSwitchLabel()` 的两态分色渲染，两者互不影响。
+- 第 1 键 `KeyAction.SWITCH_IME`：切系统其它输入法（服务侧实现），键面是键盘图标（`ic_ime_switch`）。
+- 第 2 键「符」：符号页（搜狗侧没有对等的符号键图标，故保持文字）。
+- 第 3 键「☺」：表情页（颜文字追加在其末尾）。
+- 第 4~6 键：快捷短语 / 剪贴板 / AI。
+- 第 7 键「🎤」：语音输入。
+- 第 8 键「⚙」：设置。
+- **没有「中/英」键**：中英切换由**字母页左下角的 Shift 键**承担（中文态下改造成「中/英」，
+  点击上报 `KeyAction.MODE_SWITCH`，见 `docs/keyboard-ui.md`）。
 - 工具栏键背景统一交给 `toolbarKeySelector()`：**默认透明，只有当前激活项（`state_selected`）显示主题色底**
   （`primaryPressed`），便于一眼看出正在使用哪个功能。
 - 没有独立的「颜」键：颜文字跟在表情页末尾，点 `☺` 后靠页码条翻到。
 - 没有「9键」键：见 1.4。
-- 9 键在窄屏会挤到 40dp 以下，所以外层是 `HorizontalScrollView(isFillViewport = true)`（**不换行、不加第二行**）：
+- 8 键在窄屏仍会挤到 40dp 以下，所以外层是 `HorizontalScrollView(isFillViewport = true)`（**不换行、不加第二行**）：
   放得下时整行铺满（视觉与旧版一致），放不下时横向滚动，每键靠 `TOOLBAR_KEY_MIN_WIDTH_DP = 40` 兜底 ≥ 40dp。
 - 字号 `TOOLBAR_TEXT_SIZE = 12f`。
 
-**宽度估算（393dp 屏）**：视口 387dp，9 键平均净宽约 **38dp**，低于 40dp 兜底 →
-实际会触发横向滚动，键面保持 48dp / 40dp。320dp 窄屏同样横向滚动。
+**宽度估算（393dp 屏）**：视口 387dp 扣掉工具栏左右 padding 6dp，8 键各带左右各 4dp margin（共 64dp），
+净宽约 317dp / 8 ≈ **39.6dp**，仍在 40dp 兜底下沿 → 视具体 ROM 字体会轻微横滑；320dp 窄屏必然横滑。
 
 ---
 
@@ -112,8 +116,8 @@ T9Layouts.t9ToLetterPatterns("2", lookup) // 展开 + 查词库，返回命中�
 | `1` 键 | 键面画「，。？」等标点图形 | `1` = 标点页入口（`PAGE_NEXT`） | 行为一致，键面文字从简（`TextView` 单行） |
 | `0` 键 | 键面写「空格」/「0」 | 键面 `0`，行为 `KeyAction.SPACE` | 九宫格里 0 就是空格 |
 | `*` / `#` | `*` 符号页、`#` 更多设置 | `*` 符号1、`#` 更多符号 | 不弹系统菜单，保持键位表驱动 |
-| 九宫格 / 26 键切换 | 工具栏「9键/26键」按钮 | 数字页底行「9键」 | 工具栏 9 键已满（含输入法切换），入口让给数字页 |
-| 切其它输入法 | 工具栏地球 / 键盘图标 | 工具栏第 3 键（键面显示 EN / 拼 / 五） | 行为由服务侧实现（`KeyAction.SWITCH_IME`）；键面文字跟随当前输入态 |
+| 九宫格 / 26 键切换 | 工具栏「9键/26键」按钮 | 数字页底行「9键」 | 工具栏 8 键已有归属，入口让给数字页 |
+| 切其它输入法 | 工具栏地球 / 键盘图标 | 工具栏第 1 键（键盘图标） | 行为由服务侧实现（`KeyAction.SWITCH_IME`） |
 | 拼音联想 | 自建拼音词库 + T9 索引 | 数字串展开成字母组合后查**九宫格专用拼音引擎** | `pinyin86.dict` + `PinyinEngine`（`AppContainer.pinyinEngine`，与「拼音混输」开关无关）；长串靠组合枚举，见第 6 节 |
 | 候选条 / 翻页 | 九宫格候选条 | 复用现有 `CandidateView` | 候选条、页码器、1-9 角标都是现成的 |
 
@@ -146,7 +150,7 @@ KeyboardLayoutKind.T9 -> T9Layouts.pages()
 // （外层 HorizontalScrollView 见 :249-258，最小宽度常量见 :599）
 private fun toolbarKeys(): List<KeyDef> = listOf(
     KeyDef.fn(KeyAction.SWITCH_IME, "⌨输入法", weight = 1.6f, style = KeyStyle.SPECIAL),
-    /* 中/英、符、☺、短语、剪贴、AI、⚙ 原样保留 */
+    /* 符、☺、短语、剪贴、AI、🎤、⚙ 原样保留（工具栏 8 键；中/英 由字母页 Shift 键承担） */
 )
 
 // SoftKeyboardView.kt:129 —— setLayout 支持 page（默认值不变，旧调用点不受影响）

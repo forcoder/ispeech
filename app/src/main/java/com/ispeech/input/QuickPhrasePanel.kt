@@ -1,13 +1,11 @@
 package com.ispeech.input
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.os.Looper
-import android.text.InputType
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextUtils
@@ -16,7 +14,6 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -28,6 +25,7 @@ import com.ispeech.data.PhraseSearch
 import com.ispeech.data.PhraseUsageStore
 import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
+import com.ispeech.engine.QuickSource
 
 /**
  * 快捷短语面板（csBaby 风格）：标题行 + 分类胶囊 + 规则列表。
@@ -43,8 +41,7 @@ import com.ispeech.engine.QuickEntry
  * 搜索框持有输入焦点（[requestSearchFocus]），并复用键盘「中/英」键的当前输入状态
  * （[setInputLanguage]）。
  * 关键词匹配走 PhraseSearch：完全 / 前缀 / 包含 / 拼音首字母四档 + 使用次数与收藏加权，
- * 即「智能联想」；中文关键词按字面包含匹配（见 PhraseSearch），英文关键词走拼音首字母。
- * 无关键词时保持规则文件原始顺序。
+ * 即「智能联想」；无关键词时保持规则文件原始顺序。
  *
  * 收藏 / 最近使用：由服务读盘后经 [submitUsage] 灌入 id 集合，面板只做内存过滤与渲染，
  * **不做任何磁盘 IO**；星标点击只回调 [onToggleStar]，写盘与状态刷新由服务负责。
@@ -90,7 +87,7 @@ class QuickPhrasePanel @JvmOverloads constructor(
      * 当前输入语言是否为英文态。
      *
      * 与键盘左下角「中/英」键**共用同一个状态源**（服务侧 `mode`），只影响搜索框状态展示，
-     * 不影响关键词匹配（中文关键词走字面包含，英文关键词走拼音首字母 [PhraseSearch]）。
+     * 不影响关键词匹配（匹配始终按 ASCII 拼音首字母走 [PhraseSearch]）。
      */
     @Volatile
     private var englishInput: Boolean = false
@@ -111,9 +108,6 @@ class QuickPhrasePanel @JvmOverloads constructor(
     private val tagBg = Color.parseColor("#E9ECF4")
     private val tagText = Color.parseColor("#5A6072")
 
-    /** 默认态图标灰色，与 [SoftKeyboardView] 的 hintColor 保持一致。 */
-    private val iconDefault = Color.parseColor("#8A9099")
-
     // ── 尺寸 ──
     private val maxPanelHeightDp = 200
     private val maxRows = 200
@@ -121,25 +115,7 @@ class QuickPhrasePanel @JvmOverloads constructor(
 
     // ── 视图（build() 中创建）──
     private lateinit var infoLabel: TextView
-
-    /** 搜索框：EditText 才能在获得焦点后绘制可见光标（TextView 不会）。 */
-    private lateinit var searchText: EditText
-
-    /** 自绘光标：请示输入焦点时闪烁，代替会被系统接管的 EditText 光标。 */
-    private lateinit var caret: View
-
-    /** 光标闪烁间隔（毫秒） */
-    private val caretBlinkMs = 500L
-
-    /** 光标闪烁任务 */
-    private val caretHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val caretRunnable = object : Runnable {
-        override fun run() {
-            if (!::caret.isInitialized) return
-            caret.visibility = if (caret.visibility == View.VISIBLE) View.INVISIBLE else View.VISIBLE
-            caretHandler.postDelayed(this, caretBlinkMs)
-        }
-    }
+    private lateinit var searchText: TextView
     private lateinit var searchClear: ImageView
 
     /** 搜索框整行（可聚焦容器）：打开面板时把输入焦点移到这里。 */
@@ -162,17 +138,20 @@ class QuickPhrasePanel @JvmOverloads constructor(
     )
 
     /**
-     * 分类胶囊：只有 全部 / ★ 收藏 / 最近。
-     *
-     * 原先还有来源分组（内置 / 远端 / 用户）与类型（应用 / 短语）胶囊，信息价值低于占地，
-     * 已按需求移除；来源不再是用户需要感知的维度，搜索结果统一按相关性排序。
+     * 分类胶囊顺序：全部 + 收藏 / 最近 + 来源分组（内置 / 远端 / 用户）+ 快速应用 + 短语。
+     * 后六项与增强前完全一致，只是整体后移两位。
      */
     private val categories: List<Category> =
         listOf(
             Category("全部"),
             Category("★ 收藏", usage = UsageFilter.STARRED),
             Category("最近", usage = UsageFilter.RECENT)
-        )
+        ) +
+            QuickSource.all.map { Category(it, source = it) } +
+            listOf(
+                Category(LookupKind.QUICKAPPLY.label, kind = LookupKind.QUICKAPPLY),
+                Category(LookupKind.PHRASE.label, kind = LookupKind.PHRASE)
+            )
 
     // ── 冻结 API ──
 
@@ -222,27 +201,11 @@ class QuickPhrasePanel @JvmOverloads constructor(
     /**
      * 把输入焦点移到搜索框（打开面板 / 切中英时由服务调用）。
      *
-     * 搜索框不弹系统键盘（输入来自同屏软键盘，`showSoftInputOnFocus = false`），但需要持有焦点：
-     * EditText 获得焦点后才会绘制并闪烁光标，搜索框也会显示焦点描边（见 [searchBoxBackground]）。
+     * 搜索框不弹系统键盘（输入来自同屏软键盘），但需要持有焦点：这样「正在往搜索框输入」
+     * 一目了然，搜索框也会显示焦点描边（见 [searchBoxBackground]）。
      */
     fun requestSearchFocus() {
-        runOnMain {
-            if (!::searchText.isInitialized) return@runOnMain
-            // 只标记「面板处于输入态」：描边 + 自绘光标闪烁，**不调用 requestFocus()**
-            if (::searchRow.isInitialized) searchRow.isSelected = true
-            caret.visibility = View.VISIBLE
-            caretHandler.removeCallbacks(caretRunnable)
-            caretHandler.postDelayed(caretRunnable, caretBlinkMs)
-        }
-    }
-
-    /** 退出输入态：停止光标闪烁（关闭面板时由服务调用）。 */
-    fun clearSearchFocus() {
-        runOnMain {
-            caretHandler.removeCallbacks(caretRunnable)
-            if (::caret.isInitialized) caret.visibility = View.INVISIBLE
-            if (::searchRow.isInitialized) searchRow.isSelected = false
-        }
+        runOnMain { if (searchRow.isFocusable) searchRow.requestFocus() }
     }
 
     /** 当前筛选关键词。 */
@@ -294,12 +257,12 @@ class QuickPhrasePanel @JvmOverloads constructor(
         // 只算一次过滤结果：标题行与列表共用，避免重复计算 id 哈希。
         val results = filtered()
         // 搜索框展示当前关键词（关键词来自软键盘，与服务同屏，搜索框本身不弹键盘）。
-        // EditText 进入编辑态后由系统绘制闪烁光标，不再用「|」字符模拟；有关键词时显示 ✕ 清空按钮。
+        // 有关键词时尾部带一个光标「|」，并显示 ✕ 清空按钮，让「正在输入搜索」一眼可见。
         val typing = keyword.isNotEmpty()
-        // 只在内容变化时写回：EditText 持有焦点时反复 setText 会把光标重置、打断输入
-        if (searchText.text.toString() != keyword) {
-            searchText.setText(keyword)
-            searchText.setSelection(searchText.text.length)
+        searchText.text = if (typing) {
+            "$keyword|"
+        } else {
+            context.getString(R.string.quick_panel_search_hint)
         }
         searchText.setTextColor(if (typing) textPrimary else textSecondary)
         searchClear.visibility = if (typing) View.VISIBLE else View.GONE
@@ -452,6 +415,8 @@ class QuickPhrasePanel @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(createStarView(entry, id), tagParams())
+            addView(createTagView(entry.source), tagParams())
+            addView(createTagView(entry.kind.label), tagParams())
         }
 
         return LinearLayout(context).apply {
@@ -492,8 +457,6 @@ class QuickPhrasePanel @JvmOverloads constructor(
         val starred = id in starredIds
         return ImageView(context).apply {
             setImageResource(if (starred) R.drawable.ic_star_filled else R.drawable.ic_star)
-            // 只有默认态（未收藏）的描边星标统一变灰；已收藏的实心星标保留原有高亮色
-            if (!starred) tintDefaultIcon(this)
             scaleType = ImageView.ScaleType.CENTER
             setPadding(dp(6), dp(2), dp(6), dp(2))
             minimumWidth = dp(36)
@@ -607,7 +570,6 @@ class QuickPhrasePanel @JvmOverloads constructor(
             isFocusable = true
             background = keySelector(rowBg, pressedBg)
             contentDescription = "返回"
-            tintDefaultIcon(this)
             setOnClickListener { onClose?.invoke() }
         }
         val title = TextView(context).apply {
@@ -665,32 +627,12 @@ class QuickPhrasePanel @JvmOverloads constructor(
         val icon = ImageView(context).apply {
             setImageResource(R.drawable.ic_search)
             scaleType = ImageView.ScaleType.CENTER
-            tintDefaultIcon(this)
         }
-        searchText = EditText(context).apply {
+        searchText = TextView(context).apply {
             textSize = 14f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, 0)
-            background = null
-            isSingleLine = true
-            // **不抢 Android 焦点**：这是 IME 自己窗口里的控件，一旦 requestFocus 系统会把
-            // 它当成新的输入目标，触发输入法切换 / 页面跳转，且按键会被它吞掉，
-            // 导致「只能打英文、打着打着跳到别的页面」。输入统一由服务侧的
-            // handleSoftKey 路由，这里只负责显示文本，光标由 [caret] 自绘。
-            isCursorVisible = false
-            isFocusable = false
-            isFocusableInTouchMode = false
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            showSoftInputOnFocus = false
-            setTextColor(textSecondary)
-            setHintTextColor(textSecondary)
-            hint = context.getString(R.string.quick_panel_search_hint)
-        }
-        caret = View(context).apply {
-            setBackgroundColor(primary)
-            visibility = View.INVISIBLE
         }
         langBadge = TextView(context).apply {
             textSize = 12f
@@ -707,21 +649,16 @@ class QuickPhrasePanel @JvmOverloads constructor(
             isFocusable = false
             visibility = View.GONE
             contentDescription = context.getString(R.string.btn_close)
-            tintDefaultIcon(this)
-            setOnClickListener {
-                onClearKeyword?.invoke()
-                requestSearchFocus()
-            }
+            setOnClickListener { onClearKeyword?.invoke() }
         }
         searchRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(6), dp(6), dp(6))
             background = searchBoxBackground()
-            // 输入焦点落在内部 EditText（而不是整行）：键盘按键经服务进入面板关键词，
-            // EditText 负责绘制光标，整行只做点击命中与焦点描边
-            isFocusable = false
-            isFocusableInTouchMode = false
+            // 输入焦点常驻搜索框：键盘按键经服务进入面板关键词，焦点只是「输入目标」的可视锚点
+            isFocusable = true
+            isFocusableInTouchMode = true
             isClickable = true
             contentDescription = "快捷短语搜索框"
             setOnClickListener { requestSearchFocus() }
@@ -734,18 +671,9 @@ class QuickPhrasePanel @JvmOverloads constructor(
             )
             addView(
                 searchText,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginStart = dp(4) }
-            )
-            addView(
-                caret,
-                LinearLayout.LayoutParams(dp(2), dp(18)).apply { marginStart = dp(1) }
-            )
-            addView(
-                View(context),
-                LinearLayout.LayoutParams(0, 1, 1f)
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dp(4)
+                }
             )
             addView(
                 langBadge,
@@ -766,13 +694,11 @@ class QuickPhrasePanel @JvmOverloads constructor(
         return searchRow
     }
 
-    /** 搜索框背景：内部 EditText 获得输入焦点时描一圈主题色边框，其余时候是普通胶囊底色。 */
+    /** 搜索框背景：获得输入焦点时描一圈主题色边框，其余时候是普通胶囊底色。 */
     private fun searchBoxBackground(): StateListDrawable {
         val focused = rounded(pillBg, radiusKeyDp).apply { setStroke(dp(1), primary) }
         return StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), focused)
-            // 焦点实际在内部 EditText 上，由它的 focus listener 把整行置为 selected
-            addState(intArrayOf(android.R.attr.state_selected), focused)
             addState(intArrayOf(), rounded(pillBg, radiusKeyDp))
         }
     }
@@ -810,11 +736,6 @@ class QuickPhrasePanel @JvmOverloads constructor(
     }
 
     // ── 局部私有辅助（不跨文件共享）──
-
-    /** 默认态图标统一着灰色（与 SoftKeyboardView 的 hintColor 一致）；激活态不调用本方法。 */
-    private fun tintDefaultIcon(icon: ImageView) {
-        icon.imageTintList = ColorStateList.valueOf(iconDefault)
-    }
 
     private fun dp(value: Int): Int = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP,
