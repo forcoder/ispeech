@@ -163,6 +163,19 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 > 都记在 `docs/v1.5-verify-log.md`。
 脚本里的远端环境变量必须写成 `\$JAVA_HOME` 转义形式，否则本地 shell 会把 `$PATH` 展开进 ssh 命令导致失败。
 
+## 开发与部署流程（worktree）
+
+一个任务 = 一个任务分支 + 一个独立 worktree；**禁止在 main 工作区直接改代码，只从干净的 main 出包部署**。
+完整 SOP（含真机 USB / 无线 adb、回滚、常见坑）见 [`docs/dev-worktree-deploy.md`](docs/dev-worktree-deploy.md)。
+
+```bash
+tools/dev/worktree.sh new VOCA-1234 quick-phrase-search   # 建 task/VOCA-1234-quick-phrase-search
+cd ~/workspace/_wt/ispeech/VOCA-1234                      # 在独立 worktree 开发、提交
+cd /Users/cookie/workspace/iSpeech
+tools/dev/worktree.sh land VOCA-1234                      # squash 合并回 main
+tools/deploy/deploy.sh --target emulator                  # 从 main 出包并装机
+```
+
 ## 安装测试（APK）
 
 1. **安装**：`adb install -r dist/ispeech-release-v1.5.apk`，或点击 APK 安装（要求 Android 8.0+；v1.5 已签名，versionCode 5）
