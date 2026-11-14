@@ -181,4 +181,6 @@
     <string name="quick_synced_none">已保存 %1$d 条；云端没有需要同步的变更</string>
     <string name="quick_sync_failed">本地已保存；云端同步失败：%1$s</string>
     <string name="sync_upload_partial">云端生效：新增 %1$d · 修改 %2$d · 删除 %3$d；%4$d 条未生效（后端不支持修改 / 删除）</string>
+<string name="asr_engine_vosk">离线识别（内置）</string>
+<string name="asr_engine_vosk_desc">内置 Vosk 中文模型，完全离线、不联网；首次使用需下载约 42MB 模型</string>
 </resources>

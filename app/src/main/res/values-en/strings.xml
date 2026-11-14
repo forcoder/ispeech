@@ -177,4 +177,6 @@
     <string name="quick_synced_none">Saved %1$d; nothing to sync to cloud</string>
     <string name="quick_sync_failed">Saved locally; cloud sync failed: %1$s</string>
     <string name="sync_upload_partial">Cloud applied: created %1$d · updated %2$d · deleted %3$d; %4$d not applied (backend rejects update / delete)</string>
+<string name="asr_engine_vosk">Offline (built-in)</string>
+<string name="asr_engine_vosk_desc">Built-in Vosk Chinese model, fully offline; the ~42MB model is downloaded on first use</string>
 </resources>

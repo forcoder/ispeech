@@ -15,6 +15,12 @@ val keystoreProps = Properties().apply {
     }
 }
 
+// 离线语音模型下载地址（配置项）：默认走阿里云 OSS 公共读对象（HTTPS + Range，
+// 默认域名免 ICP 备案，baseline 见 docs/model-host-runbook.md）。
+// 打包时可用 -PasrModelUrl=https://... 覆盖（例如切到备用源），无需改业务代码。
+val asrModelUrl: String = (project.findProperty("asrModelUrl") as String?)
+    ?: "https://delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
+
 android {
     namespace = "com.ispeech"
     compileSdk = 34
@@ -28,6 +34,9 @@ android {
 
         // 后端基础地址：与 CsBabyClient.DEFAULT_BASE_URL 保持一致
         buildConfigField("String", "API_BASE_URL", "\"http://api.agentai0.com/\"")
+
+        // 离线语音模型下载地址（见文件顶部 asrModelUrl 配置项）
+        buildConfigField("String", "ASR_MODEL_URL", "\"$asrModelUrl\"")
     }
 
     signingConfigs {
@@ -110,6 +119,16 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
     implementation(libs.gson)
 
+    // FunASR 离线识别（基于 sherpa-onnx 的第三方封装）
+    implementation(libs.sherpa.onnx)
+    // 解压 .tar.bz2 模型包（Android 无 tar 可执行文件，JDK 不支持 bzip2）
+    implementation(libs.commons.compress)
+
     // 端侧语音识别（离线 Vosk；模型不入包，首次使用时下载到 filesDir）
     implementation(libs.vosk.android)
+
+    // 单元测试
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.test.ext:junit:1.1.5")
+    testImplementation(kotlin("test"))
 }
