@@ -1,18 +1,40 @@
-# 智语 iSpeech 1.5 — 测试安装包（Android）
+# 智语 iSpeech 1.6 — 内测安装包（Android）
 
 搜狗五笔 86 复刻原型 · Kotlin + Jetpack Compose · 五笔86 引擎 + 拼音混输 / 模糊音 + 九宫格 T9 +
 简繁输出 + 颜文字 / 更多符号 + 输入统计 + csBaby 快捷短语（收藏 / 最近）+ 触屏软键盘 + AI 回复。
 
-## 本版文件（v1.5）
+**本版定位**：内测分发 · Android Debug 证书签名 · 含 FunASR 离线语音运行时（4 ABI）· 默认模型源为 OSS HTTPS。
+语音入口修复（VOCA-166）尚未合入，本包是**试包**：版本 / 签名 / 模型源 / 产物内容可验，语音键是否可用不在本包保证范围内；
+VOCA-166 合入 main 后会在 VOCA-186 重打最终包并替换本文件。
+
+## 本版文件（v1.6）
 
 | 文件 | 说明 |
 | --- | --- |
-| `ispeech-release-v1.5.apk` | **release（本次交付）**，versionCode 5 / versionName 1.5，本工程自签测试证书（CN=iSpeech Prototype） |
-| `ispeech-debug.apk` | debug（抓日志：`adb logcat -s IspeechIme`），与 release 同一份源码 |
-| `ispeech-release-v1.3.apk` / `ispeech-release-v1.0.apk` | 历史版本，保留用于回归对比 |
-| `SHA256SUMS` | 完整性校验 |
+| `ispeech-internal-v1.6.apk` | **内测交付包（试包）**：versionCode 6 / versionName 1.6，Android Debug 证书（SHA-256 `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`），含 4 ABI `libsherpa-onnx-jni.so` |
+| `SHA256SUMS` | 完整性校验（含 `_archive/` 历史包） |
+| `_archive/` | 历史包 v1.0–v1.5，**均不含语音**（无 sherpa-onnx / FunASR 运行时），仅用于回归对比 |
 
-## v1.5 新增（相对 v1.4）
+## v1.6 变更（相对 v1.5）
+
+- 版本号 `versionCode 6` / `versionName 1.6`，装机后可凭版本号区分「含语音」的内测包与旧包
+- 默认 `asrModelUrl` 切到 OSS HTTPS（`delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com`），
+  构建**不带** `-PasrModelUrl`；dex 内不再出现 `cvm.agentai0.com`
+- 内置 FunASR 离线识别运行时：sherpa-onnx + Paraformer-zh-small，arm64-v8a / armeabi-v7a / x86 / x86_64
+- 签名：Android Debug 证书（非 release 自签证书），可与既有内测包同证书覆盖安装，不用先卸载
+- 出包基线：提交 `bc81c30`（合并 `origin/main` 的 `76d178c`）+ 版本提交 `a9d1dae`；APK 由该提交 `assembleRelease` 产物用本机 debug keystore 重签
+
+## 出包门禁（2026-11-14 实测，全部通过）
+
+| 门禁 | 结果 |
+| --- | --- |
+| 原生库 ABI 数 | `unzip -l … \| grep -c libsherpa-onnx-jni.so` = **4** |
+| 模型源在 dex | 命中 `delivery-service-smzk` = **1**；`cvm.agentai0.com` = **0** |
+| 签名证书 | `apksigner verify --print-certs` → `85:7C:E6:…:A0:ED`（Android Debug） |
+| 版本元数据 | `aapt2 dump badging` → `versionCode='6'` / `versionName='1.6'` |
+| 模型源可用 | `HEAD` 200 / `Content-Length: 77920048` / `Range: 0-1023` → 206 |
+
+## v1.5 变更（历史，相对 v1.4）
 
 - **拼音混输**：`assets/pinyin86.dict`（44684 行，三源 MIT 数据 + sha256 固定）+ `PinyinEngine`
   （全拼 / 简拼 / 前缀三层，兜底档位排在五笔之后）；设置页开关
@@ -29,7 +51,8 @@
 
 ## 安装
 
-1. `adb install -r ispeech-release-v1.5.apk`，或将 APK 拷进手机点击安装（要求 Android 8.0+ / minSdk 26）。
+1. `adb install -r ispeech-internal-v1.6.apk`，或将 APK 拷进手机点击安装（要求 Android 8.0+ / minSdk 26）。
+   已装旧内测包（同 debug 证书）可直接覆盖，不需要先卸载；若报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 说明证书不同，**不要卸载清数据**，先回报。
 2. 系统设置 → 语言与输入 → 管理输入法 → 启用「智语」。
 3. 任意输入框：通过输入法切换器（长按空格 / 通知栏）切到「智语」，或直接在键盘工具栏点「⌨输入法」。
 
@@ -45,25 +68,30 @@
 
 ## 已知限制
 
-- 无双拼 / 手写 / 语音 / 五笔 98 / 云词库；皮肤仅主题色
+- 无双拼 / 手写 / 五笔 98 / 云词库；皮肤仅主题色
+- **语音**：本试包已带 FunASR 运行时与默认 OSS 模型源，但语音入口修复（VOCA-166）未合入，语音键行为以真机验收（VOCA-188）结论为准
 - 九宫格无音节切分（组合枚举上限 192 组、数字串 ≤9 位），>6 位数字时候选变少
 - 简繁为字符级转换，不做词汇消歧
 - 输入统计不含 AI 回复上屏
 - 云端同步与 AI 回复需先在设置页登录 csBaby（`http://api.agentai0.com`）
 
-## 构建与实测环境
+## 构建与重签（可复现）
 
-本工程开发机已装 JDK 17（Temurin 17.0.20.1）但没有 Android SDK，编译与真机冒烟都在远端构建机（`cookie@43.136.44.72:10010`，
-JDK 17 + Android SDK 34 + emulator-5554 / Android 14）执行，命令见仓库根 `README.md` 的
-「远端构建机」与「v1.5 真机实测记录」两节。
-
-打包命令：
+本机（macOS arm64，JDK 17 + Android commandline tools 34）直接出包并重签；远端构建机自带 debug keystore 与本机不同，
+所以**产物必须在本机重签**，否则装不上已装旧包的手机。
 
 ```bash
-./ispeech-remote.sh sync
-ssh -p 10010 cookie@43.136.44.72 'cd ~/workspace/iSpeech && export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools && export PATH=$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:/usr/bin:/bin && ./gradlew assembleRelease'
-scp -P 10010 cookie@43.136.44.72:~/workspace/iSpeech/app/build/outputs/apk/release/app-release.apk dist/ispeech-release-v1.5.apk
-cd dist && shasum -a 256 ispeech-release-v1.5.apk >> SHA256SUMS
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+git checkout a9d1dae                            # 出包提交（含 76d178c 与 v1.6 版本号）
+printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties   # 本机文件，不入库
+./gradlew assembleRelease                       # 不带 -PasrModelUrl，走 OSS 默认源
+
+BT=$ANDROID_HOME/build-tools/34.0.0
+$BT/apksigner sign --ks ~/.android/debug.keystore --ks-type JKS \
+  --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android \
+  --out dist/ispeech-internal-v1.6.apk app/build/outputs/apk/release/app-release.apk
+cd dist && shasum -a 256 ispeech-internal-v1.6.apk _archive/*.apk > SHA256SUMS
 ```
 
 ## 校验

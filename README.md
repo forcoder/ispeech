@@ -2,6 +2,11 @@
 
 智语是一款基于五笔输入法的 Android 输入法（IME），集成 csBaby 后端实现快捷短语查找、快速应用与云端同步。
 
+**当前版本 v1.6（内测）**：`versionCode 6` / `versionName 1.6`，分发包 `dist/ispeech-internal-v1.6.apk`。
+本版把离线语音模型源默认切到 OSS HTTPS（构建不再需要 `-PasrModelUrl`）、内置 arm64-v8a / armeabi-v7a / x86 / x86_64
+四套 FunASR（sherpa-onnx + Paraformer）运行时，并用 Android Debug 证书签名以覆盖安装既有内测包。
+语音入口修复（VOCA-166）尚未合入，该包是试包，门禁证据与重签步骤见 `dist/README.md`。
+
 **v1.5 主题：在 v1.4 全功能键盘的基础上补齐搜狗五笔的「输入方案 + 切换 + 统计 + 语音」——
 拼音混输 / 模糊音、简繁输出、九宫格 T9、颜文字、输入统计、语音输入，并加上 csBaby 快捷短语的收藏与最近使用。**
 
@@ -226,7 +231,7 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 - 云端同步与 AI 回复需先在设置页登录 csBaby
 - 首次使用需手动启用输入法
 - **构建依赖 JDK 17 + Android SDK 34**：`local.properties` 不入库，按「构建方法」配置本机 SDK 路径；
-  仓库 `dist/` 里的 APK 是历史交付包，重新构建请以 `assembleDebug` / `assembleRelease` 产物为准
+  `dist/` 只保留当前内测包（`ispeech-internal-v1.6.apk`），v1.5 及更早的包已移入 `dist/_archive/`；重新构建请以 `assembleDebug` / `assembleRelease` 产物为准
 
 ## 文档
 
