@@ -116,6 +116,9 @@ class IspeechImeService : InputMethodService() {
         /** 九宫格（T9）数字串最长 9 位 */
         private const val T9_MAX_DIGITS = 9
 
+        /** 联想词去重兜底时回看的已上屏字数（与 AssociationCommit 的锚点窗口一致） */
+        private const val ASSOCIATION_ANCHOR_CHARS = 16
+
         /**
          * 九宫格一次最多展开的字母组合数。
          *
@@ -1175,9 +1178,13 @@ class IspeechImeService : InputMethodService() {
             commit(candidate.insertText)
             return
         }
-        // 联想词以已上屏末字开头，整词上屏会把这个字重复一遍（「你」+「你好」→「你你好」）：
-        // 只上屏多出来的部分，靠已上屏的字接续
-        val text = AssociationCommit.textToCommit(lastCommit, candidate.insertText)
+        // 联想词按已上屏的末字查出来，开头就是这个字，整词上屏会把它重复一遍：
+        // 「你」+「你好」→「你你好」，「指导老师」+「师专」→「指导老师师专」。
+        // 只上屏与已上屏文本不相重的部分，靠已上屏的字接续
+        val beforeCursor = runCatching {
+            currentInputConnection?.getTextBeforeCursor(ASSOCIATION_ANCHOR_CHARS, 0)?.toString().orEmpty()
+        }.getOrDefault("")
+        val text = AssociationCommit.textToCommit(lastCommit, candidate.insertText, beforeCursor)
         if (text.isEmpty()) {
             clearAssociation()
             renderCandidateView()

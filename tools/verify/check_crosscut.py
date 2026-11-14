@@ -24,7 +24,8 @@
      分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
      词典页 SAF 安装 + 启停 / 删除 + 中英文案
 11. 联想词上屏去重：AssociationCommit 规则 -> 服务 pickCandidate 联想分支接线 ->
-     规则本身用 Python 复刻跑用例（「你」+「你好」不能变「你你好」）
+     规则本身用 Python 复刻跑用例（「你」+「你好」不能变「你你好」；
+     多字候选「指导老师」+「师专」不能变「指导老师师专」）
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -1587,9 +1588,14 @@ def check_association_commit() -> None:
         f"{rel(ASSOCIATION_COMMIT)} 缺失或没有 AssociationCommit",
     )
     check(
-        "candidate.startsWith(lastCommit)" in commit and "substring(lastCommit.length)" in commit,
-        "规则：联想词以已上屏文本开头时只补多出来的部分",
-        "AssociationCommit.textToCommit 未实现「去掉已上屏前缀」",
+        "suffixPrefixOverlap" in commit and "regionMatches" in commit,
+        "规则：按「已上屏后缀 / 候选前缀」最长重合裁剪",
+        "AssociationCommit.textToCommit 未实现最长重合裁剪（多字候选会出现重复字）",
+    )
+    check(
+        "candidate.startsWith(lastCommit)" not in commit,
+        "规则不再只认「整段前缀」重合（多字候选漏裁剪的根因）",
+        "AssociationCommit 仍只处理整段前缀，多字候选上屏后点联想词会重复末字",
     )
     pick = re.search(r"private fun pickCandidate\(.*?\n    \}", service, re.S)
     body = pick.group(0) if pick else ""
@@ -1599,40 +1605,59 @@ def check_association_commit() -> None:
         "pickCandidate 未调用 AssociationCommit.textToCommit（联想词仍会整词上屏）",
     )
     check(
+        "getTextBeforeCursor" in body,
+        "pickCandidate 用光标前实际文本兜底（lastCommit 被宿主清空时不重复）",
+        "pickCandidate 未把光标前文本作为兜底锚点，宿主重启输入连接后仍可能重复",
+    )
+    check(
         "commit(text, allowAssociation = false)" in body,
         "联想词上屏后不再接续联想（沿用原语义，只改上屏文本）",
         "pickCandidate 联想分支的上屏调用被改动，需人工确认",
     )
 
-    def text_to_commit(last_commit: str, candidate: str) -> str:
+    def text_to_commit(last_commit: str, candidate: str, before_cursor: str = "") -> str:
         """Python 复刻 AssociationCommit.textToCommit（改 Kotlin 时同步改这里）."""
-        if not last_commit or not candidate:
+        if not candidate:
             return candidate
-        if candidate == last_commit:
+        anchor = last_commit or before_cursor
+        if not anchor:
+            return candidate
+        if candidate == anchor:
             return ""
-        if len(candidate) <= len(last_commit):
-            return candidate
-        return candidate[len(last_commit):] if candidate.startswith(last_commit) else candidate
+        window = anchor[-16:]
+        for length in range(min(len(window), len(candidate)), 0, -1):
+            if candidate.startswith(window[-length:]):
+                return candidate[length:]
+        return candidate
 
     cases = [
         # 末字单字上屏 -> 联想词只补后半截
         (("你", "你好"), "好"),
         (("你", "你们"), "们"),
+        # 多字候选：联想按末字查，候选开头就是这个字 -> 裁掉重复的那个字
+        (("指导老师", "师专"), "专"),
+        (("指导老师", "师傅"), "傅"),
+        (("知道", "道理"), "理"),
+        (("指导老师", "老师好"), "好"),
         # 词组整词前缀重合 -> 只补多出来的部分
         (("你好", "你好吗"), "吗"),
         (("天气", "天气预报"), "预报"),
-        # 无前缀重合 -> 整词上屏（用户词库「包含」联想 / 词组接续）
+        # 无重合 -> 整词上屏（用户词库「包含」联想）
         (("气", "天气"), "天气"),
-        (("天气", "气温"), "气温"),
+        (("知", "认知"), "认知"),
         # 与已上屏内容相同 -> 不重复写
         (("天气", "天气"), ""),
+        (("指导老师", "指导老师"), ""),
         # 无已上屏文本 -> 原样
         (("", "你好"), "你好"),
+        # lastCommit 被宿主清空 -> 退回光标前实际文本
+        (("", "师专", "指导老师"), "专"),
+        (("", "师专", "师专"), ""),
     ]
     bad = [(args, want, text_to_commit(*args)) for args, want in cases if text_to_commit(*args) != want]
     check(
         not bad,
-        f"去重规则用例全过（{len(cases)} 组：单字接续 / 整词重合 / 无重合 / 完全相同）",
+        f"去重规则用例全过（{len(cases)} 组：单字接续 / 多字重复字 / 整词重合 / 无重合 / 完全相同）",
         f"去重规则用例不符：{bad}",
     )
 
