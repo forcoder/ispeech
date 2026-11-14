@@ -8,6 +8,7 @@ import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickLocator
 import com.ispeech.engine.QuickMatchMode
+import com.ispeech.engine.QuickOverride
 import com.ispeech.engine.QuickPhraseEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -84,7 +85,10 @@ object SyncRepository {
             CsBabyAuthStore.save(context, auth)
         }
 
+        // 快捷字母覆盖只在本地生效（见 QuickOverride）：跳过它们，避免云端出现同内容的重复规则
+        val remoteEntries = readRemoteEntries(context)
         val locals = readLocalUserEntries(context)
+            .filterNot { entry -> QuickOverride.matchesAny(entry, remoteEntries) }
         val remote = client.listRules(auth)
         val mapFile = File(context.filesDir, REMOTE_RULE_MAP_FILE_NAME)
         val known = RemoteRuleMap.load(mapFile)
@@ -172,6 +176,16 @@ object SyncRepository {
     /** 读取本地用户自定义规则（filesDir/quick_phrases_user.txt），失败返回空列表。 */
     private fun readLocalUserEntries(context: Context): List<QuickEntry> {
         val stream = QuickLocator.openUser(context) ?: return emptyList()
+        return runCatching {
+            stream.use { input ->
+                QuickPhraseEngine.fromText(input.readBytes().toString(Charsets.UTF_8))?.entries.orEmpty()
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** 读取远端规则文件（filesDir/quick_phrases_remote.txt），用于识别本地覆盖条目。 */
+    private fun readRemoteEntries(context: Context): List<QuickEntry> {
+        val stream = QuickLocator.openRemote(context) ?: return emptyList()
         return runCatching {
             stream.use { input ->
                 QuickPhraseEngine.fromText(input.readBytes().toString(Charsets.UTF_8))?.entries.orEmpty()

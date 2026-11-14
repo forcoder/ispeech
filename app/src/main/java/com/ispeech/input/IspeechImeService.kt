@@ -20,9 +20,11 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import com.ispeech.R
+import com.ispeech.data.AiLearningStore
 import com.ispeech.data.ClipboardHistory
 import com.ispeech.data.CommitType
 import com.ispeech.data.CsBabyAuthStore
+import com.ispeech.data.DirectLlmClient
 import com.ispeech.data.HanConversion
 import com.ispeech.data.InputStats
 import com.ispeech.data.PhraseUsageStore
@@ -98,6 +100,9 @@ class IspeechImeService : InputMethodService() {
 
         /** AI 生成时从输入框读取的最大字符数 */
         private const val AI_MAX_MESSAGE_CHARS = 1000
+
+        /** AI 键一次最多给出的快捷短语候选数 */
+        private const val QUICK_REPLY_LIMIT = 20
 
         /** 只有较短的词才写进用户词库；长文本说明是快捷短语内容 */
         private const val MAX_LEARN_TEXT_LENGTH = 8
@@ -198,6 +203,9 @@ class IspeechImeService : InputMethodService() {
     /** 短语正文 → 规则条目，用于面板上屏时记一次「使用」 */
     private var quickByContent: Map<String, QuickEntry> = emptyMap()
 
+    /** AI 学习库（生成 / 采纳计数 + few-shot 语料），落盘在 filesDir */
+    private val aiLearning by lazy { AiLearningStore(this) }
+
     // ── AI 回复状态 ──
 
     /** 服务级协程作用域（AI 请求、面板数据加载） */
@@ -208,6 +216,9 @@ class IspeechImeService : InputMethodService() {
 
     /** 当前候选是否为 AI 回复 */
     private var aiReplyActive = false
+
+    /** 当前 AI 候选是否来自模型产出或历史复用（false = 快捷短语命中，不计入采纳率） */
+    private var aiReplyFromModel = false
 
     /** 生成 AI 回复时输入框的原文（用于替换语义） */
     private var aiSourceText = ""
@@ -267,6 +278,9 @@ class IspeechImeService : InputMethodService() {
         // 软键盘
         val keyboard = root.findViewById<SoftKeyboardView>(R.id.soft_keyboard)
         keyboard.onKey = { key -> handleSoftKey(key) }
+        // 空格键按住 ≥ 设置阈值直接进入语音输入：与语音键共用同一套按下 / 抬起语义
+        keyboard.onSpaceLongPress = { onVoicePressDown() }
+        keyboard.onSpaceLongPressEnd = { onVoicePressUp() }
         keyboard.keyHeightDp = settings.keyHeightDp
         keyboard.vibrate = settings.vibrate
         keyboard.setEnglishMode(mode == Mode.ENGLISH)
@@ -323,6 +337,8 @@ class IspeechImeService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         refreshEngineIfStale()
+        // 空格长按进语音的阈值由设置页决定（0.5s / 1s），每次打开键盘时同步一次
+        softKeyboard?.spaceLongPressMs = SettingsStore.voiceSpaceLongPressMs(this).toLong()
         punctor.reset()
         renderCandidateView()
     }
@@ -431,6 +447,36 @@ class IspeechImeService : InputMethodService() {
             KeyAction.TOGGLE_FULL_WIDTH -> toggleFullWidth()
             KeyAction.VOICE -> toggleVoiceInput()
         }
+    }
+
+    /**
+     * 按住说话：按下开始收音（空格长按进语音走这里）。
+     *
+     * 引擎选择沿用 [toggleVoiceInput] 的既有判定：离线识别（[AsrEngine.VOSK]）与系统识别
+     * 是两条完全不同的链路，这里只负责「开始」，结束交给 [onVoicePressUp]。
+     */
+    private fun onVoicePressDown() {
+        if (asr.engine == AsrEngine.VOSK) {
+            if (voskVoice?.isListening == true) return
+            toggleVoskVoice()
+            return
+        }
+        if (voiceController?.isListening == true) return
+        toggleVoiceInput()
+    }
+
+    /**
+     * 按住说话：松手结束收音并上屏。
+     *
+     * 系统识别走 [VoiceInputController.finish]（保留回调，收尾结果仍经 onFinal 上屏）；
+     * Vosk 走 [VoskSpeechEngine.finish]（工作线程读 finalResult 后回调）。
+     */
+    private fun onVoicePressUp() {
+        if (asr.engine == AsrEngine.VOSK) {
+            voskVoice?.finish()
+            return
+        }
+        voiceController?.finish()
     }
 
     /** 切换键盘布局；离开字母页前先把未完成的组合上屏，避免丢字。[page] 为直达页（如九宫格 `#`）。 */
@@ -1085,7 +1131,7 @@ class IspeechImeService : InputMethodService() {
     /** 点击候选条第 [index] 项：上屏其 insertText */
     private fun pickCandidate(index: Int) {
         if (aiReplyActive) {
-            if (index == 0) commitAiReply()
+            commitAiReply(index)
             return
         }
         val candidate = candidates.getOrNull(index) ?: return
@@ -1677,20 +1723,98 @@ class IspeechImeService : InputMethodService() {
         val seq = ++aiRequestSeq
         serviceScope.launch {
             try {
-                val auth = CsBabyAuthStore.load(this@IspeechImeService)
-                if (auth == null) {
+                // 1. 先找快捷短语：命中就直接当建议回复展示，不再调后端
+                val phrases = matchQuickPhrases(message)
+                if (seq != aiRequestSeq) return@launch
+                if (phrases.isNotEmpty()) {
+                    aiSourceText = message
+                    aiSourceLen = message.length
+                    aiReplyActive = true
+                    // 快捷短语命中：不是模型产出，不计入采纳率与学习语料
+                    aiReplyFromModel = false
+                    statusText = null
+                    codeOverride = "快捷短语"
+                    allCandidates = emptyList()
+                    pageCount = 1
+                    pageIndex = 0
+                    candidates = phrases
+                    renderCandidateView()
+                    return@launch
+                }
+                // 2. 没命中：按设置调用大模型生成建议回复
+                val aiSettings = SettingsStore.aiSettingsFlow(this@IspeechImeService).first()
+                if (!aiSettings.isReady()) {
                     if (seq == aiRequestSeq) {
-                        statusText = "未登录：请先在设置页登录 csBaby"
+                        statusText = if (aiSettings.provider.isDirect) {
+                            "请先在设置页配置大模型"
+                        } else {
+                            "未登录：请先在设置页登录 csBaby"
+                        }
+                        candidates = emptyList()
                         renderCandidateView()
                     }
                     return@launch
                 }
-                val result = AppContainer.csBabyClient(this@IspeechImeService)
-                    .generateReply(auth, message)
+                // 2.5 学习复用：这次输入与某条已采纳的回复高度相似时，直接用那条。
+                // 命中率高（是用户自己写过的），零延迟零成本；相似度不够还是走模型。
+                if (aiSettings.learning) {
+                    val reusable = withContext(Dispatchers.IO) { aiLearning.findReusable(message) }
+                    if (seq != aiRequestSeq) return@launch
+                    if (reusable != null) {
+                        withContext(Dispatchers.IO) { aiLearning.recordGenerated() }
+                        aiSourceText = message
+                        aiSourceLen = message.length
+                        aiReplyActive = true
+                        // 复用历史回复同样计入采纳统计（用来强化高频回复）
+                        aiReplyFromModel = true
+                        statusText = null
+                        codeOverride = "常用回复"
+                        allCandidates = emptyList()
+                        pageCount = 1
+                        pageIndex = 0
+                        candidates = listOf(
+                            LookupCandidate(
+                                code = "learned",
+                                display = preview(reusable.reply),
+                                insertText = reusable.reply,
+                                weight = 0,
+                                kind = LookupKind.QUICKAPPLY,
+                            ),
+                        )
+                        renderCandidateView()
+                        return@launch
+                    }
+                }
+                val reply = if (aiSettings.provider.isDirect) {
+                    // 学习用户输入：把过去采纳过的回复作为 few-shot 例子带进提示词
+                    val examples = if (aiSettings.learning) {
+                        withContext(Dispatchers.IO) {
+                            aiLearning.examples(DirectLlmClient.MAX_FEW_SHOT, message)
+                        }
+                    } else {
+                        emptyList()
+                    }
+                    DirectLlmClient(this@IspeechImeService).generate(aiSettings, message, examples)
+                } else {
+                    val auth = CsBabyAuthStore.load(this@IspeechImeService)
+                    if (auth == null) {
+                        if (seq == aiRequestSeq) {
+                            statusText = "未登录：请先在设置页登录 csBaby"
+                            candidates = emptyList()
+                            renderCandidateView()
+                        }
+                        return@launch
+                    }
+                    AppContainer.csBabyClient(this@IspeechImeService)
+                        .generateReply(auth, message)
+                        .reply
+                }
                 if (seq != aiRequestSeq) return@launch
+                withContext(Dispatchers.IO) { aiLearning.recordGenerated() }
                 aiSourceText = message
                 aiSourceLen = message.length
                 aiReplyActive = true
+                aiReplyFromModel = true
                 statusText = null
                 codeOverride = "AI回复"
                 allCandidates = emptyList()
@@ -1699,8 +1823,8 @@ class IspeechImeService : InputMethodService() {
                 candidates = listOf(
                     LookupCandidate(
                         code = "ai",
-                        display = preview(result.reply),
-                        insertText = result.reply,
+                        display = preview(reply),
+                        insertText = reply,
                         weight = 0,
                         kind = LookupKind.QUICKAPPLY,
                     ),
@@ -1718,9 +1842,58 @@ class IspeechImeService : InputMethodService() {
         }
     }
 
-    /** 上屏 AI 回复；若输入框仍是生成前原文，先删除原文（替换语义）。 */
-    private fun commitAiReply() {
-        val candidate = candidates.firstOrNull() ?: return
+    /**
+     * 在快捷短语里找与 [message] 相关的条目（内置 + 远端 + 用户）。
+     *
+     * 双向包含：短语正文出现在用户输入里（输入提到「发票」→ 发票类短语），
+     * 或用户输入是短语正文的一段（话没说完也先给出整句）。
+     * 单字正文（如「好」）几乎能命中任何句子，会造成噪声，直接排除。
+     *
+     * 读规则文件是 IO 活，必须离开主线程：本方法自带 [Dispatchers.IO]。
+     */
+    private suspend fun matchQuickPhrases(message: String): List<LookupCandidate> =
+        withContext(Dispatchers.IO) {
+            val needle = message.trim().lowercase()
+            if (needle.isEmpty()) return@withContext emptyList()
+            val entries = runCatching {
+                val enableQuick = SettingsStore.enableQuickPhrasesFlow(this@IspeechImeService).first()
+                val enableRemote = SettingsStore.enableRemoteRulesFlow(this@IspeechImeService).first()
+                val singleNoTrigger = SettingsStore.singleLetterNoTriggerFlow(this@IspeechImeService).first()
+                QuickLocator.loadAll(
+                    this@IspeechImeService,
+                    includeLocal = enableQuick,
+                    includeRemote = enableRemote,
+                    includeUser = true,
+                    minTriggerLength = if (singleNoTrigger) 2 else 1,
+                )
+            }.getOrElse { emptyList() }
+            if (entries.isEmpty()) return@withContext emptyList()
+            entries.asSequence()
+                .filter { it.content.length >= 2 }
+                .filter { entry ->
+                    val content = entry.content.lowercase()
+                    val label = entry.label.lowercase()
+                    content.contains(needle) || needle.contains(content) ||
+                        label.contains(needle) || needle.contains(label)
+                }
+                .sortedByDescending { it.weight }
+                .distinctBy { it.content }
+                .take(QUICK_REPLY_LIMIT)
+                .map { entry ->
+                    LookupCandidate(
+                        code = entry.trigger,
+                        display = preview(entry.content),
+                        insertText = entry.content,
+                        weight = entry.weight,
+                        kind = LookupKind.QUICKAPPLY,
+                    )
+                }
+                .toList()
+        }
+
+    /** 上屏 AI 回复（或第 [index] 条快捷短语候选）；若输入框仍是生成前原文，先删除原文（替换语义）。 */
+    private fun commitAiReply(index: Int = 0) {
+        val candidate = candidates.getOrNull(index) ?: return
         val ic = currentInputConnection
         if (ic != null && aiSourceLen > 0) {
             val before = ic.getTextBeforeCursor(aiSourceLen, 0)?.toString().orEmpty()
@@ -1730,6 +1903,14 @@ class IspeechImeService : InputMethodService() {
         }
         ic?.commitText(candidate.insertText, 1)
         lastCommit = candidate.insertText
+        // 用户采纳了模型建议：本地记一条「输入 → 采纳的回复」，下次作为 few-shot
+        if (aiReplyFromModel) {
+            val source = aiSourceText
+            val reply = candidate.insertText
+            serviceScope.launch(Dispatchers.IO) {
+                runCatching { aiLearning.recordAccepted(source, reply) }
+            }
+        }
         dismissAiState()
         buffer = ""
         candidates = emptyList()
@@ -1742,11 +1923,14 @@ class IspeechImeService : InputMethodService() {
             aiRequestSeq++
         }
         statusText = null
-        if (codeOverride == "AI回复") codeOverride = null
+        if (codeOverride == "AI回复" || codeOverride == "快捷短语" || codeOverride == "常用回复") {
+            codeOverride = null
+        }
         if (aiReplyActive) {
             candidates = emptyList()
         }
         aiReplyActive = false
+        aiReplyFromModel = false
         aiSourceText = ""
         aiSourceLen = 0
     }

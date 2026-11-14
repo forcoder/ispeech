@@ -159,6 +159,7 @@
     <string name="voice_service_unavailable">No usable speech recognition service on this device. Choose another service component in Settings → Speech Recognition, or install a speech app.</string>
     <string name="voice_network_error">Network error — speech recognition needs a connection</string>
     <string name="voice_audio_error">Recording failed — check whether another app is using the microphone</string>
+    <string name="voice_error">Speech recognition failed. Please try again.</string>
     <string name="voice_error_code">Speech recognition failed (error %1$d)</string>
     <string name="voice_panel_listening">Listening…</string>
     <string name="voice_panel_hint">Release to insert · swipe up to cancel</string>

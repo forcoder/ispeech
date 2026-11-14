@@ -163,6 +163,7 @@
     <string name="voice_service_unavailable">本机未安装可用的语音识别服务；请在「设置 → 语音识别」中指定其它识别服务组件，或安装支持语音识别的应用</string>
     <string name="voice_network_error">网络异常，语音识别需要联网</string>
     <string name="voice_audio_error">录音失败，请检查麦克风是否被其它应用占用</string>
+    <string name="voice_error">语音识别失败，请重试</string>
     <string name="voice_error_code">语音识别失败（错误码 %1$d）</string>
     <string name="voice_panel_listening">正在聆听…</string>
     <string name="voice_panel_hint">松开上屏 · 上滑取消</string>

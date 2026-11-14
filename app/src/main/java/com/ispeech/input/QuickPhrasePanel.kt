@@ -382,10 +382,22 @@ class QuickPhrasePanel @JvmOverloads constructor(
             ellipsize = TextUtils.TruncateAt.END
             setTextColor(textSecondary)
         }
+        // 标题行：名称 + 快捷字母角标（例：ycsf），让用户一眼看到该短语对应的触发码
+        val titleRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                label,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            if (entry.trigger.isNotBlank()) {
+                addView(createTagView(entry.trigger), tagParams())
+            }
+        }
         val textColumn = LinearLayout(context).apply {
             orientation = VERTICAL
             addView(
-                label,
+                titleRow,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT

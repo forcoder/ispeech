@@ -154,14 +154,47 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
      * 下一次 [start] 容易拿到 `ERROR_RECOGNIZER_BUSY`（表现就是「语音时好时坏」）。
      */
     fun stop() {
+        mainHandler.removeCallbacks(finishWatchdog)
         isListening = false
         clearCallbacks()
         recognizer?.destroy()
         recognizer = null
     }
 
+    /**
+     * 结束收音并等待结果（「按住说话」松手上屏）。
+     *
+     * 与 [stop] 的区别：这里**保留回调**，收尾结果仍会经 `onFinal` 上抛；
+     * [stop] 是用户主动取消，回调清空、结果丢弃。识别器不销毁——`stopListening()`
+     * 之后系统仍会回调 `onResults` / `onError`，服务侧据此上屏或提示。
+     */
+    fun finish() {
+        val rec = recognizer ?: return
+        if (!isListening) return
+        runCatching { rec.stopListening() }
+            .onFailure {
+                stop()
+                return
+            }
+        // 兜底：个别识别服务松手后既不回 onResults 也不回 onError。按住-说话没有「再点一次」
+        // 可供恢复，若不复位，语音键会一直卡在「收音中」——再按也不会重新开始。
+        mainHandler.postDelayed(finishWatchdog, FINISH_TIMEOUT_MS)
+    }
+
+    /** 松手后等待结果的兜底超时：复位状态并按「没听清」提示用户重说。 */
+    private val finishWatchdog = Runnable {
+        if (!isListening) return@Runnable
+        isListening = false
+        recognizer?.destroy()
+        recognizer = null
+        val notify = onError
+        clearCallbacks()
+        notify?.invoke(context.getString(R.string.voice_no_match))
+    }
+
     /** 释放识别器（输入法服务 onDestroy 调用）。 */
     fun destroy() {
+        mainHandler.removeCallbacks(finishWatchdog)
         isListening = false
         clearCallbacks()
         recognizer?.destroy()
@@ -182,6 +215,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     }
 
     override fun onResults(results: Bundle?) {
+        mainHandler.removeCallbacks(finishWatchdog)
         isListening = false
         val text = firstResult(results)
         post {
@@ -194,6 +228,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     }
 
     override fun onError(error: Int) {
+        mainHandler.removeCallbacks(finishWatchdog)
         isListening = false
         // 「识别器忙」：上一次会话在系统侧尚未完全释放，重建识别器原地重试一次；
         // 不重试的话用户看到的就是「点了语音键没反应」，只能反复点。
@@ -263,5 +298,8 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     private companion object {
         /** 真正的 RecognitionService 必须以该权限自保护（[SpeechRecognizer] 依赖它区分桩服务）。 */
         const val BIND_PERMISSION = "android.permission.BIND_RECOGNITION_SERVICE"
+
+        /** 松手后等待识别结果的上限（毫秒）：超时复位，避免语音键卡在「收音中」。 */
+        const val FINISH_TIMEOUT_MS = 6000L
     }
 }

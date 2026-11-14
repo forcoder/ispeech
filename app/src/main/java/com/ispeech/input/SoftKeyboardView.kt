@@ -86,6 +86,22 @@ class SoftKeyboardView @JvmOverloads constructor(
     var capsLock: Boolean = false
         private set
 
+    /** 空格键按住到点：服务侧据此进入语音输入（搜狗「长按空格说话」）。 */
+    var onSpaceLongPress: (() -> Unit)? = null
+
+    /** 空格键按住进入语音的阈值（毫秒），由服务侧按设置推入（0.5s / 1s）。 */
+    var spaceLongPressMs: Long = DEFAULT_SPACE_LONG_PRESS_MS
+
+    /** 长按空格进入语音后抬手：服务侧据此收尾上屏。 */
+    var onSpaceLongPressEnd: (() -> Unit)? = null
+
+    private val spaceHandler = Handler(Looper.getMainLooper())
+
+    /** 长按计时器：到点才置位，抬手时据此决定「上屏空格」还是「结束语音」。 */
+    private var spaceLongPressRunnable: Runnable? = null
+
+    private var spaceLongPressFired = false
+
     private var pages: List<KeyboardPage> = emptyList()
     private var pageIndex: Int = 0
 
@@ -293,13 +309,6 @@ class SoftKeyboardView @JvmOverloads constructor(
             weight = 1f,
             style = KeyStyle.SPECIAL,
             iconRes = R.drawable.ic_ime_switch,
-        ),
-        KeyDef.fn(
-            KeyAction.MODE_SWITCH,
-            "中/英",
-            weight = 1f,
-            style = KeyStyle.SPECIAL,
-            iconRes = R.drawable.ic_lang_switch,
         ),
         KeyDef.fn(
             KeyAction.LAYOUT,
@@ -587,7 +596,65 @@ class SoftKeyboardView @JvmOverloads constructor(
             haptic(v)
             onKey?.invoke(effectiveKey)
         }
+        // 空格键：短按仍走上面的点击回调（正常上屏空格），按住 ≥ spaceLongPressMs 改走语音
+        if (effectiveKey.action == KeyAction.SPACE) {
+            installSpaceGesture(targetView, effectiveKey)
+        }
         return container
+    }
+
+    /**
+     * 空格键「按住说话」手势（搜狗语义）。
+     *
+     * 短按（不足 [spaceLongPressMs]）抬手时照常派发 [onKey]，空格上屏行为不变；
+     * 长按到点先派发 [onSpaceLongPress] 进入语音，抬手再派发 [onSpaceLongPressEnd] 收尾上屏。
+     *
+     * 必须自己接管 touch：软键盘是自绘 View，按键事件不经过
+     * `InputMethodService.onKeyUp`，服务侧拿不到「松手」时机。
+     */
+    private fun installSpaceGesture(target: View, key: KeyDef) {
+        target.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    showPreview(v, keyLabel(key))
+                    spaceLongPressFired = false
+                    spaceLongPressRunnable?.let { spaceHandler.removeCallbacks(it) }
+                    val runnable = Runnable {
+                        spaceLongPressFired = true
+                        haptic(v)
+                        onSpaceLongPress?.invoke()
+                    }
+                    spaceLongPressRunnable = runnable
+                    spaceHandler.postDelayed(runnable, spaceLongPressMs)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    dismissPreview()
+                    spaceLongPressRunnable?.let { spaceHandler.removeCallbacks(it) }
+                    spaceLongPressRunnable = null
+                    if (spaceLongPressFired) {
+                        spaceLongPressFired = false
+                        onSpaceLongPressEnd?.invoke()
+                    } else {
+                        haptic(v)
+                        onKey?.invoke(key)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    // 手势被打断：语音已开始就收尾上屏，否则什么都不做
+                    dismissPreview()
+                    spaceLongPressRunnable?.let { spaceHandler.removeCallbacks(it) }
+                    spaceLongPressRunnable = null
+                    if (spaceLongPressFired) {
+                        spaceLongPressFired = false
+                        onSpaceLongPressEnd?.invoke()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
     }
 
     /** 键面文字：字母键在 shift / caps 开启时显示大写 */
@@ -786,6 +853,9 @@ class SoftKeyboardView @JvmOverloads constructor(
 
     private companion object {
         const val DEFAULT_KEY_HEIGHT_DP = 52
+
+        /** 空格长按进入语音的默认阈值（毫秒）；实际值由服务侧按设置推入 [spaceLongPressMs]。 */
+        const val DEFAULT_SPACE_LONG_PRESS_MS = 500L
         const val MIN_KEY_HEIGHT_DP = 40
         const val MAX_KEY_HEIGHT_DP = 72
         const val TOOLBAR_HEIGHT_DP = 34
