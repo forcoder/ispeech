@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ispeech.data.UserDictEntry
 import com.ispeech.di.AppContainer
+import com.ispeech.settings.store.ChineseInputMethod
 import com.ispeech.settings.store.KeyboardSettings
 import com.ispeech.settings.store.KeyboardSize
 import com.ispeech.settings.store.SettingsStore
@@ -31,7 +32,7 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
             SettingsStore.keyboardSettingsFlow(app).collect { _settings.value = it }
         }
         viewModelScope.launch {
-            SettingsStore.inputMethodModeFlow(app).collect { _inputMethodMode.value = it }
+            SettingsStore.chineseInputMethodFlow(app).collect { _chineseInputMethod.value = it }
         }
         viewModelScope.launch {
             SettingsStore.voiceSpaceLongPressMsFlow(app).collect { _spaceLongPressMs.value = it }
@@ -98,15 +99,15 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { SettingsStore.setTraditionalOutput(app, enabled) }
     }
 
-    private val _inputMethodMode = MutableStateFlow(SettingsStore.InputMethodMode.PINYIN)
-    val inputMethodMode: StateFlow<SettingsStore.InputMethodMode> = _inputMethodMode.asStateFlow()
+    private val _chineseInputMethod = MutableStateFlow(ChineseInputMethod.PINYIN)
+    val chineseInputMethod: StateFlow<ChineseInputMethod> = _chineseInputMethod.asStateFlow()
 
     private val _spaceLongPressMs = MutableStateFlow(500)
     val spaceLongPressMs: StateFlow<Int> = _spaceLongPressMs.asStateFlow()
 
-    fun setInputMethodMode(mode: SettingsStore.InputMethodMode) {
-        _inputMethodMode.value = mode
-        viewModelScope.launch { SettingsStore.setInputMethodMode(app, mode) }
+    fun setChineseInputMethod(method: ChineseInputMethod) {
+        _chineseInputMethod.value = method
+        viewModelScope.launch { SettingsStore.setChineseInputMethod(app, method) }
     }
 
     fun setSpaceLongPressMs(ms: Int) {

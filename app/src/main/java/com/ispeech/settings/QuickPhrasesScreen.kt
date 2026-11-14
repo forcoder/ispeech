@@ -1,5 +1,7 @@
 package com.ispeech.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,6 +82,23 @@ import com.ispeech.settings.quick.RemoteRuleInfo
 internal fun isValidShortcutTrigger(trigger: String): Boolean =
     trigger.length in 2..4 && trigger.all { it in 'a'..'z' }
 
+/**
+ * 通用短语 CSV 的文件选择器 MIME 白名单。
+ *
+ * 不同来源报的 MIME 不一样：文本编辑器 / 网盘多为 `text/plain`，Excel 是 `application/vnd.ms-excel`，
+ * 部分文件管理器给 `application/octet-stream`。漏一个用户就看不到自己刚下载的 CSV，
+ * 所以逐个列全而不是用通配符（通配符会把二进制文件也放进选择器）。
+ */
+private val PHRASE_CSV_MIME_TYPES = arrayOf(
+    "text/plain",
+    "text/csv",
+    "text/comma-separated-values",
+    "text/x-csv",
+    "application/csv",
+    "application/vnd.ms-excel",
+    "application/octet-stream",
+)
+
 /** 快捷短语页：搜索 / 编辑本地快捷规则，并可增删 csBaby 云端简写。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,6 +115,11 @@ fun QuickPhrasesScreen(onBack: () -> Unit, onOpenSync: () -> Unit) {
     var remoteEditor by remember { mutableStateOf<RemoteShortcutEditor?>(null) }
     // 「新增」类型选择弹窗：本地规则 / 云端简写
     var choosingAddKind by remember { mutableStateOf(false) }
+
+    // 通用短语 CSV 导入：系统文件选择器（SAF），不申请存储权限
+    val csvImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let { viewModel.importPhraseCsv(it) } }
 
     // 统一展示 ViewModel 的提示信息
     LaunchedEffect(state.tip) {
@@ -134,30 +158,42 @@ fun QuickPhrasesScreen(onBack: () -> Unit, onOpenSync: () -> Unit) {
                 onKeyword = viewModel::setKeyword,
                 onClear = viewModel::clearKeyword,
             )
-            Row(
+            // 统计行 + 两个入口：窄屏上按钮换行到文字下方，不挤压“本地 / 远端”说明
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (state.keyword.isBlank()) {
-                            stringResource(R.string.quick_search_smart, state.matches.size)
-                        } else {
-                            stringResource(R.string.quick_search_count, state.matches.size, state.keyword)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = stringResource(R.string.quick_source_files),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                }
-                OutlinedButton(onClick = onOpenSync) {
-                    Text("从远程同步")
+                Text(
+                    text = if (state.keyword.isBlank()) {
+                        stringResource(R.string.quick_search_smart, state.matches.size)
+                    } else {
+                        stringResource(R.string.quick_search_count, state.matches.size, state.keyword)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(R.string.quick_source_files),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    OutlinedButton(
+                        onClick = { csvImportLauncher.launch(PHRASE_CSV_MIME_TYPES) },
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                    ) {
+                        Text(stringResource(R.string.quick_import_csv))
+                    }
+                    OutlinedButton(
+                        onClick = onOpenSync,
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                    ) {
+                        Text("从远程同步")
+                    }
                 }
             }
             when {

@@ -53,6 +53,10 @@ object SettingsStore {
     private val KEY_FUZZY_PINYIN = booleanPreferencesKey("fuzzy_pinyin")
     private val KEY_TRADITIONAL_OUTPUT = booleanPreferencesKey("traditional_output")
 
+    // —— 中文输入法 ——
+    /** 历史键名保持不变，老用户已选的「五笔」不会被重置。 */
+    private val KEY_CHINESE_INPUT_METHOD = stringPreferencesKey("input_method_mode")
+
     // —— 语音识别（ASR）——
     private val KEY_ASR_ENGINE = stringPreferencesKey("asr_engine")
     private val KEY_ASR_SERVICE_COMPONENT = stringPreferencesKey("asr_service_component")
@@ -175,6 +179,21 @@ object SettingsStore {
     suspend fun setTraditionalOutput(context: Context, enabled: Boolean) =
         context.editSettings { it[KEY_TRADITIONAL_OUTPUT] = enabled }
 
+    // —— 中文输入法 ——
+
+    /** 中文输入法（默认拼音）：中文态默认使用哪种输入法。 */
+    fun chineseInputMethodFlow(context: Context): Flow<ChineseInputMethod> =
+        context.safeData().map { prefs ->
+            ChineseInputMethod.parse(prefs[KEY_CHINESE_INPUT_METHOD])
+        }
+
+    /** 阻塞读取一次，供输入法服务 onCreate / onStartInputView 使用。 */
+    fun chineseInputMethod(context: Context): ChineseInputMethod =
+        runBlocking { chineseInputMethodFlow(context).first() }
+
+    suspend fun setChineseInputMethod(context: Context, method: ChineseInputMethod) =
+        context.editSettings { it[KEY_CHINESE_INPUT_METHOD] = method.name }
+
     // —— 语音识别（ASR）——
 
     /** 语音识别设置（含默认值兜底），输入法服务与设置页共用。 */
@@ -237,24 +256,6 @@ object SettingsStore {
         it[KEY_AI_API_KEY] = settings.apiKey.trim()
         it[KEY_AI_LEARNING] = settings.learning
     }
-
-    /** 输入法模式：拼音 / 五笔，默认拼音。 */
-    enum class InputMethodMode {
-        PINYIN,
-        WUBI,
-    }
-
-    private val KEY_INPUT_METHOD_MODE = stringPreferencesKey("input_method_mode")
-
-    /** 输入法模式（默认拼音）。 */
-    fun inputMethodModeFlow(context: Context): Flow<InputMethodMode> =
-        context.safeData().map { prefs ->
-            val raw = prefs[KEY_INPUT_METHOD_MODE] ?: InputMethodMode.PINYIN.name
-            runCatching { InputMethodMode.valueOf(raw) }.getOrDefault(InputMethodMode.PINYIN)
-        }
-
-    suspend fun setInputMethodMode(context: Context, mode: InputMethodMode) =
-        context.editSettings { it[KEY_INPUT_METHOD_MODE] = mode.name }
 
     /** 阻塞读取一次，供输入法服务 onStartInputView 推给键盘。 */
     fun voiceSpaceLongPressMs(context: Context): Int =

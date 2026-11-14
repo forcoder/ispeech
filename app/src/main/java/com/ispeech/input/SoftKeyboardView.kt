@@ -1,6 +1,7 @@
 package com.ispeech.input
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -99,25 +100,42 @@ class SoftKeyboardView @JvmOverloads constructor(
 
     private var lastShiftClickAt: Long = 0L
 
-    // ── 颜色（搜狗风格：白键 + 浅灰功能键 + 柔和阴影） ──
+    // ── 颜色（对齐搜狗默认皮肤：白键 + 浅灰功能键 + 自上而下的键盘底色渐变） ──
     private val keyBg = Color.parseColor("#FFFFFF")
-    private val keyBgPressed = Color.parseColor("#E6E8EB")
-    private val specialBg = Color.parseColor("#CDD1D8")
-    private val specialBgPressed = Color.parseColor("#BFC4CC")
+    private val keyBgPressed = Color.parseColor("#E7E9ED")
+    private val specialBg = Color.parseColor("#C9CDD5")
+    private val specialBgPressed = Color.parseColor("#BCC1CA")
     private val accentBg = Color.parseColor("#FFFFFF")
-    private val accentBgPressed = Color.parseColor("#DCE1E8")
+    private val accentBgPressed = Color.parseColor("#DDE4EF")
     private val dangerBg = Color.parseColor("#FFFFFF")
-    private val dangerBgPressed = Color.parseColor("#DCE1E8")
+    private val dangerBgPressed = Color.parseColor("#DDE4EF")
     private val primary = Color.parseColor("#4C7DF0")
     private val primaryPressed = Color.parseColor("#3A66D0")
-    private val textColor = Color.parseColor("#000000")
+    private val textColor = Color.parseColor("#14171C")
     private val dangerText = Color.parseColor("#C0392B")
-    private val hintColor = Color.parseColor("#9AA0A6")
-    private val pageBarBg = Color.parseColor("#CDD1D8")
+    private val hintColor = Color.parseColor("#A2A8B2")
+    private val spaceTextColor = Color.parseColor("#7C838D")
+    private val pageBarBg = Color.parseColor("#D5D9E0")
+    private val toolbarPressedBg = Color.parseColor("#E1E5EC")
+
+    // 键盘底色：搜狗默认皮肤是一条自上而下的浅灰渐变（同一台真机上实测 #F2F3F6 → #D6D8E0），
+    // 这里取同向但更柔和的渐变：保留「白键浮在浅灰上」的层次，又不至于在底部压暗。
+    private val keyboardTop = Color.parseColor("#F4F5F8")
+    private val keyboardBottom = Color.parseColor("#E3E6EC")
+
+    // 「换行」键：浅主色胶囊（浅蓝渐变底 + 1dp 主色描边 + 主色 ↵ 图标 / 小字标签）。
+    // 旧版是整块纯蓝 + 18sp 粗体白字：键宽 134px 里字面就占 120px（左右各只剩 2.5dp），
+    // 看起来像被字糊满；而且整块高饱和蓝是键盘上唯一的深色大色块，比字母键还抢眼。
+    private val enterTop = Color.parseColor("#EFF4FF")
+    private val enterBottom = Color.parseColor("#E1EAFE")
+    private val enterTopPressed = Color.parseColor("#E4EDFF")
+    private val enterBottomPressed = Color.parseColor("#D3E1FA")
+    private val enterStroke = Color.parseColor("#C5D7F8")
+    private val enterAccent = Color.parseColor("#2E5FD8")
 
     // ── 尺寸 ──
-    private val keyMargin = 4
-    private val keyRadius = 10
+    private val keyMargin = 3
+    private val keyRadius = 6
 
     private fun dp(v: Int): Float = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP,
@@ -155,14 +173,14 @@ class SoftKeyboardView @JvmOverloads constructor(
         }
     }
 
-    /** 拼音 / 五笔切换：影响「中/英」键面文案与工具栏「输入法切换」键面（EN / 拼 / 五）。 */
+    /** 当前中文输入法状态：影响「中/英」键面文案与工具栏状态键面（EN / 拼 / 五）。 */
     fun setPinyinMode(pinyin: Boolean) {
         if (pinyin == pinyinMode) return
         pinyinMode = pinyin
         rebuild()
     }
 
-    /** 「输入法切换」键面：英文态 EN，中文态按拼音 / 五笔分别是「拼」/「五」。 */
+    /** 工具栏状态键面：英文态 EN，中文态按拼音 / 五笔分别是「拼」/「五」。 */
     private fun imeSwitchLabel(): String = when {
         englishMode -> "EN"
         pinyinMode -> "拼"
@@ -269,6 +287,7 @@ class SoftKeyboardView @JvmOverloads constructor(
                     heightPx = dpInt(TOOLBAR_HEIGHT_DP),
                     minWidthPx = dpInt(TOOLBAR_KEY_MIN_WIDTH_DP),
                     fillWidth = false,
+                    inToolbar = true,
                 ),
             )
         }
@@ -313,7 +332,7 @@ class SoftKeyboardView @JvmOverloads constructor(
             weight = 1f,
             style = KeyStyle.SPECIAL,
         ),
-        // 第 4 键显示「当前输入态」：拼音 拼 / 英文 EN / 五笔 五，点击循环切换
+        // 第 4 键显示「当前输入态」：拼音 拼 / 英文 EN / 五笔 五，点击在中文 / 英文之间切换
         KeyDef.fn(
             KeyAction.MODE_SWITCH,
             "中/英",
@@ -393,10 +412,27 @@ class SoftKeyboardView @JvmOverloads constructor(
             setPadding(padding, 0, padding, 0)
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
         }
+        // 字母页按 10 个宽度单位排栅格：第 2 行只有 9 键（asdfghjkl），左右各补半个空位，
+        // 让三行字母键上下对齐（搜狗同款居中排布）。不补时这一行每键比其它行宽 8px，行间错位。
+        val missing = if (layoutKind == KeyboardLayoutKind.LETTER) {
+            LETTER_ROW_UNITS - row.fold(0f) { sum, key -> sum + key.weight }
+        } else {
+            0f
+        }
+        val center = missing > 0.01f
+        if (center) line.addView(buildRowSpacer(missing / 2f))
         for (key in row) {
             line.addView(createKey(key, keyTextSize(key), dpInt(keyHeightDp)))
         }
+        if (center) line.addView(buildRowSpacer(missing / 2f))
         return line
+    }
+
+    /** 行内补位：透明不可点，只占 weight + 与按键相同的边距（字母页第 2 行居中用）。 */
+    private fun buildRowSpacer(weight: Float): View = View(context).apply {
+        layoutParams = LayoutParams(0, 1, weight).apply {
+            setMargins(dpInt(keyMargin), 0, dpInt(keyMargin), 0)
+        }
     }
 
     /** 底部留白：避免最后一行贴到输入法窗口下沿 */
@@ -404,12 +440,37 @@ class SoftKeyboardView @JvmOverloads constructor(
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, dpInt(4))
     }
 
-    private fun keyTextSize(key: KeyDef): Float = when (key.style) {
-        KeyStyle.SPACE -> 16f
-        KeyStyle.SPECIAL, KeyStyle.PRIMARY, KeyStyle.ACCENT, KeyStyle.DANGER -> 18f
-        // 标点 / 符号字号比字母键小一号：全角标点（，。？！）按字母字号 23sp 渲染会显得过大
-        KeyStyle.PUNCT -> 20f
-        KeyStyle.LETTER -> if (key.weight > 1.4f) 18f else 23f
+    /**
+     * 键面字号（sp）。
+     *
+     * 基准是同一台真机上搜狗五笔的实测值（1260×2720 / density 520 / fontScale 1.15）：
+     * 搜狗字母键的字形高 48–53px（≈ 18sp），而旧版 23sp 的字形高 63px —— 在 98px 宽的键里
+     * 左右只剩 2.5dp，这就是「字母太大」的来源。其余样式按同一比例收一档。
+     *
+     * 九宫格（T9）不参与这次收缩：它的键宽是 26 键字母键的 2–3 倍，沿用旧字号才不会显得空。
+     */
+    private fun keyTextSize(key: KeyDef): Float {
+        if (layoutKind == KeyboardLayoutKind.T9) {
+            return when (key.style) {
+                KeyStyle.SPACE -> 16f
+                KeyStyle.SPECIAL, KeyStyle.ACCENT, KeyStyle.PRIMARY, KeyStyle.DANGER -> 18f
+                KeyStyle.PUNCT -> 20f
+                KeyStyle.LETTER -> if (key.weight > 1.4f) 18f else 23f
+            }
+        }
+        return when (key.style) {
+            KeyStyle.SPACE -> 13f
+            KeyStyle.SPECIAL, KeyStyle.ACCENT, KeyStyle.PRIMARY, KeyStyle.DANGER -> 15f
+            // 标点 / 符号字号比字母键小一号：全角标点（，。？！）按字母字号渲染会显得过大。
+            // 符号页的键是字母键的 2.4 倍宽（4 列 + 右侧控制列），单个符号用底行标点的字号会显空，
+            // 所以符号页保留旧版的 20sp（分类条文案跟着一起大一号，和符号键同排看着才整齐）
+            KeyStyle.PUNCT -> if (layoutKind == KeyboardLayoutKind.SYMBOL) 20f else 16f
+            KeyStyle.LETTER -> when {
+                // 长文案键（颜文字 / 更多符号，weight 2f）用小一号，长条目才放得下
+                key.weight > 1.4f -> 15f
+                else -> 18f
+            }
+        }
     }
 
     // ──────────────────────────────────────────────
@@ -429,6 +490,8 @@ class SoftKeyboardView @JvmOverloads constructor(
      * @param minWidthPx 最小宽度（工具栏用 [TOOLBAR_KEY_MIN_WIDTH_DP] 兜底可点面积；0 = 不额外限制）
      * @param fillWidth true = 宽度 0dp + weight 由布局行均分；false = wrap_content + weight
      *   （工具栏专用：放得下时靠 [HorizontalScrollView] 的 isFillViewport 铺满，放不下时滚动）
+     * @param inToolbar 工具栏键：背景取透明的 [toolbarKeySelector]；行内键（含字母页底行的「符」/「中/英」）
+     *   一律是灰底功能键 —— 搜狗底行的「符」「中/英」也是灰键，旧版把这两键错当工具栏键画成透明了。
      */
     private fun createKey(
         key: KeyDef,
@@ -436,6 +499,7 @@ class SoftKeyboardView @JvmOverloads constructor(
         heightPx: Int,
         minWidthPx: Int = 0,
         fillWidth: Boolean = true,
+        inToolbar: Boolean = false,
     ): View {
         // 中英切换已按搜狗五笔布局移到字母页底行的「中/英」键，Shift 键不再被改造成中/英：
         // 三种大写状态（未开 / 单击 / 锁定）在中文态与英文态下外观一致。
@@ -447,6 +511,13 @@ class SoftKeyboardView @JvmOverloads constructor(
         // 图标按几何复刻搜狗 Android 版的 `ime_function_*.png`（见 docs/icon-replication.md §8）。
         //
         // 「中/英」键不走此分支：它是文字键（搜狗侧同样是文字），由下面的 TextView 分色渲染。
+        // 「换行」键单独画：浅主色胶囊 + ↵ 图标 + 小字标签（见 [buildEnterKey]）
+        val enterView: View? = if (effectiveKey.action == KeyAction.ENTER) {
+            buildEnterKey(effectiveKey, heightPx)
+        } else {
+            null
+        }
+
         val iconView: ImageView? = if (
             effectiveKey.action == KeyAction.SHIFT || effectiveKey.iconRes != 0
         ) {
@@ -460,7 +531,7 @@ class SoftKeyboardView @JvmOverloads constructor(
                 }
                 isClickable = true
                 isFocusable = true
-                background = backgroundFor(effectiveKey.style, effectiveKey.action, effectiveKey.layout)
+                background = backgroundFor(effectiveKey.style, inToolbar)
                 if (effectiveKey.iconRes != 0) {
                     setImageResource(effectiveKey.iconRes)
                     // 图标随键样式着色，并把按下态高亮出来 —— 等价于搜狗成对提供的 x / x_p 两张图。
@@ -489,7 +560,7 @@ class SoftKeyboardView @JvmOverloads constructor(
             null
         }
 
-        val view: View = iconView ?: TextView(context).apply {
+        val view: View = enterView ?: iconView ?: TextView(context).apply {
             // 「中/英」键面走分色渲染；其余键面仍是纯文本（[keyLabel] 负责大小写）
             text = when {
                 // 工具栏第 4 键：单色显示当前输入态（拼 / EN / 五）
@@ -509,7 +580,7 @@ class SoftKeyboardView @JvmOverloads constructor(
             maxLines = 1
             isClickable = true
             isFocusable = true
-            background = backgroundFor(effectiveKey.style, effectiveKey.action, effectiveKey.layout)
+            background = backgroundFor(effectiveKey.style, inToolbar)
             // 布局行按键加一点柔和投影，形成「白键浮在灰底上」的搜狗观感
             if (fillWidth) elevation = dp(1)
             if (minWidthPx > 0) minWidth = minWidthPx
@@ -549,7 +620,7 @@ class SoftKeyboardView @JvmOverloads constructor(
                 addView(
                     TextView(context).apply {
                         text = effectiveKey.hint
-                        this.textSize = 11f
+                        this.textSize = HINT_TEXT_SIZE
                         setTextColor(hintColor)
                         gravity = Gravity.TOP or Gravity.END
                         setPadding(0, dpInt(2), dpInt(2), 0)
@@ -609,6 +680,62 @@ class SoftKeyboardView @JvmOverloads constructor(
         if (effectiveKey.action == KeyAction.SPACE) {
             installSpaceGesture(targetView, effectiveKey)
         }
+        return container
+    }
+
+    /**
+     * 「换行」键面：浅主色胶囊（垂直渐变底 + 1dp 描边）+ 主色 `↵` 图标。两种形态：
+     *
+     * - 26 键字母页 / 数字页：键面文案是「换行」→ `↵` 小图标 + 小字标签。旧版是纯色块 + 18sp 粗体白字：
+     *   键宽 134px 里字面就占 120px，左右各只剩 2.5dp；整块 #4C7DF0 也是键盘上唯一的深色大色块。
+     *   新版把主色收进描边 / 图标 / 小字：主操作仍然一眼可辨，但不再压过字母键。
+     * - 九宫格页：键面是 `↵` 字形（不是「换行」文案）→ 只画一个大一点的图标。
+     *   把 `↵` 当文字渲染时，它在 300px 宽的键面里只有 26px，比旁边的 ⌫ / ☺ 小一大截；
+     *   而且「图标 ↵ + 文字 ↵」会重复。
+     */
+    private fun buildEnterKey(key: KeyDef, heightPx: Int): View {
+        val label = keyLabel(key)
+        val textKey = label.any { it.isLetterOrDigit() }
+        val container = LinearLayout(context).apply {
+            orientation = VERTICAL
+            gravity = Gravity.CENTER
+            // 子 View（图标 / 文字）不接点击，触控落到容器上，才能统一挂预览 / 回调
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (textKey) label else "换行"
+            background = backgroundFor(key.style, inToolbar = false)
+            elevation = dp(1)
+            layoutParams = LayoutParams(0, heightPx, key.weight).apply {
+                setMargins(dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin))
+            }
+        }
+        val iconSize = dpInt(if (textKey) ENTER_ICON_DP else ENTER_GLYPH_ICON_DP)
+        container.addView(
+            ImageView(context).apply {
+                setImageResource(R.drawable.ic_enter)
+                imageTintList = ColorStateList.valueOf(enterAccent)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+            },
+        )
+        if (!textKey) return container
+        container.addView(
+            TextView(context).apply {
+                text = label
+                textSize = ENTER_LABEL_TEXT_SIZE
+                setTextColor(enterAccent)
+                typeface = Typeface.DEFAULT_BOLD
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                maxLines = 1
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dpInt(ENTER_ICON_GAP_DP)
+            },
+        )
         return container
     }
 
@@ -800,7 +927,7 @@ class SoftKeyboardView @JvmOverloads constructor(
         dismissPreview()
         val content = TextView(context).apply {
             text = label
-            textSize = 22f
+            textSize = 20f
             setTextColor(textColor)
             gravity = Gravity.CENTER
             background = roundedRect(keyBg, keyRadius)
@@ -840,7 +967,7 @@ class SoftKeyboardView @JvmOverloads constructor(
             strip.addView(
                 TextView(context).apply {
                     text = alt
-                    textSize = 20f
+                    textSize = 18f
                     setTextColor(textColor)
                     gravity = Gravity.CENTER
                     isClickable = true
@@ -901,35 +1028,58 @@ class SoftKeyboardView @JvmOverloads constructor(
 
     private fun textColorOf(style: KeyStyle): Int = when (style) {
         KeyStyle.ACCENT -> primary
-        KeyStyle.PRIMARY -> Color.WHITE
+        // PRIMARY（换行）由 [buildEnterKey] 单独渲染：文案键面用主色小字，
+        // 这里保留主色，避免将来回退成 TextView 时变回白字
+        KeyStyle.PRIMARY -> enterAccent
+        KeyStyle.SPACE -> spaceTextColor
         KeyStyle.DANGER -> dangerText
         else -> textColor
     }
 
-    private fun backgroundFor(
-        style: KeyStyle,
-        action: KeyAction,
-        layout: KeyboardLayoutKind?,
-    ): StateListDrawable = when (style) {
-        KeyStyle.SPECIAL -> if (
-            action == KeyAction.PANEL_QUICK_PHRASE ||
-            action == KeyAction.AI ||
-            action == KeyAction.SWITCH_IME ||
-            action == KeyAction.MODE_SWITCH ||
-            (action == KeyAction.LAYOUT && (layout == KeyboardLayoutKind.SYMBOL || layout == KeyboardLayoutKind.EMOJI)) ||
-            action == KeyAction.PANEL_CLIPBOARD ||
-            action == KeyAction.VOICE ||
-            action == KeyAction.SETTINGS
-        ) {
-            toolbarKeySelector()
-        } else {
-            keySelector(specialBg, specialBgPressed)
-        }
+    /**
+     * 按键背景。
+     *
+     * [inToolbar] 之前的版本靠「action / layout 白名单」猜哪些键在工具栏里，
+     * 结果字母页底行的「符」（LAYOUT→SYMBOL）和「中/英」（MODE_SWITCH）也被当成工具栏键
+     * 画成了透明底，与旁边灰底的 `123` 不一致（搜狗底行这两个键都是灰键）。
+     */
+    private fun backgroundFor(style: KeyStyle, inToolbar: Boolean): StateListDrawable = when (style) {
+        KeyStyle.SPECIAL -> if (inToolbar) toolbarKeySelector() else keySelector(specialBg, specialBgPressed)
         KeyStyle.SPACE -> keySelector(keyBg, keyBgPressed)
         KeyStyle.ACCENT -> keySelector(accentBg, accentBgPressed)
-        KeyStyle.PRIMARY -> keySelector(primary, primaryPressed)
+        KeyStyle.PRIMARY -> enterKeySelector()
         KeyStyle.DANGER -> keySelector(dangerBg, dangerBgPressed)
         KeyStyle.LETTER, KeyStyle.PUNCT -> keySelector(keyBg, keyBgPressed)
+    }
+
+    /**
+     * 「换行」键背景：浅主色胶囊。
+     *
+     * 用渐变而不是平铺色，是为了和旁边白键的柔和阴影同一层次；
+     * 1dp 主色描边负责把「主操作」这件事说清楚（纯浅色底会显得像禁用键）。
+     */
+    private fun enterKeySelector(): StateListDrawable {
+        val normal = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(enterTop, enterBottom),
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(keyRadius)
+            setStroke(dpInt(1), enterStroke)
+        }
+        val pressed = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(enterTopPressed, enterBottomPressed),
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(keyRadius)
+            setStroke(dpInt(1), enterStroke)
+        }
+        return StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), pressed)
+            addState(intArrayOf(android.R.attr.state_selected), pressed)
+            addState(intArrayOf(), normal)
+        }
     }
 
     private fun keySelector(normalColor: Int, pressedColor: Int): StateListDrawable {
@@ -945,8 +1095,11 @@ class SoftKeyboardView @JvmOverloads constructor(
     private fun toolbarKeySelector(): StateListDrawable {
         val normal = ColorDrawable(Color.TRANSPARENT)
         val selected = roundedRect(primaryPressed, keyRadius)
+        val pressed = roundedRect(toolbarPressedBg, keyRadius)
         return StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_selected), selected)
+            // 工具栏键没有实体键底，按下时补一层浅灰回馈，否则只有选中态看不出来
+            addState(intArrayOf(android.R.attr.state_pressed), pressed)
             addState(intArrayOf(), normal)
         }
     }
@@ -991,15 +1144,32 @@ class SoftKeyboardView @JvmOverloads constructor(
         const val REPEAT_SLOW_MS = 90L
         const val REPEAT_FAST_MS = 45L
         const val REPEAT_FAST_AFTER = 6
+
+        /** 字母页栅格宽度单位：第 1 行 10 键 = 10f（第 2 行补位居中靠它对齐）。 */
+        const val LETTER_ROW_UNITS = 10f
+
+        /** 「换行」键图标边长 / 图标与文字的间距（dp）。 */
+        const val ENTER_ICON_DP = 15
+        const val ENTER_ICON_GAP_DP = 2
+
+        /** 「换行」键小字字号（sp）/ 九宫格页只有 `↵` 图标时的边长（dp）。 */
+        const val ENTER_LABEL_TEXT_SIZE = 11f
+        const val ENTER_GLYPH_ICON_DP = 24
+
+        /** 键面右上角提示（数字 / 符号）字号：搜狗同机型实测字形高 21px，约合 8sp。 */
+        const val HINT_TEXT_SIZE = 8f
     }
 
     // init 必须位于所有属性声明之后：Kotlin 按声明顺序初始化，
     // 若在 keyHeightDp / 颜色 / pages 赋值前构建键盘，按键会退化为 0 高度。
     init {
         orientation = VERTICAL
-        background = GradientDrawable().apply {
+        // 键盘底色：搜狗默认皮肤是自上而下的浅灰渐变，平铺色会让键盘看着「焊死」在白键下
+        background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(keyboardTop, keyboardBottom),
+        ).apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor("#F2F3F5"))
         }
         pages = KeyboardLayouts.pages(layoutKind, englishMode)
         rebuild()

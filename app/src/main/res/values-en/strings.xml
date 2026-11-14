@@ -76,6 +76,19 @@
     <string name="quick_enabled">Enabled</string>
     <string name="quick_empty">No quick phrases yet. Tap the button to add one.</string>
     <string name="quick_import_app">Import from Quick Apps</string>
+    <string name="quick_import_csv">Import CSV</string>
+    <string name="quick_import_done">Imported %1$d quick phrases (%2$s). Tap Save to write them locally and upload.</string>
+    <string name="quick_import_done_clean">Imported %1$d quick phrases. Tap Save to write them locally and upload.</string>
+    <string name="quick_import_empty">Nothing to import: the CSV needs INPUT_CODE (shortcut letters) and CONTENT (text) columns.</string>
+    <string name="quick_import_failed">Import failed: %1$s</string>
+    <string name="quick_import_detail_duplicate">%1$d duplicate codes merged</string>
+    <string name="quick_import_detail_no_code">%1$d rows without shortcut letters</string>
+    <string name="quick_import_detail_bad_code">%1$d invalid shortcut codes</string>
+    <string name="quick_import_detail_deleted">%1$d deleted in the source file</string>
+    <string name="quick_import_detail_empty">%1$d empty contents</string>
+    <string name="quick_import_detail_long">%1$d codes longer than 4, hit by the first 4 letters in Wubi mode</string>
+    <string name="quick_import_detail_single">%1$d single-letter codes, exact match only and competes with Wubi level-1 codes</string>
+    <string name="quick_import_detail_replaced">%1$d existing rules replaced</string>
     <string name="quick_saved">Saved</string>
     <string name="quick_user_file">Local file: quick_phrases_user.txt</string>
     <string name="quick_source_files">Local: quick_phrases_user.txt · Remote: quick_phrases_remote.txt</string>
@@ -180,6 +193,9 @@
     <!-- In-IME settings panel -->
     <string name="settings_panel_title">Input settings</string>
     <string name="settings_panel_more">More settings</string>
+    <string name="panel_chinese_input_method">Chinese input</string>
+    <string name="panel_chinese_input_pinyin">Pinyin</string>
+    <string name="panel_chinese_input_wubi">Wubi</string>
     <string name="panel_toggle_chinese_punct">Chinese punctuation</string>
     <string name="panel_toggle_full_width">Full-width output</string>
     <string name="panel_toggle_association">Word association</string>

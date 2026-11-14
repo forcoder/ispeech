@@ -48,7 +48,7 @@ object KeyboardLayouts {
 
     /** 切到符号页的 `符` 键（搜狗五笔字母页底行最左）。 */
     private fun symbolSwitchKey(): KeyDef =
-        KeyDef.fn(KeyAction.LAYOUT, "符", 1f, KeyStyle.SPECIAL, KeyboardLayoutKind.SYMBOL)
+        KeyDef.fn(KeyAction.LAYOUT, "符", 1.6f, KeyStyle.SPECIAL, KeyboardLayoutKind.SYMBOL)
 
     /**
      * 切到九宫格（T9）的 `9键` 键。
@@ -108,6 +108,10 @@ object KeyboardLayouts {
     /**
      * 构造字母页。底行照搬搜狗五笔 26 键：`符` / `中/英` / `，` / 空格 / `。` / `123` / `换行`。
      *
+     * 底行各键的宽度权重按同一台真机上搜狗底行的实测像素比例取值（实测 1260px 屏：
+     * 符 169 / 123 134 / ，102 / 空格 309 / 。102 / 中英 134 / 换行 168）：
+     * `符` 在搜狗侧是宽键（1.66 单位），旧版写成 1f 后比 `123` 还窄，底行看着一头重一头轻。
+     *
      * @param commaAlt `,` 键长按候选（直接上屏，不经过中文标点转换）
      * @param periodAlt `.` 键长按候选（同上）
      */
@@ -131,10 +135,10 @@ object KeyboardLayouts {
                 symbolSwitchKey(),
                 numberSwitchKey(),
                 KeyDef.punct(commaOutput, commaLabel, commaAlt, 1f),
-                spaceKey(),
+                spaceKey(3.3f),
                 KeyDef.punct(periodOutput, periodLabel, periodAlt, 1f),
-                KeyDef.fn(KeyAction.MODE_SWITCH, "中/英", 1.8f, KeyStyle.SPECIAL),
-                enterKey(),
+                KeyDef.fn(KeyAction.MODE_SWITCH, "中/英", 1.45f, KeyStyle.SPECIAL),
+                enterKey(1.8f),
             ),
         ),
     )

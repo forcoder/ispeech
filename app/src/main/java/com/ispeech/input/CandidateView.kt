@@ -19,7 +19,7 @@ import com.ispeech.engine.LookupCandidate
  * 候选条：[组合码] [候选 1..9（横向滚动）] [翻页器] [齿轮]
  *
  * - 左侧高亮显示当前组合码 / 状态文本
- * - 首选候选用搜狗橙加粗 + 浅橙底，其余候选纯黑加粗
+ * - 首选候选用搜狗橙 + 浅橙底，其余候选纯黑；候选词一律常规字重（不加粗，VOCA-56）
  * - 候选只显示词条文本，不再渲染「拼」「应用」「短语」等来源标签
  * - 右侧翻页器显示「1/3」，支持上一页 / 下一页（候选多于一页时出现）；
  *   翻页箭头是复刻搜狗五笔的矢量图（`ic_page_prev` / `ic_page_next`），不再是 ‹ › 字符
@@ -126,7 +126,8 @@ class CandidateView @JvmOverloads constructor(
         val label = TextView(context).apply {
             text = candidate.display
             textSize = 22f
-            typeface = Typeface.DEFAULT_BOLD
+            // 候选词常规字重：加粗会让候选条整体发沉，也压不住首选与非首选的字重差（VOCA-56）
+            typeface = Typeface.DEFAULT
             maxLines = 1
             gravity = Gravity.CENTER
             setTextColor(if (highlighted) PICKED_TEXT else TEXT_PRIMARY)

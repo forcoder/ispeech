@@ -624,3 +624,161 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 - 覆盖条目是本地别名，`SyncRepository.pushLocalRules` 会读取远端文件并跳过
   `label + content` 能匹配上的用户条目（`QuickOverride.matchesAny`），避免在 csBaby 上
   生成同内容的第二条远端规则。
+
+### 12.6 内置 5 位触发码：`dtwsl` → 泡池须知（2026-11-10 追加）
+
+营业说明（泡池 / 充气城堡 / 泳池的收费与预约规则）是**逐字要发给客人**的文案：
+换行、emoji、全半角括号、`【】`、`--`、金额（150元 / 100元 / 50元）、时长（2小时 / 4小时）
+一个都不能丢。所以它按「内置规则」交付，正文以仓库内源文件为逐字基准。
+
+落点：
+
+| 项 | 值 |
+|---|---|
+| 正文源文件 | `tools/quick/phrases/dtwsl.txt`（11 行 / 281 字，逐字基准，改文案只改这里） |
+| 规则行 | `app/src/main/assets/quick_phrases.txt`：`dtwsl \t 泡池须知 \t <正文> \t exact \t 110 \t a` |
+| 候选名 | 「泡池须知」（4 字，候选条 / 面板卡片都放得下） |
+| 匹配方式 | `exact` —— **最短命中长度 = 整码 5 位**，打字中途不会弹出 281 字长文 |
+| 排序 | `kind = a` → `QUICKAPPLY`(order 0) 排在五笔 / 拼音候选之前；`weight = 110` 高于既有内置条目的 100 |
+
+正文换行不能直接写在规则行里（一行一条规则，真实换行会把后面的规则全部解析错位）。
+落盘时用字面量转义，口径与 `UserDictStore.escapeLineText` / `QuickPhraseCodec.sanitizeContent`
+一致：`\` → `\\`、换行 → `\n`、`\t` → `\t`，`\r` 丢弃。读取侧 `unescapeLineText` 还原，
+所以候选插入文本与源文件**逐字相同**。
+
+#### 5 位码的两种输入态（重要）
+
+`dtwsl` 是 5 位，比既有内置码都长，两种输入态的缓冲区上限不一样：
+
+- **拼音态（默认态）**：组合串上限 `MAX_PINYIN_LENGTH = 12`，`d t w s l` 能完整累积，
+  第 5 个字母落下时精确命中，候选首位即「泡池须知」。**验收走这条路径。**
+- **五笔态**：组合缓冲区上限 `MAX_CODE_LENGTH = 4`，第 5 个字母到来前会先把当前首选上屏，
+  所以 `dtwsl` 在五笔态永远打不全；且 `AppContainer.loadQuickPhrases()` 在五笔态
+  `includeLocal = false`，内置规则整体不挂载。要让五笔态也支持，必须改 `MAX_CODE_LENGTH`
+  （牵动五笔码表「定长 4 位」的假设），不在本次范围。
+
+用户自己的「快捷字母」仍限 2–4 位（`QuickPhrasesScreen.isValidShortcutTrigger`）：
+那是为了让用户在任意输入态都能敲完，与内置码这条 5 位的取舍不冲突。
+
+#### 幂等写入（有则更新、无则新增）
+
+```bash
+python3 tools/quick/upsert_quick_phrase.py \
+  --trigger dtwsl --label 泡池须知 \
+  --content-file tools/quick/phrases/dtwsl.txt \
+  --mode exact --weight 110 --kind a
+```
+
+- 同 trigger 已有行**原地替换**（行号不变），同 trigger 的多余行一并清理，
+  **条目总数不增长**；没有该 trigger 时才追加到文件末尾。
+- 第二次执行输出 `动作: unchanged`，文件字节不变（`check_quick_trigger.py` 的 L11 直接对
+  写入器函数做断言：重复执行 no-op、换正文原地更新、重复行清理）。
+- 加 `--check` 只比对不写盘：需要更新时退出码 1，可接进 CI / pre-commit。
+- 用户文件里的同 trigger 条目由 `QuickPhrasesViewModel` 的保存路径按 trigger 覆盖
+  （`indexOfFirst { it.trigger == userEntry.trigger }`），解析侧 `byTrigger[trigger]` 也只留一条，
+  因此不会出现「用户文件 + 内置资产各一条同 trigger」并存。
+
+#### 验收
+
+```bash
+python3 tools/verify/check_quick_trigger.py   # L 节：正文逐字一致 / 排首位 / 缓冲区 / 写入器幂等
+python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 \
+  --content-file tools/quick/phrases/dtwsl.txt --mode exact --weight 110 --kind a --check
+```
+
+离线断言覆盖到「输入 `dtwsl` 的候选首位是泡池须知、插入文本与源文件 sha256 一致」；
+真实候选条截图 / 真机记录需要在装有输入法的设备上补（离线环境没有 Android SDK）。
+
+## 13. 导入「通用短语.csv」（2026-11-09 追加）
+
+来源：产品给的搜狗 / csBaby 导出文件 `通用短语.csv`（235 行、GBK、61 KB）。目标是「导进常用语，
+敲快捷字母就出对应候选」，不再一条条手录。仓库内留了这份文件作基线（`tools/verify/fixtures/general_phrases.csv`），
+`tools/verify/check_phrase_csv_import.py` 直接读它做回归。
+
+### 13.1 入口
+
+设置 → 快捷短语 → 「导入 CSV」→ 系统文件选择器（`ActivityResultContracts.OpenDocument`，
+不申请存储权限）。MIME 白名单枚举了 `text/plain`、`text/csv`、`text/comma-separated-values`、`text/x-csv`、
+`application/csv`、`application/vnd.ms-excel`、`application/octet-stream`——网盘 / 微信 / Excel 报的 MIME 各不相同，漏一个用户就选不到刚下载的文件。
+
+选完只进内存列表并提示「已导入 N 条」，点「保存并同步」才落盘 + 上传：沿用 `upsert` 的同一套
+契约（`dirty = true` → `save()`），中途退出不会留下半份数据。
+
+### 13.2 文件格式
+
+GBK（Excel 另存）或 UTF-8（含 BOM 也行），首行表头，逗号分隔，RFC 4180 引号字段
+（字段内可含换行、逗号、`""` 转义）：
+
+| 列 | 用途 |
+| --- | --- |
+| `CONTENT` | 上屏文本，可含换行（真实文件 224 条中 108 条是多行） |
+| `INPUT_CODE` | 快捷字母，落成 `trigger` |
+| `GROUP_NAME` | 分组名，仅当内容全为空时兜底当短名 |
+| `IS_DELETE` | 非 0 视为已删除，跳过 |
+| `UUID` / 时间戳 / `SYNC_STATUS` | 忽略 |
+
+表头按别名识别、顺序无关（`input_code` / `code` / `简写` / `编码`，`content` / `内容`……），
+换一家导出的文件不用改代码。
+
+### 13.3 映射口径
+
+| 字段 | 规则 | 为什么 |
+| --- | --- | --- |
+| `trigger` | 去空白 → 转小写，须为 1–12 位 `[a-z]` | 引擎按小写比对；`MAX_CODE_LENGTH = 4` 只是五笔输入上限 |
+| `mode` | 1 位 → `exact`，其余 → `prefix` | `QuickPhraseEngine` 的 prefix / contains 在输入短于 2 位时被 `minTriggerLength` 拦下，1 位码用 prefix 等于永远打不出来 |
+| 长码 > 4 位 | 照常导入为 prefix | 五笔态最多打 4 码，prefix 让「打前 4 位」也能命中；本文件 60 条 |
+| `label` | 内容首个非空行，码点截断 20 位 + `…`；重名追加 `·2` / `·3` | `CompositeEngine` 按 display 去重，短名重复会吞掉候选；本文件 13 条重名 |
+| `content` | CRLF / 孤立 CR → `\n`，逐行去行尾空白，连续空行压成一行，首行去前导空白 | 源文件有 `\r\r\n` 混排；这些空白在落盘 `trim` 后会丢，先规范化才能保证回读逐字一致 |
+| `weight` | 100 | 与手录规则一致 |
+| `kind` | `PHRASE`（落盘 `p`） | 走短语档位，`CandidateRanking` 里排在五笔 / 拼音候选之前 |
+
+### 13.4 跳过规则与提示
+
+提示里逐项报数，不静默吞行：
+
+| 情况 | 条数 | 处理 |
+| --- | --- | --- |
+| 无 `INPUT_CODE` | 1 | 跳过 |
+| 同码重复 | 10 | 保留先出现的，其余计入「同码合并」 |
+| 1 位字母 | 1（`j`） | 照常导入，`exact`；提示说明它会抢五笔一级简码 |
+| 超 4 位 | 60 | 照常导入，提示「五笔态打前 4 位即可命中」 |
+| 已删除 / 空内容 | 0 | — |
+| **合计导入** | **224** | 235 行 − 1 无码 − 10 重复 |
+
+同 `trigger` 的已有用户规则被导入条目覆盖，其余规则原样保留，所以重复导入同一份文件是幂等的；
+`replaced > 0` 时会提示覆盖了几条。
+
+### 13.5 验证
+
+```bash
+python3 tools/verify/check_phrase_csv_import.py   # 44 项：解析 / 映射 / 候选 / 落盘回读 / 接线
+```
+
+`app/src/test/java/com/ispeech/data/PhraseCsvImportTest.kt` 覆盖同样边界（有 JDK 的环境跑 JUnit）。
+
+### 13.6 真机验收（2026-11-09，华为 ALN-AL00）
+
+设备：`ALN-AL00`（`4.2.0.223(C00E215R10P2)`，HarmonyOS 4.2 / EMUI，1260×2720，density 520），
+USB 直连 serial `FMR0224913042917`，输入法为 `com.ispeech.ime/com.ispeech.input.IspeechImeService`（默认）。
+
+构建与安装口径：源码 worktree 副本 + JDK 17 + Android SDK（`:app:assembleDebug`）→
+`app-debug.apk` 104,937,729 B、`md5 33bea1a619c5a1aa17569eead74db17b`，
+与设备上 `base.apk` 的 md5 逐字节一致——下面所有结论都是在**这份构建**上跑出来的。
+`adb install -r -d` 覆盖安装（原为 1.5 / versionCode 5，签名一致，无需卸载，csBaby 登录态因此失效，见末行）。
+
+| 用例 | 操作 | 真机结果 |
+| --- | --- | --- |
+| 导入 | 设置 → 快捷短语 → 导入 CSV → 系统文件选择器 → 下载内容 → `通用短语.csv`（61.5 KB） | 列表头「共 224 条」 |
+| 幂等 | 同一文件再导一次 | 仍 224 条；提示「已导入 224 条…（同码合并 10 条；缺快捷字母 1 条；超 4 位 60 条…覆盖已有 224 条）」 |
+| 落盘 | 保存并同步（csBaby 未登录） | 提示「已保存 224 条到本地；未登录 csBaby，未同步云端」；`files/quick_phrases_user.txt` 72,198 B = 2 行头注释 + 224 条 |
+| 2 位码 | 键盘敲 `ly` | 候选第 1 位 **鹭影**，其后才是词典词 旅游 / 利用；点第 2 位「旅游」照常上屏（词典路径未受影响） |
+| 2 位码 | `ls` | 第 1 位 **揽墅**，其后 历史 / 来说 |
+| 4 位码命中长文 | `hxww` | 唯一候选 **湖山鹭韵五街5号**；点选后整段多行房源文案（含换行）落到输入框 |
+| 超 4 位码打前 4 位 | `hxws`（原码 8 位） | 第 1 位 **湖山鹭韵五街3号·2**，300+ 字长文完整上屏 |
+| 1 位码 | `j` | 第 1 位「亲，距离很近，走路大概1~2分钟吧」 |
+| 三方宿主 | 系统「设置」搜索框敲 `hxww` | 候选命中，点选后完整多行文案进设置搜索框（uiautomator 读出全文、换行保留） |
+| 五笔回归 | `ggd` | 仍出 高高地 / 感光度，未被短语挤掉 |
+| 稳定性 | 全程 logcat | 无 ispeech 的 crash / ANR |
+
+未覆盖：csBaby 登录后的云端上传（覆盖安装后未登录，提示语如实说明本地已存、云端未同步）；
+224 条未逐条点选，抽测 6 个码（含 1 / 2 / 4 / 8 位码与多行文本）。
