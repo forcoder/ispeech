@@ -1,12 +1,14 @@
 package com.ispeech.di
 
 import android.content.Context
+import com.ispeech.data.CellDictStore
 import com.ispeech.data.ClipboardHistory
 import com.ispeech.data.CsBabyClient
 import com.ispeech.data.PhraseUsageStore
 import com.ispeech.data.UserDictStore
 import com.ispeech.data.UserDictMode
 import com.ispeech.engine.CompositeEngine
+import com.ispeech.engine.CellDictEngine
 import com.ispeech.engine.LookupEngine
 import com.ispeech.engine.LookupKind
 import com.ispeech.engine.PinyinDictLoader
@@ -33,6 +35,9 @@ object AppContainer {
 
     /** 用户词频 / 自造词文件名（位于 filesDir 下） */
     const val USER_DICT_FILE = "user_dict.txt"
+
+    /** 分类词库（细胞词库）目录名（位于 filesDir 下） */
+    const val CELL_DICT_DIR_NAME = "cell_dicts"
 
     /** 剪贴板历史文件名（位于 filesDir 下） */
     const val CLIPBOARD_HISTORY_FILE = "clipboard_history.txt"
@@ -63,6 +68,9 @@ object AppContainer {
 
     @Volatile
     private var userDictCache: UserDictStore? = null
+
+    @Volatile
+    private var cellDictCache: CellDictStore? = null
 
     @Volatile
     private var clipboardHistoryCache: ClipboardHistory? = null
@@ -113,6 +121,7 @@ object AppContainer {
             includeUser = true,
             minTriggerLength = if (singleNoTrigger) 2 else 1,
             userDict = userDict(ctx),
+            cellDict = cellDict(ctx),
             pinyin = keyboard.pinyinMixed,
             fuzzyPinyin = keyboard.fuzzyPinyin,
         )
@@ -145,12 +154,17 @@ object AppContainer {
     }
 
     /**
-     * 拼音态查询引擎：用户词库（cn 模式）+ 拼音词表。
+     * 拼音态查询引擎：用户词库（cn 模式）+ 拼音词表 + 快捷短语规则。
      *
      * 拼音态原本直接走 [pinyinEngine]，用户词库完全够不着——自造词与词频学习在拼音态写了也没用，
      * 所以输入法服务干脆禁掉了拼音态学习。搜狗把用户词库按输入模式拆成 `wb_dict_user` /
      * `cn_dict_user`，这里同理：cn 模式的用户词与拼音词表合成一个复合引擎，用户词带 +10 万权重，
      * 与拼音词同档（[LookupKind.PINYIN]）竞争时排到前面。
+     *
+     * 已启用的分类词库里 `cn` 码的词条同样并入（权重 8 万，排在用户词之后、拼音词表之前）。
+     *
+     * 快捷短语也必须并入：输入法默认是拼音态，若只在五笔态挂快捷规则，用户设置的
+     * 4 位快捷字母（如 `ytyc` → 雨天泳池）在拼音态会完全没有候选。
      */
     fun pinyinLookupEngine(context: Context): CompositeEngine {
         val cached = pinyinLookupCache
@@ -161,6 +175,8 @@ object AppContainer {
             val appCtx = context.applicationContext
             val engines = ArrayList<LookupEngine>()
             engines.add(UserDictEngine(userDict(appCtx), UserDictMode.PINYIN))
+            val cells = cellDict(appCtx).entries(enabledOnly = true)
+            if (cells.isNotEmpty()) engines.add(CellDictEngine(cells, UserDictMode.PINYIN))
             val dict = PinyinDictLoader.load(appCtx)
             if (!dict.isEmpty) {
                 engines.add(
@@ -173,6 +189,23 @@ object AppContainer {
                     )
                 )
             }
+            // 快捷短语 / 快速应用与五笔态共用同一批规则：拼音态（默认态）也必须能命中
+            // 用户设置的快捷字母，否则输入 `ytyc` 只会在拼音词表里查无结果。
+            val (enableQuick, enableRemote, singleNoTrigger) = runBlocking {
+                val q = SettingsStore.enableQuickPhrasesFlow(appCtx).first()
+                val r = SettingsStore.enableRemoteRulesFlow(appCtx).first()
+                val s = SettingsStore.singleLetterNoTriggerFlow(appCtx).first()
+                Triple(q, r, s)
+            }
+            engines.addAll(
+                QuickLocator.buildQuickEngines(
+                    appCtx,
+                    includeLocal = enableQuick,
+                    includeRemote = enableRemote,
+                    includeUser = true,
+                    minTriggerLength = if (singleNoTrigger) 2 else 1,
+                )
+            )
             val created = CompositeEngine(engines)
             pinyinLookupCache = created
             return created
@@ -209,6 +242,10 @@ object AppContainer {
     fun quickPhrasesUserFile(context: Context): File =
         File(context.filesDir, QUICK_PHRASES_USER_FILE)
 
+    /** 快捷短语远端规则文件：filesDir/quick_phrases_remote.txt（同步拉取产物，只读展示） */
+    fun quickPhrasesRemoteFile(context: Context): File =
+        File(context.filesDir, QuickLocator.REMOTE_FILE_NAME)
+
     /** 用户词典存储：filesDir/user_dict.txt，全局懒加载缓存 */
     fun userDict(context: Context): UserDictStore {
         val cached = userDictCache
@@ -227,6 +264,27 @@ object AppContainer {
         synchronized(this) {
             userDictCache = null
         }
+    }
+
+    /** 分类词库（细胞词库）：filesDir/cell_dicts/，全局懒加载缓存 */
+    fun cellDict(context: Context): CellDictStore {
+        val cached = cellDictCache
+        if (cached != null) return cached
+        synchronized(this) {
+            val existing = cellDictCache
+            if (existing != null) return existing
+            val created = CellDictStore.open(File(context.filesDir, CELL_DICT_DIR_NAME))
+            cellDictCache = created
+            return created
+        }
+    }
+
+    /** 安装 / 删除 / 启停分类词库后调用：丢弃缓存实例并让引擎重建（下次查询用上新词库）。 */
+    fun invalidateCellDict() {
+        synchronized(this) {
+            cellDictCache = null
+        }
+        invalidateEngine()
     }
 
     /** 剪贴板历史：filesDir/clipboard_history.txt，全局懒加载缓存 */

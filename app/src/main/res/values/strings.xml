@@ -23,7 +23,7 @@
     <string name="settings_title">设置</string>
     <string name="settings_intro">在这里配置词典、快捷短语、账号同步与主题外观</string>
     <string name="settings_dict_desc">管理五笔 86 词库，查看与导入自定义词典</string>
-    <string name="settings_quick_desc">维护触发词与回复内容，支持快捷应用规则</string>
+    <string name="settings_quick_desc">维护快捷字母与回复内容，支持快捷应用规则</string>
     <string name="settings_csbaby_desc">登录 csBaby 账号以启用云端规则同步</string>
     <string name="settings_sync_desc">把云端关键词规则同步到本地快捷短语</string>
     <string name="settings_theme_desc">选择浅色、深色或跟随系统</string>
@@ -49,13 +49,25 @@
     <string name="dict_import_result">导入完成：写入 %1$d 条（更新 %2$d，跳过 %3$d）</string>
     <string name="dict_import_failed">导入失败：%1$s</string>
     <string name="dict_export_failed">导出失败：%1$s</string>
+    <string name="dict_cell_title">分类词库（细胞词库）</string>
+    <string name="dict_cell_hint">安装本地文本词库（每行「编码 + 词条」，与用户词库同一格式，可加 `# category: 分类名` 头），可随时启用 / 停用；启用的词条并入查询候选，五笔态取 wb 码、拼音态取 cn 码</string>
+    <string name="dict_cell_add">添加词库</string>
+    <string name="dict_cell_empty">还没有安装分类词库</string>
+    <string name="dict_cell_entry_count">%1$d 条</string>
+    <string name="dict_cell_category_unknown">自定义</string>
+    <string name="dict_cell_added">已安装「%1$s」：写入 %2$d 条（跳过 %3$d）</string>
+    <string name="dict_cell_updated">已更新「%1$s」：写入 %2$d 条（跳过 %3$d）</string>
+    <string name="dict_cell_add_failed">词库操作失败：%1$s</string>
+    <string name="dict_cell_remove">删除</string>
 
     <!-- 快捷短语 -->
     <string name="quick_title">快捷短语</string>
-    <string name="quick_search_hint">搜索触发词或内容</string>
+    <string name="quick_search_hint">搜索快捷字母或内容</string>
     <string name="quick_add_rule">新增快捷短语</string>
     <string name="quick_edit_rule">编辑快捷短语</string>
-    <string name="quick_trigger">触发词</string>
+    <string name="quick_trigger">快捷字母</string>
+    <string name="quick_trigger_hint">例：ycsf → 输入法里敲 ycsf，候选第一位就是这条短语</string>
+    <string name="quick_trigger_error">快捷字母需为 2–4 位小写字母（与五笔编码上限 4 位一致）</string>
     <string name="quick_label">名称</string>
     <string name="quick_content">内容</string>
     <string name="quick_match_mode">匹配方式</string>
@@ -64,8 +76,28 @@
     <string name="quick_enabled">启用</string>
     <string name="quick_empty">暂无快捷短语，点击右下角按钮新增</string>
     <string name="quick_import_app">从快速应用导入</string>
+    <string name="quick_import_csv">导入 CSV</string>
+    <string name="quick_import_done">已导入 %1$d 条快捷短语（%2$s）；点「保存并同步」写入本地并上传</string>
+    <string name="quick_import_done_clean">已导入 %1$d 条快捷短语；点「保存并同步」写入本地并上传</string>
+    <string name="quick_import_empty">CSV 里没有可导入的短语：需要 INPUT_CODE（快捷字母）与 CONTENT（内容）两列</string>
+    <string name="quick_import_failed">导入失败：%1$s</string>
+    <string name="quick_import_detail_duplicate">同码合并 %1$d 条</string>
+    <string name="quick_import_detail_no_code">缺快捷字母 %1$d 条</string>
+    <string name="quick_import_detail_bad_code">快捷字母非法 %1$d 条</string>
+    <string name="quick_import_detail_deleted">源文件已删除 %1$d 条</string>
+    <string name="quick_import_detail_empty">内容为空 %1$d 条</string>
+    <string name="quick_import_detail_long">超 4 位 %1$d 条，五笔态打前 4 位即可命中</string>
+    <string name="quick_import_detail_single">1 位字母 %1$d 条，只能精确匹配、会抢五笔一级简码</string>
+    <string name="quick_import_detail_replaced">覆盖已有 %1$d 条</string>
     <string name="quick_saved">已保存</string>
     <string name="quick_user_file">本地文件：quick_phrases_user.txt</string>
+    <string name="quick_source_files">本地：quick_phrases_user.txt · 远端：quick_phrases_remote.txt</string>
+    <string name="quick_remote_shortcut_title">设置快捷字母</string>
+    <string name="quick_remote_shortcut_desc">远端规则内容只读；快捷字母保存在本地，可随时恢复默认</string>
+    <string name="quick_remote_overridden">已覆盖为 %1$s</string>
+    <string name="quick_remote_restore">恢复默认</string>
+    <string name="quick_remote_override_set">已设置快捷字母「%1$s」，点击右上角「保存并同步」写入本地</string>
+    <string name="quick_remote_override_restored">已恢复远端默认快捷字母，点击右上角「保存并同步」写入本地</string>
     <string name="quick_panel_search_hint">输入关键词搜索短语（拼音首字母也行）</string>
     <string name="quick_panel_search_active">🔍 %1$s</string>
     <string name="btn_add_cloud_shortcut">添加云端简写</string>
@@ -132,6 +164,9 @@
     <string name="voice_network_error">网络异常，语音识别需要联网</string>
     <string name="voice_audio_error">录音失败，请检查麦克风是否被其它应用占用</string>
     <string name="voice_error_code">语音识别失败（错误码 %1$d）</string>
+    <string name="voice_panel_listening">正在聆听…</string>
+    <string name="voice_panel_hint">松开上屏 · 上滑取消</string>
+    <string name="voice_panel_hint_cancel">松开取消</string>
 
     <!-- ASR 模型配置 -->
     <string name="asr_title">ASR 模型配置</string>
@@ -141,8 +176,8 @@
     <string name="asr_engine_system_desc">使用 Android 系统内置的语音识别服务</string>
     <string name="asr_engine_custom">自定义识别服务</string>
     <string name="asr_engine_custom_desc">指定设备上已安装的语音识别服务组件</string>
-    <string name="asr_engine_vosk">离线识别（内置）</string>
-    <string name="asr_engine_vosk_desc">内置 Vosk 中文模型，完全离线、不联网；首次使用需下载约 42MB 模型</string>
+    <string name="asr_engine_funasr">FunASR 离线识别</string>
+    <string name="asr_engine_funasr_desc">FunASR Paraformer-zh-small 模型，完全离线、不联网；首次使用需下载约 74MB 模型，中文准确率更高</string>
     <string name="voice_model_downloading">语音模型下载中 %1$d%%</string>
     <string name="voice_model_ready">语音模型已就绪，再次点击麦克风开始说话</string>
     <string name="voice_model_failed">语音模型下载失败，请检查网络后重试</string>
@@ -162,6 +197,9 @@
     <!-- 输入法内置配置面板 -->
     <string name="settings_panel_title">输入设置</string>
     <string name="settings_panel_more">更多设置</string>
+    <string name="panel_chinese_input_method">中文输入法</string>
+    <string name="panel_chinese_input_pinyin">拼音</string>
+    <string name="panel_chinese_input_wubi">五笔</string>
     <string name="panel_toggle_chinese_punct">中文标点</string>
     <string name="panel_toggle_full_width">全角输出</string>
     <string name="panel_toggle_association">词语联想</string>
@@ -172,7 +210,7 @@
     <string name="panel_toggle_vibrate">按键震动</string>
     <string name="quick_search_empty">没有匹配的快捷短语，试试拼音首字母（如 fp → 发票）</string>
     <string name="quick_search_count">找到 %1$d 条 · 关键词 %2$s</string>
-    <string name="quick_search_smart">智能联想：触发词 / 名称 / 内容 / 拼音首字母，共 %1$d 条</string>
+    <string name="quick_search_smart">智能联想：快捷字母 / 名称 / 内容 / 拼音首字母，共 %1$d 条</string>
     <string name="quick_tier_initials">拼音首字母</string>
     <string name="quick_save_sync">保存并同步</string>
     <string name="quick_saved_local_only">已保存 %1$d 条到本地；未登录 csBaby，未同步云端</string>
@@ -180,6 +218,9 @@
     <string name="quick_synced_partial">本地已保存 · 云端生效：新增 %1$d · 修改 %2$d · 删除 %3$d；%4$d 条未生效（后端不支持修改 / 删除）</string>
     <string name="quick_synced_none">已保存 %1$d 条；云端没有需要同步的变更</string>
     <string name="quick_sync_failed">本地已保存；云端同步失败：%1$s</string>
+    <string name="quick_cloud_login_required">请先登录 csBaby 账号</string>
+    <string name="quick_cloud_added_success">云端简写「%1$s」已添加成功</string>
+    <string name="quick_cloud_added_failed">云端简写「%1$s」添加失败：%2$s</string>
     <string name="sync_upload_partial">云端生效：新增 %1$d · 修改 %2$d · 删除 %3$d；%4$d 条未生效（后端不支持修改 / 删除）</string>
 <string name="asr_engine_vosk">离线识别（内置）</string>
 <string name="asr_engine_vosk_desc">内置 Vosk 中文模型，完全离线、不联网；首次使用需下载约 42MB 模型</string>
