@@ -15,6 +15,20 @@ VOCA-166 合入 main 后会在 VOCA-186 重打最终包并替换本文件。
 | `SHA256SUMS` | 完整性校验（含 `_archive/` 历史包） |
 | `_archive/` | 历史包 v1.0–v1.5，**均不含语音**（无 sherpa-onnx / FunASR 运行时），仅用于回归对比 |
 
+## 取包方式（产物必须可被他人取到）
+
+内测包以 **git 发布分支**交付，任何人可用一条命令取到字节并自查：
+
+```bash
+git clone --single-branch --branch release/voca-186-v1.6 <repo-url>
+cd voca-186-v1.6/dist && shasum -a 256 ispeech-internal-v1.6.apk
+# 期望：9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42（98416118 字节）
+```
+
+- 发布分支 `release/voca-186-v1.6` = 出包提交 `199b972`（版本提交 `a9d1dae`、出包基线合并 `bc81c30`）+ 本文档；APK 与 `199b972` 里的是同一个 blob 对象，字节未变。
+- 不走任务分支 `agent/sre/voca-186`：其历史含一个 132.72 MB 的 `dist/ispeech-release-1.5-20261115-1004.apk`（非本 issue 产物），超过 GitHub 100 MB 硬限制，`git push` 被 pre-receive 以 GH001 拒收；v1.6 包 93.86 MB 只触发 >50 MB 警告，可正常推送。
+- 最终包（VOCA-190 + VOCA-166 合入 main 后重打）就绪时，在本 issue 重打并覆盖发布分支，同步更新本节 sha256。
+
 ## v1.6 变更（相对 v1.5）
 
 - 版本号 `versionCode 6` / `versionName 1.6`，装机后可凭版本号区分「含语音」的内测包与旧包
