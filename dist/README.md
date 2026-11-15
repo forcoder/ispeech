@@ -27,7 +27,7 @@ cd voca-186-v1.6/dist && shasum -a 256 ispeech-internal-v1.6.apk
 
 - 发布分支 `release/voca-186-v1.6` = 出包提交 `199b972`（版本提交 `a9d1dae`、出包基线合并 `bc81c30`）+ 本文档；APK 与 `199b972` 里的是同一个 blob 对象，字节未变。
 - 不走任务分支 `agent/sre/voca-186`：其历史含一个 132.72 MB 的 `dist/ispeech-release-1.5-20261115-1004.apk`（非本 issue 产物），超过 GitHub 100 MB 硬限制，`git push` 被 pre-receive 以 GH001 拒收；v1.6 包 93.86 MB 只触发 >50 MB 警告，可正常推送。
-- 最终包（VOCA-190 + VOCA-166 合入 main 后重打）就绪时，在本 issue 重打并覆盖发布分支，同步更新本节 sha256。
+- 最终包门禁 = VOCA-190（FunASR 接线）+ VOCA-166（语音入口/麦克风）+ VOCA-170（设置页必崩）三者都合入 main 后重打，覆盖发布分支 `release/voca-186-v1.6` 并同步更新本节 sha256。
 
 ## v1.6 变更（相对 v1.5）
 
@@ -84,6 +84,9 @@ cd voca-186-v1.6/dist && shasum -a 256 ispeech-internal-v1.6.apk
 
 - 无双拼 / 手写 / 五笔 98 / 云词库；皮肤仅主题色
 - **语音**：本试包已带 FunASR 运行时与默认 OSS 模型源，但语音入口修复（VOCA-166）未合入，语音键行为以真机验收（VOCA-188）结论为准
+- **设置 → 键盘与输入 必崩（VOCA-170）**：`KeyboardViewModel.kt` 的 `init{}`（`:29`，写入在 `:35` / `:38`）先于属性声明（`:102` / `:105`）执行，
+  对尚未初始化的 `MutableStateFlow` 调 `setValue` → 确定性 NPE，崩的是 IME 主进程 `com.ispeech.ime`。1.5/5 与 v1.6 试包同源，均 100% 复现（取证见 VOCA-228）。
+  **这不是 v1.6 回归**，装机与验收请勿按新缺陷重复上报；最终包门禁要求 VOCA-170 先合入 main
 - 九宫格无音节切分（组合枚举上限 192 组、数字串 ≤9 位），>6 位数字时候选变少
 - 简繁为字符级转换，不做词汇消歧
 - 输入统计不含 AI 回复上屏
