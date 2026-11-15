@@ -5,13 +5,13 @@ import com.ispeech.engine.QuickTrigger
 import java.security.MessageDigest
 
 /**
- * 本地规则上传前的决策层（ADR-0002 C3-1…C3-7、C3-10、C2-5）。
+ * 本地规则上传前的决策层（ADR-0002 C3-1…C3-5、C3-7、C2-5）。
  *
  * 「云端正文会不会被本地静默覆盖」的唯一决策点，因此做成纯函数、可单测：
- * **没有本地映射记录时，同码远端规则一律记为冲突，绝不进入上传集合。**
+ * **没有本地映射记录时，同码远端规则一律记为冲突，绝不进入上传集合（C3-1）。**
  *
  * 指纹口径保持原样：本地是否「变了」仍由 [RemoteRuleMap.fingerprint] 的远端可见字段指纹判定，
- * 这里只负责把它接进决策；冲突记录里的远端指纹取正文的 sha256（转义后），
+ * 这里只负责把它接进决策；冲突留痕用的远端指纹取正文 sha256（转义后），
  * 与落盘形态同口径，便于离线复现对比。
  */
 internal object LocalRuleSyncPlan {
@@ -22,7 +22,7 @@ internal object LocalRuleSyncPlan {
     /** 首次绑定：远端已有同码规则且内容一致，只补映射，不推送。 */
     internal data class Binding(val trigger: String, val remoteId: String, val fingerprint: String)
 
-    /** 同码冲突：本地与远端都用这个触发词、正文不同、且本地没有映射记录。 */
+    /** 同码冲突：本地与远端都用这个触发词、正文不同、且本地没有映射记录（C3-1）。 */
     internal data class Conflict(
         val trigger: String,
         val remoteId: String,
@@ -39,11 +39,10 @@ internal object LocalRuleSyncPlan {
     )
 
     /**
-     * @param locals 允许上传的本地规则（已过 [QuickTrigger.isValidShortcutTrigger]，ADR-0002 C3-3）
-     * @param known 本地映射表，主键必须是 [QuickTrigger.normalize] 后的 trigger（C3-9）
+     * @param locals 待上传的本地规则（读取侧从不校验长度，这里也不裁剪：C1-5）
+     * @param known 本地映射表，主键必须是 [QuickTrigger.normalize] 后的 trigger（C3-1：它是唯一身份来源）
      * @param remoteById 远端规则按 id 建索引
      * @param remoteByKeyword 远端规则按归一化 keyword 建索引
-     * @param stale 有映射记录、但本轮被校验器挡在上传集合外的本地条目（C3-10：不得静默）
      * @param localFingerprintOf 本地条目的远端可见字段指纹（与映射表记录同口径）
      * @param remoteFingerprintOf 远端规则正文指纹（只用于冲突留痕）
      * @param remoteMatches 远端规则与本地条目在远端可见字段上是否一致
@@ -56,7 +55,6 @@ internal object LocalRuleSyncPlan {
         localFingerprintOf: (QuickEntry) -> String,
         remoteFingerprintOf: (RemoteKeywordRule) -> String,
         remoteMatches: (RemoteKeywordRule, QuickEntry) -> Boolean,
-        stale: List<QuickEntry> = emptyList(),
     ): Decisions {
         val creates = ArrayList<QuickEntry>()
         val updates = ArrayList<Update>()
@@ -66,32 +64,25 @@ internal object LocalRuleSyncPlan {
         locals.forEach { entry ->
             val trigger = QuickTrigger.normalize(entry.trigger)
             val ref = known[trigger]
-            // 映射表里没有该触发词时按触发词兜底匹配（换机恢复 / 旧版本上传 / 远端手工建的同码规则）
-            val target = ref?.let { remoteById[it.id] } ?: remoteByKeyword[trigger]
+            // C3-5：映射在 → 身份只认这个 id，id 已不在远端就是「码空闲」→ create，
+            // 绝不退到 keyword 兜底（那会把别人的同码规则当成自己的那条覆盖掉）。
+            // C3-1/C3-2：只有「无映射」时才用 keyword 兜底，且兜底命中正文不一致一律记冲突。
+            val target = if (ref != null) remoteById[ref.id] else remoteByKeyword[trigger]
             val fingerprint = localFingerprintOf(entry)
             when {
-                // C3-3：远端没有这个码 → 新建
+                // C3-5：远端没有这条规则（码空闲，或映射指向的 id 已被删）→ 新建
                 target == null -> creates += entry
-                // C3-1：无映射记录 + 同码远端内容不同 → 冲突，不覆盖
+                // C3-1：无映射记录 + 同码远端正文不同 → 冲突，禁止覆盖
                 ref == null && !remoteMatches(target, entry) ->
                     conflicts += conflict(trigger, entry, target, remoteFingerprintOf)
-                // C3-6：无映射记录 + 同码远端内容一致 → 只补映射
+                // C3-2：无映射记录 + 同码远端正文一致 → 只补映射，不推送
                 ref == null -> bindings += Binding(trigger, target.id, fingerprint)
-                // C3-4：映射在、本地正文变了 → 更新
+                // C3-4：映射在、本地正文变了 → 更新（用户改的是自己拥有的规则）
                 ref.fingerprint != fingerprint -> updates += Update(target.id, entry)
-                // C3-5：映射在、本地没变、远端被改了 → 更新回本地内容
+                // C3-1：映射在 = 这条远端规则归本地所有；远端正文被人改了 → 推回本地正文
                 !remoteMatches(target, entry) -> updates += Update(target.id, entry)
                 else -> Unit
             }
-        }
-
-        // C3-10：条目被校验器挡在上传集合外，映射记录仍在 → 同码远端若内容不同必须记冲突
-        stale.forEach { entry ->
-            val trigger = QuickTrigger.normalize(entry.trigger)
-            val ref = known[trigger] ?: return@forEach
-            val target = remoteById[ref.id] ?: remoteByKeyword[trigger] ?: return@forEach
-            if (remoteMatches(target, entry)) return@forEach
-            conflicts += conflict(trigger, entry, target, remoteFingerprintOf)
         }
 
         return Decisions(creates, updates, bindings, conflicts)
