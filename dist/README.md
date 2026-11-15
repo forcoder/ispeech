@@ -27,7 +27,7 @@ cd voca-186-v1.6/dist && shasum -a 256 ispeech-internal-v1.6.apk
 
 - 发布分支 `release/voca-186-v1.6` = 出包提交 `199b972`（版本提交 `a9d1dae`、出包基线合并 `bc81c30`）+ 本文档；APK 与 `199b972` 里的是同一个 blob 对象，字节未变。
 - 不走任务分支 `agent/sre/voca-186`：其历史含一个 132.72 MB 的 `dist/ispeech-release-1.5-20261115-1004.apk`（非本 issue 产物），超过 GitHub 100 MB 硬限制，`git push` 被 pre-receive 以 GH001 拒收；v1.6 包 93.86 MB 只触发 >50 MB 警告，可正常推送。
-- 最终包门禁 = VOCA-190（FunASR 接线）+ VOCA-166（语音入口/麦克风）+ VOCA-170（设置页必崩）三者都合入 main 后重打，覆盖发布分支 `release/voca-186-v1.6` 并同步更新本节 sha256。
+- 最终包门禁 = VOCA-190（FunASR 接线）+ VOCA-170（设置页必崩）+ VOCA-121（联想去重，PR #10 @ `e8dc6f1`，**必要项·不可裁剪**）+ VOCA-166（语音入口/麦克风）四条都合入 main 后重打，覆盖发布分支 `release/voca-186-v1.6` 并同步更新本节 sha256。验收判据 = VOCA-183 交付计划 六·五 / AC-1…AC-10；缺任一条不出包。
 
 ## v1.6 变更（相对 v1.5）
 
@@ -37,6 +37,7 @@ cd voca-186-v1.6/dist && shasum -a 256 ispeech-internal-v1.6.apk
 - 内置 FunASR 离线识别运行时：sherpa-onnx + Paraformer-zh-small，arm64-v8a / armeabi-v7a / x86 / x86_64
 - 签名：Android Debug 证书（非 release 自签证书），可与既有内测包同证书覆盖安装，不用先卸载
 - 出包基线：提交 `bc81c30`（合并 `origin/main` 的 `76d178c`）+ 版本提交 `a9d1dae`；APK 由该提交 `assembleRelease` 产物用本机 debug keystore 重签
+- **修复**：多字候选上屏后再点以末字开头的联想词不再重复末字（VOCA-121）
 
 ## 出包门禁（2026-11-14 实测，全部通过）
 
