@@ -634,10 +634,17 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 
 回写安全线（ADR-0002 C3，P0）：
 
-- **`filesDir/quick_phrases_remote_map.txt` 是远端规则的唯一同步身份。** 没有映射记录时，
+- **`filesDir/quick_phrases_remote_map.txt` 是远端规则的唯一同步身份。** 没有**有效**映射记录时，
   同 keyword 的远端规则正文与本地不一致 → 判为**冲突**，不推送、不补映射、不计 `applied`
   （`LocalRuleSyncPlan.decide`，C3-1）；正文一致才「只补映射」（C3-2）。
   有映射且本地指纹变化才允许按 id 覆盖（C3-4，用户改的是自己拥有的规则）。
+- **映射是一条会失效的凭证，不是永久产权（C3-5′）**：远端不再返回映射里那个 id 时，这条映射视同无映射，
+  重新按 C3-1 / C3-2 / C3-3 分类。**同码被占且正文不一致时不新建重复规则**，判冲突交给用户处置
+  —— 弹窗两个动作，或在编辑器里把触发词改成别的码（改完就成了「无人占用」，下一轮自然新建）。
+  在云端留两条同 `keyword` 的规则，设备表达不了：本地主键是归一化 trigger，同码只留一条，
+  命中哪条取决于服务端返回顺序。判为冲突的失效映射同时从映射表清除，表里不留死凭证。
+- **参与身份判定的远端集合 = 未软删的条目（C3-11）**：`remoteById` / `remoteByKeyword` 都由它构建，
+  软删条目既不占码也不算所有权，orphan 清理对软删 id 只清映射、不再推 delete。
 - 冲突条数进 `RuleSyncReport.conflicts`，同步文案用独立的 `quick_synced_conflict` /
   `sync_upload_conflict`（**不复用**语义为「后端不支持修改 / 删除」的 `*_partial`，C3-3），
   界面报「N 条与云端同码冲突，本轮未上传」而不是报成功。

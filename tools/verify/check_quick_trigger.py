@@ -636,7 +636,7 @@ def check_conflict_safety() -> None:
     )
     check(
         "ref != null) remoteById[ref.id] else remoteByKeyword[trigger]" in plan_text,
-        "keyword 兜底只在「无映射」时生效：有映射但 id 已消失也不会改判别人的同码规则（C3-1 / C3-5）",
+        "keyword 兜底只在「无有效映射」时生效：兜底命中的同码他人规则一律按 C3-1 判冲突，不覆盖（C3-1 / C3-5′）",
         "决策层用 keyword 兜底替代映射身份，会把别人的远端规则当成自己那条覆盖掉",
     )
 
@@ -679,6 +679,29 @@ def check_conflict_safety() -> None:
         and "PhraseUsageStore.idOf" in adopt and "store.toggleStar(" in adopt,
         "「采用云端正文」只改内存条目并迁移收藏，不自动改写任何规则文件（C2-6 / C2-7）",
         "迁移路径直接写盘，升级后 quick_phrases_user.txt / _remote.txt 会被悄悄改写",
+    )
+
+    # M6（C3-5′）映射有效性判定必须先于 keyword 兜底，失效映射即判即清
+    validity = plan_text.find("?.takeIf { remoteById.containsKey")
+    fallback = plan_text.find("else remoteByKeyword[trigger]")
+    check(
+        validity != -1 and fallback != -1 and validity < fallback
+        and "decisions.staleMappings.forEach { trigger -> next.remove(trigger) }" in sync
+        and "decisions.creates.isEmpty()" in gate and "staleMappings" in gate,
+        "兜底之前先判映射是否仍被远端返回；判冲突的失效映射由 SyncRepository 清出映射表（C3-5′：表里不留死凭证）",
+        "失效映射仍被当所有权（同码被占会走 create 留下重复码），或死凭证永久残留导致反复重推",
+    )
+
+    # M7（C3-11）身份判定的远端集合排除软删条目
+    check(
+        "rules.filterNot { it.deleted }" in sync
+        and "val visible = visibleRules(remote)" in sync
+        and "visible.associateBy { it.id }" in sync
+        and "visible.associateBy { QuickTrigger.normalize(it.keyword) }" in sync
+        and sync.count("visibleRules(rules).associateBy") == 2
+        and "C3-11" in gate and "deleted = true" in gate,
+        "remoteById / remoteByKeyword 只由未软删的远端条目构建（C3-11：软删条目既不占码也不算所有权）",
+        "软删条目重新参与身份判定：按软删 id 推送永远复核不过，条目会永久卡在「未同步」，另有假冲突",
     )
 
 
