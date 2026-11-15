@@ -1489,9 +1489,9 @@ def check_cell_dict_chain() -> None:
     )
     check(
         "internal const val CELL_DICT_WEIGHT = 80_000" in cell_engine
-        and "UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE" in cell_engine
+        and "UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE" in cell_engine
         and "UserDictMode.PINYIN -> LookupKind.PINYIN" in cell_engine,
-        "权重 8 万（让位用户词 / 压过系统词），档位与用户词库一致",
+        "权重 8 万（让位用户词 / 压过系统词），多字条目走 WUBIPHRASE（不混入快捷短语组）",
         f"{rel(CELL_DICT_ENGINE)} 权重或档位映射缺失",
     )
     check(

@@ -93,11 +93,14 @@ class IspeechImeService : InputMethodService() {
          */
         private const val MAX_PINYIN_LENGTH = 12
 
-        /** 一次查询最多取「每页候选数 × [MAX_PAGES]」条（实际页数按取回条数计算） */
-        private const val MAX_PAGES = 3
-
         /** 设置入口（由设置模块提供，这里用类名解耦，避免强依赖） */
         private const val SETTINGS_ACTIVITY = "com.ispeech.settings.MainActivity"
+
+        /**
+         * 候选池倍数：候选条不再分页，一次取「每屏候选数 × 该倍数」条，
+         * 让用户左右拖动时能浏览到与旧版三页相同数量的候选。
+         */
+        private const val CANDIDATE_POOL_FACTOR = 3
 
         /** AI 生成时从输入框读取的最大字符数 */
         private const val AI_MAX_MESSAGE_CHARS = 1000
@@ -115,7 +118,7 @@ class IspeechImeService : InputMethodService() {
          * 九宫格一次最多展开的字母组合数。
          *
          * 每个组合都要过一次词库，9 位数字理论上 4^9 组；截断保证长数字串下的单次查询可控，
-         * 配合 [MAX_PAGES] 的候选池上限（见 lookupT9）实际开销远低于上限。
+         * 配合 `candidatePageSize` 的候选池上限（见 [lookupT9]）实际开销远低于上限。
          */
         private const val T9_PATTERN_LIMIT = 192
 
@@ -171,14 +174,12 @@ class IspeechImeService : InputMethodService() {
     /** 引擎代次：设置页 [AppContainer.invalidateEngine] 后据此重取引擎 */
     private var engineGeneration: Int = -1
 
-    /** 当前页候选 */
+    /** 当前候选（候选条横向滑动浏览的全部候选） */
     private var candidates: List<LookupCandidate> = emptyList()
 
-    /** 分页前的全部候选 */
-    private var allCandidates: List<LookupCandidate> = emptyList()
-
-    private var pageIndex: Int = 0
-    private var pageCount: Int = 1
+    /** 单次查询取回的候选条数：每屏候选数 × [CANDIDATE_POOL_FACTOR]，替代旧版三页候选池。 */
+    private val candidatePoolLimit: Int
+        get() = settings.candidatePageSize * CANDIDATE_POOL_FACTOR
 
     /** 当前候选是否为「联想」（buffer 为空但候选有效） */
     private var associationActive: Boolean = false
@@ -272,9 +273,6 @@ class IspeechImeService : InputMethodService() {
         val bar = root.findViewById<CandidateView>(R.id.candidate_bar)
         bar.onCandidatePicked = { index -> pickCandidate(index) }
         bar.onCandidateLongPressed = { index -> rememberCandidate(index) }
-        bar.onSettingsClick = { openSettings() }
-        bar.onPagePrev = { moveCandidatePage(-1) }
-        bar.onPageNext = { moveCandidatePage(1) }
         candidateView = bar
 
         // 软键盘
@@ -599,15 +597,10 @@ class IspeechImeService : InputMethodService() {
             return true
         }
 
-        // - / = 翻候选页（对齐桌面输入法习惯）
-        if (keyCode == KeyEvent.KEYCODE_MINUS) {
-            if (pageCount <= 1) return false
-            moveCandidatePage(-1)
-            return true
-        }
-        if (keyCode == KeyEvent.KEYCODE_EQUALS) {
-            if (pageCount <= 1) return false
-            moveCandidatePage(1)
+        // - / = 左右滚动候选条（候选条不再分页，对齐桌面输入法的「翻候选」习惯）
+        if (keyCode == KeyEvent.KEYCODE_MINUS || keyCode == KeyEvent.KEYCODE_EQUALS) {
+            if (candidates.size <= 1) return false
+            candidateView?.scrollCandidates(if (keyCode == KeyEvent.KEYCODE_MINUS) -1 else 1)
             return true
         }
 
@@ -844,26 +837,22 @@ class IspeechImeService : InputMethodService() {
     private fun refreshT9Candidates() {
         val digits = t9Digits
         val seq = ++t9Seq
-        pageIndex = 0
         associationActive = false
         statusText = null
         if (digits.isEmpty()) {
             codeOverride = null
-            allCandidates = emptyList()
             candidates = emptyList()
-            pageCount = 1
             currentInputConnection?.setComposingText("", 0)
             renderCandidateView()
             return
         }
         codeOverride = digits
         currentInputConnection?.setComposingText(digits, 1)
-        val limit = settings.candidatePageSize * MAX_PAGES
+        val limit = candidatePoolLimit
         serviceScope.launch {
             val found = withContext(Dispatchers.Default) { lookupT9(digits, limit) }
             if (seq != t9Seq || t9Digits != digits) return@launch
-            allCandidates = found
-            applyPage()
+            candidates = found
             renderCandidateView()
         }
     }
@@ -929,9 +918,6 @@ class IspeechImeService : InputMethodService() {
         t9Seq++
         lastCommit = out
         candidates = emptyList()
-        allCandidates = emptyList()
-        pageIndex = 0
-        pageCount = 1
         associationActive = false
         voiceActive = false
         codeOverride = null
@@ -970,9 +956,6 @@ class IspeechImeService : InputMethodService() {
     private fun clear() {
         buffer = ""
         candidates = emptyList()
-        allCandidates = emptyList()
-        pageCount = 1
-        pageIndex = 0
         associationActive = false
         codeOverride = null
         currentInputConnection?.setComposingText("", 0)
@@ -1070,11 +1053,10 @@ class IspeechImeService : InputMethodService() {
         return if (hasDict) lookup else engine
     }
 
-    /** 组合码 / 联想文本变化后重新查询候选并回到第一页 */
+    /** 组合码 / 联想文本变化后重新查询候选 */
     private fun refreshCandidates() {
         // 设置页 / 同步页改动引擎相关项后，下一次候选刷新即重建引擎，无需重启输入法
         refreshEngineIfStale()
-        pageIndex = 0
         if (buffer.isEmpty()) {
             if (associationActive && lastCommit.isNotEmpty()) {
                 // 联想可能因词库/设置变化查不到：查空时要复位联想状态，
@@ -1088,19 +1070,16 @@ class IspeechImeService : InputMethodService() {
                 // 既没有组合码也没有联想：顺手复位联想状态，避免残留导致空格变成死键
                 clearAssociation()
                 candidates = emptyList()
-                allCandidates = emptyList()
-                pageCount = 1
                 currentInputConnection?.setComposingText("", 0)
                 renderCandidateView()
             }
             return
         }
-        val limit = settings.candidatePageSize * MAX_PAGES
-        allCandidates = lookupSource()?.lookup(buffer, limit).orEmpty().withoutTofu()
+        val limit = candidatePoolLimit
+        candidates = lookupSource()?.lookup(buffer, limit).orEmpty().withoutTofu()
         recordQuery()
         associationActive = false
         codeOverride = null
-        applyPage()
         currentInputConnection?.setComposingText(markedCode(), 1)
         renderCandidateView()
     }
@@ -1117,39 +1096,16 @@ class IspeechImeService : InputMethodService() {
         renderCandidateView()
     }
 
-    /** 查询联想候选并切页；返回是否命中 */
+    /** 查询联想候选；返回是否命中 */
     private fun lookupRelated(text: String): Boolean {
         if (!settings.association) return false
         val tail = text.trim().takeLast(1)
-        allCandidates = if (tail.isEmpty()) {
+        candidates = if (tail.isEmpty()) {
             emptyList()
         } else {
-            engine?.related(tail, settings.candidatePageSize * MAX_PAGES).orEmpty().withoutTofu()
+            engine?.related(tail, candidatePoolLimit).orEmpty().withoutTofu()
         }
-        pageIndex = 0
-        applyPage()
-        return allCandidates.isNotEmpty()
-    }
-
-    /** 按当前页大小切出本页候选并计算总页数 */
-    private fun applyPage() {
-        val size = settings.candidatePageSize.coerceAtLeast(1)
-        // 页数按真实候选数算，不再用 MAX_PAGES 截断：截断会让排在后面的候选永远翻不到，
-        // MAX_PAGES 只用来约束查询条数 limit（见 refreshCandidates / lookupRelated）。
-        pageCount = if (allCandidates.isEmpty()) 1 else (allCandidates.size + size - 1) / size
-        if (pageIndex >= pageCount) pageIndex = 0
-        val from = pageIndex * size
-        val to = (from + size).coerceAtMost(allCandidates.size)
-        candidates = if (from >= allCandidates.size) emptyList() else allCandidates.subList(from, to).toList()
-    }
-
-    /** 候选翻页（翻页器 / 硬件键盘 - =） */
-    private fun moveCandidatePage(offset: Int) {
-        if (pageCount <= 1) return
-        val next = pageIndex + offset
-        pageIndex = ((next % pageCount) + pageCount) % pageCount
-        applyPage()
-        renderCandidateView()
+        return candidates.isNotEmpty()
     }
 
     /** 点击候选条第 [index] 项：上屏其 insertText */
@@ -1171,10 +1127,12 @@ class IspeechImeService : InputMethodService() {
         return spanned
     }
 
-    /** 同步候选条：高亮组合码 + 候选列表 + 分页信息 */
+    /** 同步候选条：高亮组合码 + 候选列表 */
     private fun renderCandidateView() {
-        val code = statusText ?: codeOverride ?: buffer
-        candidateView?.update(code, candidates, pageIndex, pageCount)
+        // codeOverride（「联想」「语音」「快捷短语」「AI回复」等）仍作为状态机参与上屏判断，
+        // 但不再渲染到候选条左侧，避免候选区出现来源标识。
+        val code = statusText ?: buffer
+        candidateView?.update(code, candidates)
     }
 
     /** 清掉联想候选（用户继续输入时调用） */
@@ -1182,10 +1140,7 @@ class IspeechImeService : InputMethodService() {
         if (!associationActive) return
         associationActive = false
         codeOverride = if (codeOverride == "联想") null else codeOverride
-        allCandidates = emptyList()
         candidates = emptyList()
-        pageCount = 1
-        pageIndex = 0
     }
 
     /** 上屏未完成的组合（切面板、按其他键之前调用） */
@@ -1551,9 +1506,6 @@ class IspeechImeService : InputMethodService() {
         statusText = getString(R.string.voice_listening)
         codeOverride = "语音"
         candidates = emptyList()
-        allCandidates = emptyList()
-        pageCount = 1
-        pageIndex = 0
         renderCandidateView()
         controller.start(
             asr = asr,
@@ -1612,9 +1564,6 @@ class IspeechImeService : InputMethodService() {
         voiceActive = false
         if (codeOverride == "语音") codeOverride = null
         candidates = emptyList()
-        allCandidates = emptyList()
-        pageCount = 1
-        pageIndex = 0
         if (text.isBlank()) {
             renderCandidateView()
             return
@@ -1654,9 +1603,6 @@ class IspeechImeService : InputMethodService() {
         statusText = getString(R.string.voice_listening)
         codeOverride = "语音"
         candidates = emptyList()
-        allCandidates = emptyList()
-        pageCount = 1
-        pageIndex = 0
         renderCandidateView()
         engine.start(
             onPartial = { text -> showVoiceCandidate(text) },
@@ -1698,9 +1644,6 @@ class IspeechImeService : InputMethodService() {
         voiceActive = false
         if (codeOverride == "语音") codeOverride = null
         candidates = emptyList()
-        allCandidates = emptyList()
-        pageCount = 1
-        pageIndex = 0
         statusText = null
     }
 
@@ -1758,9 +1701,6 @@ class IspeechImeService : InputMethodService() {
                     aiReplyFromModel = false
                     statusText = null
                     codeOverride = "快捷短语"
-                    allCandidates = emptyList()
-                    pageCount = 1
-                    pageIndex = 0
                     candidates = phrases
                     renderCandidateView()
                     return@launch
@@ -1793,9 +1733,6 @@ class IspeechImeService : InputMethodService() {
                         aiReplyFromModel = true
                         statusText = null
                         codeOverride = "常用回复"
-                        allCandidates = emptyList()
-                        pageCount = 1
-                        pageIndex = 0
                         candidates = listOf(
                             LookupCandidate(
                                 code = "learned",
@@ -1841,9 +1778,6 @@ class IspeechImeService : InputMethodService() {
                 aiReplyFromModel = true
                 statusText = null
                 codeOverride = "AI回复"
-                allCandidates = emptyList()
-                pageCount = 1
-                pageIndex = 0
                 candidates = listOf(
                     LookupCandidate(
                         code = "ai",
@@ -2041,9 +1975,6 @@ class IspeechImeService : InputMethodService() {
         t9Digits = ""
         t9Seq++
         candidates = emptyList()
-        allCandidates = emptyList()
-        pageIndex = 0
-        pageCount = 1
         associationActive = false
         lastCommit = ""
         panelKeyword = ""
