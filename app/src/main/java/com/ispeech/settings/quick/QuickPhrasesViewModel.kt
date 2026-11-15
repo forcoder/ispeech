@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ispeech.R
 import com.ispeech.data.CsBabyAuthStore
+import com.ispeech.data.LocalRuleSyncPlan
 import com.ispeech.data.PhraseCsvImport
 import com.ispeech.data.PhraseCsvImportResult
 import com.ispeech.data.PhraseMatch
@@ -15,11 +16,14 @@ import com.ispeech.data.RemoteKeywordRule
 import com.ispeech.data.SyncRepository
 import com.ispeech.data.unescapeLineText
 import com.ispeech.di.AppContainer
+import com.ispeech.settings.triggerIssueRes
 import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickMatchMode
 import com.ispeech.engine.QuickOverride
 import com.ispeech.engine.QuickSource
+import com.ispeech.engine.QuickTriggerIssue
+import com.ispeech.engine.QuickTrigger
 import com.ispeech.data.remote.RuleUpsertRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,10 +34,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** 远端规则的展示信息：原始远端条目 + 用户覆盖的快捷字母（未覆盖为 null）。 */
+/**
+ * 远端规则的展示信息：原始远端条目 + 用户覆盖的快捷字母（未覆盖为 null）。
+ *
+ * [conflict] = 同 trigger 但本地正文与云端不一致（ADR-0002 C2-5）：卡片要挂冲突徽标，
+ * 并给出「采用云端正文」/「以本地为准并更新云端」两个显式动作，默认不改写任何一侧。
+ */
 data class RemoteRuleInfo(
     val original: QuickEntry,
     val overrideTrigger: String?,
+    val conflict: Boolean = false,
 )
 
 /** 快捷短语页界面状态。 */
@@ -134,44 +144,19 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
     }.getOrElse { emptyList() }
 
     /**
-     * 合并用户 / 远端规则用于展示。
+     * 合并用户 / 远端规则用于展示（判定见 [QuickDisplayMerge.merge]，可单测）。
      *
-     * 用户文件里 label + content 与某条远端规则相同的条目视为该规则的「快捷字母覆盖」：
-     * 用覆盖条目的 trigger / mode / kind 替换远端条目展示，并从用户卡片中移除，避免同一条短语
-     * 出现两次；返回的 [DisplayMerge.infoById] 以展示 id 为键，供 UI 判断来源与「恢复默认」。
-     * 没匹配到远端的用户条目（普通规则 / 远端已删除后遗留的覆盖）照常展示。
+     * 用户文件里归一化 trigger 与某条远端规则相同的条目视为该规则的「快捷字母覆盖」：
+     * 折叠成一张卡片、正文取本地内容（ADR-0002 C2-3），并从用户卡片中移除，避免同一条短语
+     * 出现两次；正文不一致时标记冲突（C2-5）。返回的 [DisplayMerge.infoById] 以展示 id 为键，
+     * 供 UI 判断来源与「恢复默认」，[DisplayMerge.originalIdById] 用于把覆盖前的使用记录并过来。
      */
     private fun mergeForDisplay(
         user: List<QuickEntry>,
         remote: List<QuickEntry>,
     ): DisplayMerge {
-        val overrides = HashMap<Pair<String, String>, ArrayDeque<QuickEntry>>()
-        user.forEach { entry ->
-            overrides.getOrPut(entry.label to entry.content) { ArrayDeque() }.addLast(entry)
-        }
-        val display = ArrayList<QuickEntry>(user.size + remote.size)
-        val infoById = LinkedHashMap<String, RemoteRuleInfo>()
-        val originalIdById = LinkedHashMap<String, String>()
-        val consumed = HashSet<String>()
-        remote.forEach { rule ->
-            val override = overrides[rule.label to rule.content]?.removeFirstOrNull()
-            val effective = if (override == null) {
-                rule
-            } else {
-                consumed.add(override.trigger)
-                rule.copy(
-                    trigger = override.trigger,
-                    mode = override.mode,
-                    kind = override.kind,
-                )
-            }
-            val displayId = PhraseUsageStore.idOf(effective)
-            infoById[displayId] = RemoteRuleInfo(rule, override?.trigger)
-            originalIdById[displayId] = PhraseUsageStore.idOf(rule)
-            display.add(effective)
-        }
-        display.addAll(user.filterNot { it.trigger in consumed })
-        return DisplayMerge(display, infoById, originalIdById)
+        val merged = QuickDisplayMerge.merge(user, remote)
+        return DisplayMerge(merged.entries, merged.infoById, merged.originalIdById)
     }
 
     /** 搜索栏输入：实时过滤 + 联想。 */
@@ -299,20 +284,26 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
      * 给远端规则设置快捷字母：不改远端文件，而是在用户规则里写一条覆盖条目。
      *
      * 覆盖条目复制远端的 label / content / kind，trigger 换成用户选的快捷字母，
-     * weight 比远端高 [REMOTE_OVERRIDE_WEIGHT_BONUS]，确保 [CompositeEngine] 全局排序后
-     * 先于原远端条目被按 display 去重。mode 固定 prefix：快捷字母按前缀输入即可命中，
-     * 不能沿用远端的 regex / contains 语义（trigger 是字母，不是正则 / 中文关键词）。
+     * weight 比远端高 [REMOTE_OVERRIDE_WEIGHT_BONUS]（同档内的相对顺序）；
+     * **身份由 trigger 判定**（ADR-0002 C2-2），不靠「正文与远端完全相同」这种脆弱等价。
+     *
+     * mode 按 [QuickTrigger.overrideMode]：≤4 位 PREFIX（前缀即可命中），
+     * >4 位 EXACT（五笔态缓冲区只有 4 位，前缀匹配会让长正文压掉用户正在输入的词，C1-6）。
+     * 非法输入不静默丢弃（C1-3）：把原因写进 tip，调用方的禁用原因是另一道提示。
      */
     fun setRemoteShortcut(original: QuickEntry, trigger: String) {
-        val shortcut = trigger.trim().lowercase()
-        // 防御性校验：正常入口已在弹窗里禁用非法输入
-        if (shortcut.length !in 2..4 || shortcut.any { it !in 'a'..'z' }) return
+        val shortcut = QuickTrigger.normalize(trigger)
+        val issue = QuickTrigger.issue(shortcut)
+        if (issue != null) {
+            _uiState.update { it.copy(tip = app.getString(R.string.quick_trigger_invalid, reasonText(issue))) }
+            return
+        }
         val override = QuickEntry(
             trigger = shortcut,
             label = original.label,
             content = original.content,
             weight = original.weight + REMOTE_OVERRIDE_WEIGHT_BONUS,
-            mode = QuickMatchMode.PREFIX,
+            mode = QuickTrigger.overrideMode(shortcut),
             kind = original.kind,
             source = QuickSource.USER,
         )
@@ -327,6 +318,59 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
                 dirty = true,
                 tip = app.getString(R.string.quick_remote_override_set, shortcut),
             ).withMatches()
+        }
+    }
+
+    /** 禁用原因 / 错误原因文案（C1-7：按钮禁用时必须说明「还差什么」），资源映射与界面共用一处。 */
+    internal fun reasonText(issue: QuickTriggerIssue): String = app.getString(triggerIssueRes(issue))
+
+    /**
+     * 冲突动作「采用云端正文」（ADR-0002 决策 2）：只改本地正文，云端一个字节都不动。
+     *
+     * 替换前冲突详情里两侧正文都逐字可读；收藏跟着正文走（C2-7），
+     * 次数由 [QuickDisplayMerge.originalIdById] 在展示层并入，不重复累加。
+     */
+    fun adoptRemoteContent(local: QuickEntry, remoteContent: String) {
+        if (local.content == remoteContent) return
+        val store = AppContainer.phraseUsage(app)
+        val updated = local.copy(content = remoteContent, label = local.label, source = QuickSource.USER)
+        val oldId = PhraseUsageStore.idOf(local)
+        val newId = PhraseUsageStore.idOf(updated)
+        if (store.isStarred(oldId) && !store.isStarred(newId)) store.toggleStar(updated)
+        _uiState.update { state ->
+            val list = state.entries.toMutableList()
+            val index = list.indexOfFirst { it.trigger == local.trigger }
+            if (index >= 0) list[index] = updated else list.add(updated)
+            state.copy(
+                entries = list,
+                dirty = true,
+                tip = app.getString(R.string.quick_conflict_adopted, local.trigger),
+            ).withMatches()
+        }
+        // 本地正文变了：让输入法重建引擎，冲突随正文一致自动消失
+        AppContainer.invalidateEngine()
+    }
+
+    /**
+     * 冲突动作「以本地为准并更新云端」（ADR-0002 C3-7）：唯一能覆盖云端正文的用户显式入口。
+     *
+     * 只推这一条，推后复验；未生效不清空冲突。
+     */
+    fun overwriteRemoteWithLocal(trigger: String) {
+        if (_uiState.value.saving) return
+        _uiState.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            val applied = runCatching { SyncRepository.resolveConflictWithLocal(app, trigger) }.getOrDefault(false)
+            _uiState.update {
+                it.copy(
+                    saving = false,
+                    tip = app.getString(
+                        if (applied) R.string.quick_conflict_overwritten else R.string.quick_conflict_overwrite_failed,
+                        trigger,
+                    ),
+                )
+            }
+            if (applied) AppContainer.invalidateEngine()
         }
     }
 
@@ -395,8 +439,18 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
             }
     }
 
-    /** 同步结果文案：pending 表示远端没生效（后端不支持修改 / 删除），如实说明而不是报成功。 */
+    /**
+     * 同步结果文案：pending 表示远端没生效（后端不支持修改 / 删除），如实说明而不是报成功。
+     *
+     * 冲突分支必须排在 partial 之前且**不复用** `quick_synced_partial`（C3-3）：
+     * 「后端不支持修改」和「有同码冲突没上传」是两件事，混成一条文案会让人以为等等看就好。
+     */
     private fun syncTip(count: Int, report: SyncRepository.RuleSyncReport): String = when {
+        report.conflicts > 0 -> app.getString(
+            R.string.quick_synced_conflict,
+            report.conflicts,
+            report.created,
+        )
         report.pushed == 0 -> app.getString(R.string.quick_synced_none, count)
         report.pending > 0 -> app.getString(
             R.string.quick_synced_partial,
@@ -566,4 +620,54 @@ internal object QuickPhraseCodec {
     /** 内容字段保留换行语义（写作 \n 字面量，与 SyncRepository 一致）。 */
     private fun sanitizeContent(value: String): String =
         value.replace("\r", "").replace("\n", "\\n").replace("\t", "\\t")
+}
+
+/**
+ * 展示层合并结果（纯计算、可单测）。
+ */
+internal data class QuickDisplayMerged(
+    val entries: List<QuickEntry>,
+    val infoById: Map<String, RemoteRuleInfo>,
+    val originalIdById: Map<String, String>,
+)
+
+/**
+ * 用户 / 远端规则的展示折叠（ADR-0002 C2-3 / C2-5 / C2-7）。
+ *
+ * 折叠键是**归一化 trigger**，不再是 label + content：正文与名称都退出身份判定（C2-2），
+ * 否则同一条远端规则会因为用户改了正文而分裂成两张卡片。
+ * 折叠后卡片正文取本地内容（本地为准），正文不等时打冲突标记，两个方向都由用户显式选择。
+ */
+internal object QuickDisplayMerge {
+
+    fun merge(user: List<QuickEntry>, remote: List<QuickEntry>): QuickDisplayMerged {
+        val byTrigger = LinkedHashMap<String, ArrayDeque<QuickEntry>>()
+        user.forEach { entry ->
+            val trigger = QuickTrigger.normalize(entry.trigger)
+            if (trigger.isEmpty()) return@forEach
+            byTrigger.getOrPut(trigger) { ArrayDeque() }.addLast(entry)
+        }
+        val display = ArrayList<QuickEntry>(user.size + remote.size)
+        val infoById = LinkedHashMap<String, RemoteRuleInfo>()
+        val originalIdById = LinkedHashMap<String, String>()
+        val foldedTriggers = HashSet<String>()
+        remote.forEach { rule ->
+            val trigger = QuickTrigger.normalize(rule.trigger)
+            val local = if (trigger.isEmpty()) null else byTrigger[trigger]?.removeFirstOrNull()
+            if (local != null) foldedTriggers.add(trigger)
+            // 本地为准：整条取本地内容（含 label / mode / kind），来源仍标注为远端已覆盖
+            val effective = local ?: rule
+            val displayId = PhraseUsageStore.idOf(effective)
+            infoById[displayId] = RemoteRuleInfo(
+                original = rule,
+                overrideTrigger = local?.trigger,
+                conflict = local != null && !LocalRuleSyncPlan.contentEquals(local.content, rule.content),
+            )
+            // 使用记录 id 迁移：覆盖 / 冲突都会让 idOf 变化，收藏与次数并到新 id（C2-7）
+            originalIdById[displayId] = PhraseUsageStore.idOf(rule)
+            display.add(effective)
+        }
+        display.addAll(user.filterNot { QuickTrigger.normalize(it.trigger) in foldedTriggers })
+        return QuickDisplayMerged(display, infoById, originalIdById)
+    }
 }

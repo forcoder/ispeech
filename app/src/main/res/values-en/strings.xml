@@ -67,7 +67,7 @@
     <string name="quick_edit_rule">Edit Quick Phrase</string>
     <string name="quick_trigger">Shortcut letters</string>
     <string name="quick_trigger_hint">e.g. ycsf — type ycsf in the IME and this phrase is the first candidate</string>
-    <string name="quick_trigger_error">Use 2–4 lowercase letters (Wubi codes are capped at 4)</string>
+    <string name="quick_trigger_error">Use 2–12 lowercase letters (a–z)</string>
     <string name="quick_label">Label</string>
     <string name="quick_content">Content</string>
     <string name="quick_match_mode">Match mode</string>
@@ -98,6 +98,26 @@
     <string name="quick_remote_restore">Restore default</string>
     <string name="quick_remote_override_set">Shortcut letters “%1$s” set. Tap Save &amp; Sync to write locally.</string>
     <string name="quick_remote_override_restored">Remote default shortcut restored. Tap Save &amp; Sync to write locally.</string>
+    <!-- ADR-0002 C1-7 / C1-9 / C2-5 / C3-3 -->
+    <string name="quick_trigger_invalid">Shortcut letters not usable: %1$s</string>
+    <string name="quick_trigger_reason_empty">nothing typed yet</string>
+    <string name="quick_trigger_reason_short">at least 2 letters</string>
+    <string name="quick_trigger_reason_long">at most 12 letters — longer cannot be typed in any mode</string>
+    <string name="quick_trigger_reason_letters">lowercase a–z only</string>
+    <string name="quick_trigger_reachable_hint">Longer than 4 letters: Wubi cannot type it fully — pick it from the phrase panel filter, or switch to pinyin and type the whole shortcut</string>
+    <string name="quick_trigger_prefix_long_content_warn">This shortcut is longer than 4 letters and uses prefix/contains matching: the long text can become the top candidate, and space commits all of it</string>
+    <string name="quick_source_remote_overridden">Remote · overridden</string>
+    <string name="quick_conflict_badge">Conflict</string>
+    <string name="quick_conflict_detail_title">%1$s: local and cloud text differ</string>
+    <string name="quick_conflict_local_label">Local text</string>
+    <string name="quick_conflict_remote_label">Cloud text</string>
+    <string name="quick_conflict_adopt_remote">Use cloud text</string>
+    <string name="quick_conflict_push_local">Keep local and update cloud</string>
+    <string name="quick_conflict_adopted">Local text replaced with the cloud text (%1$s); conflict cleared</string>
+    <string name="quick_conflict_overwritten">Cloud updated from local text (%1$s)</string>
+    <string name="quick_conflict_overwrite_failed">Cloud not updated (%1$s): the backend cannot modify it or the network failed; the conflict stays</string>
+    <string name="quick_synced_conflict">%1$d rule(s) conflict with the cloud and were not uploaded (%2$d created): pick which side to keep on the card</string>
+    <string name="sync_upload_conflict">%1$d rule(s) conflict with the cloud and were not uploaded (%2$d created)</string>
     <string name="quick_panel_search_hint">Type to search phrases (initials ok)</string>
     <string name="quick_panel_search_active">🔍 %1$s</string>
 
