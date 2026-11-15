@@ -85,8 +85,8 @@ object SyncRepository {
      * 才计入 applied 并更新映射表，未生效的部分如实上报为 pending，不做「假装成功」。
      *
      * 写安全线（ADR-0002 C3）：哪些条目进新增、哪些进修改、哪些只补映射、哪些算冲突，
-     * 全部由 [LocalRuleSyncPlan.decide] 决定；没有映射记录的同码远端规则一律记冲突，
-     * 不会被本地正文覆盖。
+     * 全部由 [LocalRuleSyncPlan.decide] 决定；没有**有效**映射记录的同码远端规则一律记冲突，
+     * 不会被本地正文覆盖，也不会另建一条同码重复规则（C3-5′）。
      */
     suspend fun pushLocalRules(context: Context): RuleSyncReport = withContext(Dispatchers.IO) {
         var auth = CsBabyAuthStore.load(context)
@@ -109,8 +109,11 @@ object SyncRepository {
         val known = RemoteRuleMap.load(mapFile)
         val next = LinkedHashMap(known)
 
-        val remoteById = remote.associateBy { it.id }
-        val remoteByKeyword = remote.associateBy { QuickTrigger.normalize(it.keyword) }
+        // C3-11：参与身份判定的只有未软删的远端条目。软删条目既不占码，也不算所有权 ——
+        // 否则映射指向软删 id 时会按软删 id 推送，复核永远不通过，条目永久卡在「未同步」。
+        val visible = visibleRules(remote)
+        val remoteById = visible.associateBy { it.id }
+        val remoteByKeyword = visible.associateBy { QuickTrigger.normalize(it.keyword) }
 
         val decisions = LocalRuleSyncPlan.decide(
             locals = locals,
@@ -168,6 +171,9 @@ object SyncRepository {
         decisions.bindings.forEach { binding ->
             next[binding.trigger] = RemoteRuleRef(binding.remoteId, binding.fingerprint)
         }
+        // C3-5′：判冲突的失效映射既不 create 也不 binding，映射表里那条死凭证没人改写。
+        // orphan 清理循环又被 `trigger in localTriggers` 挡掉，不清就会永久残留 —— 表里不留死凭证。
+        decisions.staleMappings.forEach { trigger -> next.remove(trigger) }
         decisions.updates.forEach { update ->
             val trigger = QuickTrigger.normalize(update.entry.trigger)
             updates.add(update.entry.toPushRule(update.remoteId))
@@ -245,7 +251,10 @@ object SyncRepository {
             val mapFile = File(context.filesDir, REMOTE_RULE_MAP_FILE_NAME)
             val known = RemoteRuleMap.load(mapFile)
             val remote = runCatching { client.listRules(auth) }.getOrNull().orEmpty()
-            val target = remoteById(remote)[known[normalized]?.id.orEmpty()]
+            // 身份口径与 decide() 一致（C3-5′ / C3-11）：映射 id 必须是远端仍返回的未软删条目，
+            // 空 id 不是合法目标 —— 否则远端返回过一条 id 为空的规则就会被当成覆盖对象。
+            val mappedId = known[normalized]?.id?.takeIf { it.isNotBlank() }
+            val target = mappedId?.let { remoteById(remote)[it] }
                 ?: remoteByKeyword(remote)[normalized]
                 ?: return@withContext false
 
@@ -283,11 +292,20 @@ object SyncRepository {
             )
         }
 
+    /**
+     * 参与身份判定的远端集合（ADR-0002 C3-11）：`listRules` 返回中未软删的条目。
+     *
+     * 软删条目既不占码也不算所有权：让它进索引，一条被别的设备删掉的规则会被当成合法推送目标，
+     * 而推送后的复核要求 `!deleted`，于是那条本地条目永远停在「未同步」——用户没有任何出路。
+     */
+    private fun visibleRules(rules: List<RemoteKeywordRule>): List<RemoteKeywordRule> =
+        rules.filterNot { it.deleted }
+
     private fun remoteById(rules: List<RemoteKeywordRule>): Map<String, RemoteKeywordRule> =
-        rules.associateBy { it.id }
+        visibleRules(rules).associateBy { it.id }
 
     private fun remoteByKeyword(rules: List<RemoteKeywordRule>): Map<String, RemoteKeywordRule> =
-        rules.associateBy { QuickTrigger.normalize(it.keyword) }
+        visibleRules(rules).associateBy { QuickTrigger.normalize(it.keyword) }
 
     /** 读取本地用户自定义规则（filesDir/quick_phrases_user.txt），失败返回空列表。 */
     private fun readLocalUserEntries(context: Context): List<QuickEntry> {

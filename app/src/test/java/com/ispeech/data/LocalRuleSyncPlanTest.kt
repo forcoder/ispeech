@@ -7,7 +7,6 @@ import com.ispeech.engine.QuickSource
 import com.ispeech.engine.QuickTrigger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -40,12 +39,14 @@ class LocalRuleSyncPlanTest {
         content: String,
         matchType: String = "EXACT",
         priority: Int = 0,
+        deleted: Boolean = false,
     ) = RemoteKeywordRule(
         id = id,
         keyword = keyword,
         matchType = matchType,
         replyTemplate = content,
         priority = priority,
+        deleted = deleted,
     )
 
     private fun plan(
@@ -55,8 +56,9 @@ class LocalRuleSyncPlanTest {
     ) = LocalRuleSyncPlan.decide(
         locals = locals,
         known = known,
-        remoteById = remote.associateBy { it.id },
-        remoteByKeyword = remote.associateBy { QuickTrigger.normalize(it.keyword) },
+        // C3-11：与 SyncRepository 同口径 —— 身份判定只看未软删的远端条目
+        remoteById = remote.filterNot { it.deleted }.associateBy { it.id },
+        remoteByKeyword = remote.filterNot { it.deleted }.associateBy { QuickTrigger.normalize(it.keyword) },
         // 单测用正文本身当指纹，映射记录按同一口径构造，避免指纹算法细节干扰裁决断言
         localFingerprintOf = { it.content },
         remoteFingerprintOf = { it.replyTemplate },
@@ -78,6 +80,7 @@ class LocalRuleSyncPlanTest {
         assertEquals(1, decisions.conflicts.size)
         assertTrue("同码已被占用，不能另建一条", decisions.creates.isEmpty())
         assertTrue("正文不一致，不能顺手补映射", decisions.bindings.isEmpty())
+        assertTrue("本来就没有映射，谈不上失效凭证", decisions.staleMappings.isEmpty())
 
         val conflict = decisions.conflicts.single()
         assertEquals("dtwsl", conflict.trigger)
@@ -168,14 +171,15 @@ class LocalRuleSyncPlanTest {
     }
 
     /**
-     * C3-5 逐字实现：「有映射 + 远端已无该 id → 走 create 分支」。
+     * C3-5′（2026-11-15 裁决）：「映射 id 已消失」不再等价于「码空闲」。
      *
-     * 这里刻意让映射指向一个已消失的 id、同时云端存在别人建的 `dtwsl`：要钉住的是
-     * **绝不向别人的 id 推送**（updates 里不能出现 `r2`）。至于「新建会不会造成同码重复」，
-     * ADR 只写了 create、没写这种组合的处置，已在 issue 追问架构师，不在此自行改判。
+     * 要钉住两件事：① 绝不向别人的 id 推送（updates 里不能出现 `r2`）—— 这条从上一版保留，
+     * 它仍是要害；② 不新建同码重复规则。云端同 keyword 两条时，本地主键（C2-1 归一化 trigger）
+     * 与 `associateBy` 索引都只能留一条，命中哪条取决于服务端返回顺序 —— 那是把可发现的冲突
+     * 换成静默二义，比冲突更糟。失效映射同时进 staleMappings，由调用方从映射表清掉。
      */
     @Test
-    fun `C3-5 映射指向的远端规则已不存在时走新建且不碰同码他人规则`() {
+    fun `C3-5修订 映射失效且同码被他人占用时判冲突，不新建重复码`() {
         val decisions = plan(
             locals = listOf(local("dtwsl", "本地正文")),
             known = known("dtwsl", "gone", "上次同步的旧正文"),
@@ -184,7 +188,52 @@ class LocalRuleSyncPlanTest {
 
         assertTrue("映射失效不能退成 keyword 兜底覆盖", decisions.updates.isEmpty())
         assertTrue("create 分支不得写进别人的 id", decisions.updates.none { it.remoteId == "r2" })
+        assertTrue("同码已被占用，不得新建第二条同码规则", decisions.creates.isEmpty())
+        assertTrue("正文不一致，不能顺手把映射改绑到占用者", decisions.bindings.isEmpty())
+        assertEquals("r2", decisions.conflicts.single().remoteId)
+        assertEquals(listOf("dtwsl"), decisions.staleMappings)
+    }
+
+    @Test
+    fun `C3-5修订 映射失效且同码正文一致时只把映射改绑到占用者`() {
+        val decisions = plan(
+            locals = listOf(local("dtwsl", "同一份正文")),
+            known = known("dtwsl", "gone", "同一份正文"),
+            remote = listOf(rule("r2", "dtwsl", "同一份正文")),
+        )
+
+        assertTrue(decisions.creates.isEmpty())
+        assertTrue(decisions.updates.isEmpty())
+        assertTrue(decisions.conflicts.isEmpty())
+        assertEquals("r2", decisions.bindings.single().remoteId)
+        // binding 分支自己就会改写 next[trigger]，死凭证被换成占用者的合法 id
+        assertTrue(decisions.staleMappings.isEmpty())
+    }
+
+    @Test
+    fun `C3-11 占码的远端条目已软删时不算占用，正常新建`() {
+        val decisions = plan(
+            locals = listOf(local("dtwsl", "本地正文")),
+            known = emptyMap(),
+            remote = listOf(rule("r2", "dtwsl", "别人删掉的正文", deleted = true)),
+        )
+
         assertEquals(1, decisions.creates.size)
+        assertTrue("软删条目不占码，不该报假冲突", decisions.conflicts.isEmpty())
+        assertTrue(decisions.updates.isEmpty())
+    }
+
+    @Test
+    fun `C3-11 映射指向软删 id 时不进 updates，改走新建`() {
+        val decisions = plan(
+            locals = listOf(local("dtwsl", "用户改过的新正文")),
+            known = known("dtwsl", "gone", "上次同步的旧正文"),
+            remote = listOf(rule("gone", "dtwsl", "上次同步的旧正文", deleted = true)),
+        )
+
+        assertTrue("按软删 id 推送永远复核不过，条目会永久卡在「未同步」", decisions.updates.isEmpty())
+        assertEquals(1, decisions.creates.size)
+        assertTrue(decisions.conflicts.isEmpty())
     }
 
     @Test
@@ -221,13 +270,6 @@ class LocalRuleSyncPlanTest {
         val conflict = conflicts.single()
         assertEquals("dtwsl", conflict.trigger)
         assertEquals("r1", conflict.remoteId)
-    }
-
-    @Test
-    fun `C3-7 采用云端正文时本地副本换个未占用的码`() {
-        assertEquals("dtwslb", LocalRuleSyncPlan.backupTrigger(setOf("dtwsl"), "dtwsl"))
-        assertEquals("dtwslc", LocalRuleSyncPlan.backupTrigger(setOf("dtwsl", "dtwslb"), "dtwsl"))
-        assertNull("12 位再加后缀就超限", LocalRuleSyncPlan.backupTrigger(setOf("abcdefghijkl"), "abcdefghijkl"))
     }
 
     @Test
