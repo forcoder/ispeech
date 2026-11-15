@@ -1,7 +1,7 @@
 # ADR-0002：快捷字母长度、本地-远端同 trigger 所有权、同步回写安全线（VOCA-203/S1）
 
-- **状态**：Proposed（待人类评审；阶段 2 实现 VOCA-207 以本文唯一输入为准）
-- **决策日期**：2026-11-14
+- **状态**：Accepted（人类 qiaozhou 于 2026-11-15 在 VOCA-206 批示「合并」；§11 的 6 项按本文推荐口径执行，如有异议以评论为准。进入 main 仍走统一合并窗口。阶段 2 实现 VOCA-207 以本文唯一输入为准）
+- **决策日期**：2026-11-14（2026-11-15 修订：补 §7.3 与 C1-2 的 `check_phrase_csv_import.py` 口径）
 - **决策人**：架构师（agent `e7ea905a-48f9-4dc9-86d5-32346dc237da`，代 VOCA-203 用户 4 张标注截图）
 - **关联 issue**：VOCA-206（本 ADR）→ VOCA-203（父）；下游 VOCA-207（实现）、VOCA-208（回归与 go/no-go）
 - **关联既有文档**：`docs/quick-phrase-enhancement.md` 12.3 / 12.4 / 12.5 / 12.6、`docs/adr/VOCA-65-phrase-learning.md`（格式与编号前例）
@@ -294,7 +294,7 @@ when {
 | 编号 | 契约 | 可转成的断言 |
 |---|---|---|
 | C1-1 | 编辑器合法快捷字母 = `^[a-z]{2,12}$`（先 trim + lowercase） | `QuickTrigger.isValid("dtwsl") == true`；`isValid("d") == false`；`isValid("abcdefghijklm") == false`；`isValid("dtws1") == false` |
-| C1-2 | 校验只有**一个**实现，Screen / ViewModel / SyncRepository 都委托它 | 全仓库 `in 2..4` 字面量出现次数 == 0；`isValidShortcutTrigger` 定义处 == 1 |
+| C1-2 | 校验只有**一个**实现，Screen / ViewModel / SyncRepository 都委托它 | `app/src/main/java/**` 内 `in 2..4` 字面量出现次数 == 0；`isValidShortcutTrigger` 定义处 == 1。`tools/verify/**` 里的 `2..4` 只允许出现在断言**文案**中，不得充当判定值（否则 `check_phrase_csv_import.py:641` 自己就把这条断言判红，见 §7.3） |
 | C1-3 | `setRemoteShortcut` 非法输入不静默 return | main `:309` 的 `return` 改为可呈现的错误（或调用方先校验），有对应单测 |
 | C1-4 | 长度不改变 mode：编辑器不因 >4 位改写用户选的匹配方式 | 输入 5 位 trigger 后 mode 字段值不变（单测） |
 | C1-5 | 读取侧从不校验长度、从不截断 | 13 位 trigger 的规则行仍完整解析、完整参与匹配（`QuickPhraseEngine.fromText` 单测） |
@@ -420,6 +420,19 @@ when {
 | 12.6「用户自己的『快捷字母』仍限 2–4 位…与内置码这条 5 位的取舍不冲突」（`:664-665`） | 「不冲突」 | → **冲突了**，必须改：统一为 2–12；新口径下的理由是 C1-6（>4 位覆盖条目用 EXACT，不用 PREFIX，因此在五笔态不会误弹），而不是原来的「两态都能敲全」 |
 
 `docs/sogou-feature-matrix.md`：main 上第 64 行已不含「2–4 位」表述，**无需改动**（本分支基线 `:64` 有，合并窗口以 main 为准）。
+
+### 7.3 `tools/verify/check_phrase_csv_import.py`（第一版漏点名，阶段 2 必须一并改）
+
+F 节的自我声明正是决策 1 要废止的那条不变量。漏改它，`tools/verify/` 全套跑不绿 → 合并窗口的「静态校验全绿」门禁卡住，包出不来（本 issue 交付时核对 main 才补上）。
+
+| 位置（行号取 main `f728231`） | 现状 | 调整为 |
+|---|---|---|
+| `:24`（模块 docstring F 项） | 「导入不破坏既有约束：手动录入仍是 2–4 位小写…」 | 口径改 2–12、单一来源 `QuickTrigger`；后半句「落盘转义仍只 CR/LF/TAB」保留不变 |
+| `:637`（`check_existing_contract_unchanged` docstring） | 「导入不能放宽手动录入的 2–4 位约束」 | 改为「导入路径不放宽**读取侧**（不截断、不校验长度，C1-5），手动录入口径与 `QuickTrigger` 同源」 |
+| `:640-642` | 断言 `internal fun isValidShortcutTrigger(...)` 与 `"trigger.length in 2..4"` 同时存在于 `QuickPhrasesScreen.kt` | 改为 ①`QuickPhrasesScreen.kt` 内不再出现 `2..4` 字面量；②校验定义处 == 1（C1-2）。若该函数迁出 Screen，断言目标同步改指 `QuickTrigger.kt`，**不得**靠删掉整段 F 节来「通过」 |
+| `:646-647` | 断言 `QuickEntry.kt` 内 `fun matchesAny(` 存在，文案「QuickOverride 覆盖判定未被改动」 | 断言**保留**（C3-10 要求 `matchesAny` 仍在用）；文案改为「覆盖判定按归一化 trigger（C2-2）」——阶段 2 改的就是它的判定基准，写「未被改动」会在下一轮把正确修复判成回归 |
+
+新增一条跨脚本口径断言（防第三次「编辑器与校验器分裂」，即修正 4 的同一类病）：`check_quick_trigger.py` 与 `check_phrase_csv_import.py` 对快捷字母长度不得各说一套，长度判定值只从 `QuickTrigger` 取，脚本侧不再抄第二份常量。
 
 ---
 
