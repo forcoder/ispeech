@@ -628,6 +628,13 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 - 覆盖条目是本地别名，`SyncRepository.pushLocalRules` 会读取远端文件并跳过
   `label + content` 能匹配上的用户条目（`QuickOverride.matchesAny`），避免在 csBaby 上
   生成同内容的第二条远端规则。
+- 拉取侧的长度降级（VOCA-391）：`CsBabyClient.toQuickEntry` 对 `trigger` 超过 4 位
+  （五笔态组合缓冲上限 `MAX_CODE_LENGTH`）的云端条一律落盘 `mode = EXACT` ——
+  `CONTAINS` / `FUZZY` / `PREFIX` / 缺省与无法识别的 `match_type` 全部降级，`REGEX` 保持原样。
+  判定口径与 C1-6 覆盖条目同源。不降级的后果：这类码在五笔态敲不全，`dtws` 4 位就会被
+  `trigger.contains(needle)` 命中 5 位码 `dtwsl`，245 字长正文压在五笔词组之上、空格直接上屏。
+  拼音 / 英文态缓冲上限 12 位，敲满 `dtwsl` 走精确码命中，不受影响；只改匹配方式，
+  不改写任何云端正文。
 
 ### 12.6 内置 5 位触发码：`dtwsl` → 泡池须知（2026-11-10 追加）
 
