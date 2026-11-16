@@ -15,6 +15,7 @@
 ```bash
 python3 tools/verify/check_static.py
 python3 tools/verify/check_input_logic.py
+python3 tools/verify/check_dist_manifest.py         # dist/SHA256SUMS 出包门禁
 ```
 
 模型源探测（需要联网，退出码非 0 = 源不可用）：
@@ -49,6 +50,35 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 | 3 | 键盘布局 | 解析 `KeyboardLayouts.kt` + `KeyDef.kt` + `EmojiData.kt`：`KeyAction` 使用值 ⊆ 声明值；`KeyboardLayoutKind` 四值在 `pages()` 的 `when` 里全覆盖；EmojiData 类别数 >= 6、每类 >= 24、全局去重；每个 `KeyboardPage` 的行数与每行键数（字母页应为 4 行 = 10/9/9/5） |
 | 4 | 标点转换 | 解析 `Punctuation.kt` 的 `chineseMap`，用 Python 复刻 `PunctuationConverter.convert`（成对引号 + 先映射后全角）并断言 6 组用例 |
 | 5 | 候选排序 | 用 Python 复刻 `CandidateRanking` 比较器 + `UserDictEngine` 的 `+100000` 加成，验证同码下用户词排在系统词前，并校验「精确码优先 → 应用<短语<五笔 → 权重降序」 |
+
+## check_dist_manifest.py —— 随包校验清单门禁（VOCA-400）
+
+校验 `dist/SHA256SUMS` 与包字节是否一致，并把它接进出包流程。口径的出处是
+`docs/adr/VOCA-400-dist-checksum-manifest.md`（ADR-0003），这里只列判据。
+
+| # | 检查项 | 为什么 |
+|---|--------|--------|
+| 1 | 每行格式合法（64 位小写 hex + 两空格 + 路径），路径不越出 `dist/` | 手写 / 编辑器折行造成的坏行会被 `shasum -c` 静默跳过 |
+| 2 | 同一路径不重复 | `>> SHA256SUMS` 追加的后果：两行并存时只认后一行，前一行永久静默 |
+| 3 | 每条记录指向的文件真实存在 | 防止「包已删除、记录还在」的孤儿行 |
+| 4 | 每条记录的 sha256 == 实际字节 | 等价 `cd dist && shasum -a 256 -c SHA256SUMS`；main 上曾有 2 条 FAILED |
+| 5 | **穷尽覆盖**：`dist` 下每个该记录的 APK 都有一行 | 只校验「清单里有的」，漏记的包一声不吭 —— `_archive/` 三个历史包就是这么漏掉的 |
+
+「该记录的集合」= `git ls-files --cached --others --exclude-standard -- dist` 里的 `*.apk`
+（已跟踪 + 会被 `git add -A` 扫进来的），因此刚 `cp` 进 `dist/` 还没入库的新包立刻要求记录；
+`.gitignore` 排除的本机残留不强加。无 git 元数据时（`git archive` 解出来的包）退回目录扫描。
+
+单文件 >100 MB 记 `WARN` 不记 `FAIL`（产物治理归 VOCA-292，不在此抢判定权）。
+
+```bash
+python3 tools/verify/check_dist_manifest.py           # 校验；任一 FAIL 退出码 1
+python3 tools/verify/check_dist_manifest.py --regen   # 按当前字节整份重写清单（唯一写入路径）
+python3 tools/verify/check_dist_manifest.py --self-test  # 7 场景双向验判定逻辑本身，不动仓库
+```
+
+**出包门禁（第五条）**：`tools/deploy/deploy.sh` 在 ③ 校验段调用它，位置在 `--skip-verify`
+分支**之外** —— 跳过这项等于允许带着一份会说谎的清单出包，而「会说谎」正是 VOCA-400 的原始故障。
+⑤ 归档段在 `cp` 之后立即 `--regen` + 回读校验，新包离开工位前就已被记录。
 
 ## check_model_host.py —— 模型托管源可用性（**需联网**）
 
