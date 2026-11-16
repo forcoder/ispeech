@@ -173,3 +173,55 @@ adb logcat -d -s AsrTrace:* | grep -E 'ev=(timeout|error|blocked)'   # 只看异
 **仍未覆盖（下一步）**：抬起事件丢失的护栏目前是「60 秒后自动收尾」，没有把「再按一次 = 结束上一次」
 改成显式语义；桩识别服务（华为 `FakeRecognitionService`）仍需用户在设置里换引擎，代码只能早 10 秒
 告知，不能替它出结果。
+
+## 九、真机复测前置核查（2026-11-16 实测，设备 `FMR0224913042917`）
+
+原始报障机回来了，但**装不上本单的诊断包**，且**这台机器跑不到 §八 的超时分支**。两条都是先跑
+只读命令得到的，不是推断；复测前先把这一节的两道门禁过掉，否则会像上一轮那样「包身份四项全对却装不上」。
+
+### 9.1 现装包身份与签名门禁
+
+| 项 | 机上现装 | 本单诊断包 |
+| --- | --- | --- |
+| versionCode / versionName | `6` / `1.6`（对应 `origin/release/voca-186-v1.6`） | `5` / `1.5` |
+| base.apk sha256 | `9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42` | `1f21e23c21b95ae580619be5558e560a85f4ac5aad6b128d2a3277c191f17621` |
+| 签名证书 | `CN=Android Debug` → `857ce64e…a0ed` | `CN=iSpeech Prototype` → `70b4f4a2…2ac7` |
+| `lastUpdateTime` | 2026-11-15 10:29:20 | — |
+| 是否含 §七/§八 代码 | **否**：dex 里 `AsrTrace` / `AsrTiming` / `armVoiceSessionGuard` / `voice_timeout_result` 全 0 命中，`FunAsrSpeechEngine` 7 命中 | 是 |
+
+- 签名者不同 → `adb install -r` 必失败（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）；再叠加 6→5 是降级，
+  还需 `-d`。**唯一可行路径是先卸载现装包 = 清空应用数据**（学习词库、设置、剪贴板），属生产操作，
+  需要人类批准后才执行；换包后 `RECORD_AUDIO` 会回到未授权状态。
+- EMUI 的 `pm install` 不支持 `--dry-run`（实测 `Unknown option --dry-run`），**没法在不改设备状态的前提下
+  预验可安装性**；只读预验只能做到上表：`pm path` → `adb pull` → `apksigner verify --print-certs` + `dumpsys package`。
+- 注意：dex 在 APK 里是压缩存储的，直接对 `.apk` 做 `grep` 只能命中 zip 条目名（`assets/…sherpa-onnx…`），
+  **判类名/字符串必须先 `unzip classes*.dex`**。用 `pm path` 的结果直接 `grep` 会得出假的「0 命中」。
+
+### 9.2 这台机器上 `ev=timeout` 跑不到（服务清单实测）
+
+| 命令 | 实测结果 |
+| --- | --- |
+| `cmd package query-services -a android.speech.action.RECOGNIZE_SPEECH` | `No services found`（0 个） |
+| `cmd package query-services -a android.speech.RecognitionService` | 1 个：`com.huawei.vassistant.voiceui.service.FakeRecognitionService`，`permission=android.permission.BIND_VOICE_INTERACTION` |
+| `settings get secure default_speech_recognizer` | `null` |
+| `dumpsys package com.ispeech.ime`（权限） | `RECORD_AUDIO: granted=true (USER_SET)` |
+
+∴ `VoiceInputController.hasUsableService()` 在这台机器上恒为 false —— 判据是 `serviceInfo.permission ==
+BIND_SPEECH_RECOGNITION_SERVICE`，而唯一的服务声明的是 `BIND_VOICE_INTERACTION`。**含义**：即使 VOCA-310
+把查询 action 修对，这里仍然是 `services=1 usable=0`，`SYSTEM` 引擎只会出 `ev=blocked`。
+要验 §八 的 `timeout stage=start/finish/session` 三条分支，只有两条路：① 有真实识别服务的机器（基线机
+`23F0224224000950` / ALN-AL10，验收口径要求的正是它）；② 离线引擎路径（`model_not_ready` / 无音频判定）。
+看到 `ev=blocked` 不算 §八 的超时分支被验证，也不算回归。
+
+### 9.3 报障现象的根因链（补齐）
+
+报障包 `agent/agent/voca-121@e8dc6f1` 的默认引擎是 `AsrEngine.FUNASR`（`AsrSettings.kt:57`，离线
+sherpa-onnx），它的模型源 `http://cvm.agentai0.com/funasr/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2`
+实测返回 **HTTP 502**（域名可解析 43.136.44.72，源站挂着）→ 模型下不来；而当时的离线引擎路径**没有任何
+时限**，UI 于是停在「语音识别中…」不动。`voca-186-v1.6` 起模型源已换成阿里云 OSS，实测 Range 请求返回
+**206 / 1KB 可读** —— 换源这件事不在本单范围，本单解的是「源挂了、服务不回话、引擎卡住时必须按时复位并把
+原因打进日志」，对应 §七 的 `blocked reason=model_not_ready model_dir=`。
+
+仍未解释的一条：报障截图里那个单候选「饭」。模型若从未下成，离线引擎不该出字；但现装包非 debuggable
+（`run-as: package not debuggable`），拿不到 `filesDir` 去证明模型在不在。复测时按日志判，不要靠猜——
+`ev=start model_ready=true` 与 `ev=first_result` 同时出现才说明那次出字来自 ASR。
