@@ -8,7 +8,8 @@ import com.ispeech.settings.store.KeyboardSettings
  * 两件事：
  * 1. 上屏优先级链条 `t9Digits → buffer → aiReply → voice → association → 直接空格`，顺序即优先级；
  *    链条被前面任一项接管时，双击判定不参与（R5：有候选时永远先上屏首选）。
- * 2. 走到底之后才轮到「双击空格出句号」：距上次空格上屏在时间窗内才出「。」，否则输出普通空格。
+ * 2. 走到底之后才轮到「双击空格出句号」：距上次空格上屏在时间窗内、且光标前那个字符确认还是刚上屏
+ *    的空格，才出「。」；两个前提少任何一个都输出普通空格。
  *
  * 抽成纯函数是因为本仓库单测是 JVM-only（无 Robolectric、无 `androidTest`），
  * 时间窗与状态前提必须能在单测里判真假，所以这里不碰任何 Android API，
@@ -47,6 +48,10 @@ object SpaceKeyPolicy {
      * @param accessibilityEnabled 无障碍服务是否启用，决定判定窗口取 300 还是 600 ms（§5）。
      * @param lastSpaceCommitAt 上一次「空格上屏」的时刻；任何非空格上屏、退格、切面板、
      *                          切中英、换输入框都要由调用方清零（R3 / R4）。
+     * @param precedingIsSpace 光标前那一个字符确认是空格。时间窗只证明「最近上屏过空格」，
+     *                         证明不了它还在原地（R4 里「移动光标」没有可靠的观测点，
+     *                         宿主也可能自己吞掉它），而双击的动作是删字符，所以默认 `false`
+     *                         = 没确认就不删。
      */
     data class State(
         val t9Pending: Boolean = false,
@@ -56,6 +61,7 @@ object SpaceKeyPolicy {
         val associationPending: Boolean = false,
         val englishMode: Boolean = false,
         val accessibilityEnabled: Boolean = false,
+        val precedingIsSpace: Boolean = false,
         val lastSpaceCommitAt: Long? = null,
     )
 
@@ -77,6 +83,8 @@ object SpaceKeyPolicy {
         if (!settings.doubleSpacePeriod || !settings.chinesePunctuation || state.englishMode) {
             return Action.SPACE
         }
+        // 删的要就是刚上屏的那个空格（R4 的兜底）：确认不了宁可多出一个空格，不能删掉别人的字符
+        if (!state.precedingIsSpace) return Action.SPACE
         val previous = state.lastSpaceCommitAt ?: return Action.SPACE
         return if (now - previous <= windowMs(state.accessibilityEnabled)) {
             Action.DOUBLE_SPACE_PERIOD

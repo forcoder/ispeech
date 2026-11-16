@@ -23,6 +23,8 @@
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
 11. 中文输入法（默认拼音 / 五笔 + 中英切换）：枚举 -> 持久化 -> 设置页 / 内置面板 -> 服务两态切换
 12. 候选条字重（VOCA-56）：候选词常规字重、首选靠颜色 / 底色区分、类注释口径一致
+13. 双击空格出句号（VOCA-46）：非空格上屏是否都清零双击时间窗（R3）、删除前是否确认目标字符、
+    判定是否留在服务侧（R8）、新设置项 key -> 默认值 -> 持久化 -> UI -> 中英文案是否闭环
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -47,6 +49,7 @@ T9 = JAVA / "input" / "keyboard" / "T9Layouts.kt"
 VIEW = JAVA / "input" / "SoftKeyboardView.kt"
 SERVICE = JAVA / "input" / "IspeechImeService.kt"
 PANEL = JAVA / "input" / "InputMethodPanel.kt"
+SPACE_KEY_POLICY = JAVA / "input" / "SpaceKeyPolicy.kt"
 QUICK_PANEL = JAVA / "input" / "QuickPhrasePanel.kt"
 CANDIDATE_VIEW = JAVA / "input" / "CandidateView.kt"
 LAYOUT_XML = RES / "layout" / "ime_input_view.xml"
@@ -1725,6 +1728,91 @@ def check_candidate_style() -> None:
     )
 
 
+def _function_bodies(text: str) -> dict:
+    """按「4 空格缩进的 fun」把源码切成 {函数名: 函数体片段}；同名片段合并（取并集）。
+
+    片段边界只到下一个函数头，所以嵌套 lambda 会算进所属函数 —— 正是我们想要的归属。
+    """
+    heads = list(re.finditer(
+        r"\n {4}(?:private |internal |protected |suspend |open |override )*fun ([A-Za-z_][A-Za-z0-9_]*)",
+        text,
+    ))
+    out = {}
+    for idx, m in enumerate(heads):
+        end = heads[idx + 1].start() if idx + 1 < len(heads) else len(text)
+        name = m.group(1)
+        out[name] = out.get(name, "") + text[m.start():end]
+    return out
+
+
+def check_double_space_period() -> None:
+    service_code = strip_comments(read(SERVICE))
+    bodies = _function_bodies(service_code)
+    policy = read(SPACE_KEY_POLICY)
+    settings = read(KEYBOARD_SETTINGS)
+    store = read(SETTINGS_STORE)
+    view = read(VIEW)
+
+    # 13.1 R3：只要上屏了文本就得清零双击时间窗，否则下一次连按删掉的是别人的字符。
+    #      commitDirect(" ") 那条分支自己会重记时间戳；insertFromPanel 走末尾的 closePanel()。
+    offenders = sorted(
+        name for name, body in bodies.items()
+        if "commitText(" in body
+        and "lastSpaceCommitAt = null" not in body
+        and "closePanel()" not in body
+    )
+    check(
+        not offenders,
+        "非空格上屏一律清零 lastSpaceCommitAt（R3：每个 commitText 落点都在清零的函数里）",
+        f"{rel(SERVICE)} 这些函数上屏文本却没清零双击时间窗（双击会删掉非空格的字符）：{offenders}",
+    )
+
+    # 13.2 R4 没有「移动光标」观测点，删除动作改为先确认目标字符
+    guard = re.search(r"if\s*\(\s*!state\.precedingIsSpace\s*\)\s*return Action\.SPACE", policy)
+    check(
+        "val precedingIsSpace: Boolean = false" in policy and guard is not None
+        and "Action.DOUBLE_SPACE_PERIOD" in policy[guard.end():],
+        "双击判定含「删除前确认光标前是空格」这道保险（未确认即退回普通空格）",
+        f"{rel(SPACE_KEY_POLICY)} 缺 precedingIsSpace 前提，或它排在出句号之后（等于没生效）",
+    )
+
+    # 13.3 服务侧真的把宿主文本喂进去了（读不到 = 不成立，Fail-closed）
+    check(
+        "precedingIsSpace = lastSpaceStillBeforeCursor()" in bodies.get("handleSpace", "")
+        and "getTextBeforeCursor(1, 0)" in bodies.get("lastSpaceStillBeforeCursor", ""),
+        "handleSpace 把「光标前一个字符」喂给判定",
+        f"{rel(SERVICE)} handleSpace 没喂 precedingIsSpace，或删除目标没经 getTextBeforeCursor 确认",
+    )
+
+    # 13.4 R8：判定留在服务侧，View 层不得再加一个空格手势（会和长按语音抢事件）
+    check(
+        "SpaceKeyPolicy" not in view and "doubleSpace" not in view,
+        "双击判定不在 View 层（R8：不与 installSpaceGesture 抢事件）",
+        f"{rel(VIEW)} 出现了 SpaceKeyPolicy / doubleSpace —— 双击判定漏到了 View 层",
+    )
+
+    # 13.5 新设置项闭环：默认关 + key -> 持久化 -> setter -> 设置页 -> 输入法内面板 -> 中英文案
+    wired = {
+        "KeyboardSettings 默认关闭": "doubleSpacePeriod: Boolean = false" in settings,
+        "SettingsStore 持久化 key": 'booleanPreferencesKey("double_space_period")' in store,
+        "keyboardSettingsFlow 读取":
+            "doubleSpacePeriod = prefs[KEY_DOUBLE_SPACE_PERIOD] ?: false" in store,
+        "SettingsStore setter": "suspend fun setDoubleSpacePeriod(" in store,
+        "设置页开关": "checked = settings.doubleSpacePeriod" in read(KEYBOARD_SCREEN),
+        "输入法内面板": '"doubleSpacePeriod"' in read(SETTINGS_PANEL),
+        "服务侧落库分支":
+            '"doubleSpacePeriod" -> SettingsStore.setDoubleSpacePeriod(' in service_code,
+        "中文文案": 'name="panel_toggle_double_space_period"' in read(STRINGS),
+        "英文文案": 'name="panel_toggle_double_space_period"' in read(STRINGS_EN),
+    }
+    broken = sorted(name for name, ok in wired.items() if not ok)
+    check(
+        not broken,
+        "双击空格设置项闭环（默认关 + key / 持久化 / UI / 中英文案齐全）",
+        f"双击空格设置项断链：{broken}",
+    )
+
+
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
     print("-- 1. LookupKind（WUBIPHRASE / PINYIN）--")
@@ -1751,6 +1839,8 @@ def main() -> int:
     check_chinese_input_method()
     print("-- 12. 候选条字重（VOCA-56）--")
     check_candidate_style()
+    print("-- 13. 双击空格出句号（VOCA-46）--")
+    check_double_space_period()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

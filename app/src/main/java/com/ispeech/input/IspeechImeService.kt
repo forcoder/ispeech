@@ -732,6 +732,7 @@ class IspeechImeService : InputMethodService() {
                 associationPending = associationActive,
                 englishMode = mode == InputMode.ENGLISH,
                 accessibilityEnabled = isAccessibilityEnabled(),
+                precedingIsSpace = lastSpaceStillBeforeCursor(),
                 lastSpaceCommitAt = lastSpaceCommitAt,
             ),
             settings = settings,
@@ -775,6 +776,18 @@ class IspeechImeService : InputMethodService() {
     /** 无障碍服务是否启用：双击判定窗口 300 → 600 ms 的依据（规格 §5）。 */
     private fun isAccessibilityEnabled(): Boolean =
         getSystemService(AccessibilityManager::class.java)?.isEnabled == true
+
+    /**
+     * 光标前那一个字符是不是刚上屏的那个空格 —— 双击出句号要删字符，删之前先确认目标。
+     *
+     * [lastSpaceCommitAt] 只证明「刚刚有一次空格上屏」，证明不了那个空格还在原地：宿主可以自己吞掉它，
+     * 用户也可以移动光标，而 R4 说的「移动光标」在输入法侧没有观测点（挂 `onUpdateSelection` 会被自家
+     * commitText 打回）。这一次读取就是那个缺失的观测点：读不到当不成立，宁可出两个空格也不误删别人的字。
+     * `getTextBeforeCursor` 是到宿主的跨进程调用，所以只在时间窗状态成立时才读。
+     */
+    private fun lastSpaceStillBeforeCursor(): Boolean =
+        lastSpaceCommitAt != null &&
+            currentInputConnection?.getTextBeforeCursor(1, 0)?.toString() == " "
 
     /** 回车：缓冲有内容时上屏首选，否则输出换行 */
     private fun handleEnter() {
@@ -1915,6 +1928,7 @@ class IspeechImeService : InputMethodService() {
         }
         ic?.commitText(candidate.insertText, 1)
         lastCommit = candidate.insertText
+        lastSpaceCommitAt = null // R3：AI 回复上屏走的是这里，不是 commit()/commitDirect()
         // 用户采纳了模型建议：本地记一条「输入 → 采纳的回复」，下次作为 few-shot
         if (aiReplyFromModel) {
             val source = aiSourceText
