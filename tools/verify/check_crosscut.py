@@ -21,7 +21,8 @@
      含 8.2b「识别服务枚举」专项（VOCA-310）：枚举必须用服务方声明的
      `android.speech.RecognitionService`（不是调用方的 RECOGNIZE_SPEECH）、必须保留
      BIND_RECOGNITION_SERVICE 真服务过滤、判定计数必须进 AsrTrace、拦下会话的 reason
-     必须走 RecognitionServices.REASON_* 且只有 traceVoiceBlocked 一个打点出口
+     必须走 RecognitionServices.REASON_*，且 ev=blocked 的两个打点出口（服务侧 traceVoiceBlocked
+     / 控制器侧 startListening 的绑定失败）逐个钉住——少钉一个、或多出第三个没断言的出口，都 FAIL
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -234,6 +235,16 @@ def function_region(text: str, header_regex: str) -> str:
     stop = re.search(r"\n    (?://|private fun |fun )", text[m.end():])
     end = m.end() + stop.start() if stop else len(text)
     return text[m.start():end]
+
+
+def enclosing_fun(text: str, idx: int) -> str:
+    """返回 text[idx] 落在哪个 `fun` 体内（顶层 / 匹配不到返回 ""）。
+
+    用来把一次埋点调用归到它的**出口函数**上：这样「新增了没人断言的出口」和「把某个出口删了」
+    都能被同一条断言抓到，不依赖调用点顺序或行号。
+    """
+    names = re.findall(r"\n[ \t]*(?:(?:private|internal|protected|suspend|override|open)\s+)*fun\s+(\w+)\s*[(<]", text[:idx])
+    return names[-1] if names else ""
 
 
 def when_subject_blocks(text: str):
@@ -908,8 +919,10 @@ def check_voice_chain() -> None:
     #      这类错误的代价不对称：不崩、不报错，只是每次静默返回 0 条，语音键于是永远进不到
     #      「识别中」。所以正反两个方向都查——枚举处不许出现调用方 action，
     #      发起识别处也不许被「顺手改」成服务方 action。
-    #      打回项 2 补的是另一半：拦下会话的三条 reason 必须有且只有一个打点出口，
-    #      「点了语音键却没进识别中」不允许存在查不到日志的路径。
+    #      打回项 2 补的是另一半：拦下会话的三条 reason 逐个钉住打点出口，
+    #      「点了语音键却没进识别中」不允许存在查不到日志的路径。出口有两个（服务侧统一入口
+    #      traceVoiceBlocked / 控制器侧 startListening 的绑定失败），两处各有一条断言，
+    #      外加一条「main 里 ev=blocked 的出口集合就是这两个」的结构性断言——多一个没钉住的出口也 FAIL。
     query_region = strip_comments(function_region(controller, r"private fun queryRecognizers\("))
     probe_region = strip_comments(function_region(controller, r"fun probeUsableServices\("))
     intent_region = strip_comments(function_region(controller, r"private fun buildIntent\("))
@@ -919,7 +932,14 @@ def check_voice_chain() -> None:
     svc = strip_comments(service)
     toggle_region = strip_comments(function_region(svc, r"private fun toggleVoiceInput\("))
     blocked_trace = strip_comments(function_region(svc, r"private fun traceVoiceBlocked\("))
+    bind_region = strip_comments(function_region(controller, r"private fun startListening\("))
     recognition_test = read(RECOGNITION_SERVICES_TEST)
+    # ev=blocked 的打点出口，按 (文件, 所在函数) 归属；下面两条断言一一对着它
+    blocked_sites = set()
+    for kt in sorted(JAVA.rglob("*.kt")):
+        kt_body = strip_comments(read(kt))
+        for m in re.finditer(r"AsrTrace\.EV_BLOCKED", kt_body):
+            blocked_sites.add((kt.name, enclosing_fun(kt_body, m.start())))
 
     m_action = re.search(r'const val SERVICE_INTERFACE\s*=\s*"([^"]+)"', strip_comments(controller))
     action_value = m_action.group(1) if m_action else ""
@@ -973,24 +993,57 @@ def check_voice_chain() -> None:
         f"{rel(VOICE_CONTROLLER)} probeUsableServices() 缺 ev=bind 计数埋点（VOCA-310 验收口径 3）",
     )
     check(
-        "controller.probeBlockedReason(asr)" in toggle_region
-        and "traceVoiceBlocked(RecognitionServices.REASON_NO_RECOGNITION_AVAILABLE)" in toggle_region,
-        "语音键前置判定走纯函数 + 两条出口都打点（拦下会话前已 bind/blocked，判定与埋点不脱节）",
-        f"{rel(SERVICE)} toggleVoiceInput() 未同时走 controller.probeBlockedReason(asr) 与"
-        f" traceVoiceBlocked(REASON_NO_RECOGNITION_AVAILABLE)：「点了语音键却没进识别中」又会出现"
-        f"没有 ev=blocked 的静默出口（VOCA-310 打回项 2）",
+        "controller.probeBlockedReason(asr)" in toggle_region,
+        "语音键的前置判定走纯函数 probeBlockedReason（判定与埋点不脱节）",
+        f"{rel(SERVICE)} toggleVoiceInput() 不再问 controller.probeBlockedReason(asr)："
+        f"判定又散回调用点，单测与门禁都管不到（VOCA-310 打回项 2）",
+    )
+    check(
+        "traceVoiceBlocked(RecognitionServices.REASON_NO_RECOGNITION_AVAILABLE)" in toggle_region,
+        "拦下分支之一：控制器为空的会话走 traceVoiceBlocked 归类",
+        f"{rel(SERVICE)} toggleVoiceInput() 的 controller == null 分支不再调用"
+        f" traceVoiceBlocked(REASON_NO_RECOGNITION_AVAILABLE)：输入法销毁后的那一按又是静默出口"
+        f"（VOCA-310 打回项 2）",
+    )
+    check(
+        "traceVoiceBlocked(blocked)" in toggle_region,
+        "拦下分支之二：探测判定拦下的会话走 traceVoiceBlocked（no_usable_service 的实际出口）",
+        f"{rel(SERVICE)} toggleVoiceInput() 里 probeBlockedReason 返回非空后不再调用"
+        f" traceVoiceBlocked(blocked)：桩服务机型「点了语音键却没进识别中」只剩文案、"
+        f"logcat 里没有 ev=blocked（VOCA-310 打回项 2 的探测分支）",
     )
     check(
         "AsrTrace.EV_BLOCKED" in blocked_trace and '"reason" to reason' in blocked_trace,
-        "ev=blocked 只有 traceVoiceBlocked 一个出口：reason 必进 AsrTrace",
+        "服务侧统一入口 traceVoiceBlocked 把 reason 打进 AsrTrace",
         f"{rel(SERVICE)} traceVoiceBlocked() 不再打 AsrTrace ev=blocked + reason："
         f"拦下会话的三种原因（no_recognition_available / no_usable_service / service_bind_failed）在日志里消失",
     )
     check(
-        not re.search(r'"(no_usable_service|no_recognition_available|service_bind_failed)"', toggle_region),
-        "服务侧不写裸 reason 字面量（词汇单一来源 = RecognitionServices.REASON_*）",
-        f"{rel(SERVICE)} toggleVoiceInput() 里出现了裸 reason 字面量：绕过 RecognitionServices.REASON_*"
-        f" 会让改名时漏改一处，取证命令按不到（VOCA-310）",
+        "AsrTrace.EV_BLOCKED" in bind_region
+        and "RecognitionServices.REASON_SERVICE_BIND_FAILED" in bind_region,
+        "拦下分支之三：绑定失败在 startListening 里就地打 ev=blocked（不经服务侧入口）",
+        f"{rel(VOICE_CONTROLLER)} startListening() 不再打 AsrTrace.EV_BLOCKED +"
+        f" RecognitionServices.REASON_SERVICE_BIND_FAILED：探测放行、识别器却建不起来那条路"
+        f"又回到只有文案没有归类（VOCA-310 验收口径 1(b)）",
+    )
+    check(
+        blocked_sites == {("IspeechImeService.kt", "traceVoiceBlocked"),
+                          ("VoiceInputController.kt", "startListening")},
+        "ev=blocked 的打点出口有两个、逐个被上面钉住（main 里不存在第三处未断言的出口）",
+        f"app/src/main 下 AsrTrace.EV_BLOCKED 的实际出口是 {sorted(blocked_sites)}，应为 "
+        f"[('IspeechImeService.kt', 'traceVoiceBlocked'), ('VoiceInputController.kt', 'startListening')]："
+        f"少一个说明拦下会话又出现查不到日志的路径，多一个说明新增了没配断言、也没进 docs 表格的出口"
+        f"（VOCA-310 打回项 2）",
+    )
+    check(
+        not re.search(r'"reason"\s+to\s*"', toggle_region + bind_region)
+        and not re.search(
+            r'"(no_usable_service|no_recognition_available|service_bind_failed)"',
+            toggle_region + bind_region,
+        ),
+        "服务侧与控制器侧都不写裸 reason 字面量（词汇单一来源 = RecognitionServices.REASON_*）",
+        f"{rel(SERVICE)} toggleVoiceInput() 或 {rel(VOICE_CONTROLLER)} startListening() 里把 reason"
+        f" 写成了内联字面量：绕过 RecognitionServices.REASON_* 会让改名时漏改一处，取证命令按不到（VOCA-310）",
     )
     check(
         all(
