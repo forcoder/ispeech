@@ -94,6 +94,16 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     private var traceVadBegan = false
     private var traceVadEnded = false
 
+    /**
+     * 本次会话是否收到过识别服务的**任何**回调（`onReadyForSpeech` 起算）——
+     * [AsrTiming.FIRST_CALLBACK_TIMEOUT_MS] 的判据。
+     *
+     * 桩服务（实测华为 ALN-AL00 的 `FakeRecognitionService`）连一个回调都不给，
+     * UI 于是停在「识别中」不动。用户没出声不算卡住：那种情况服务自己会回
+     * `ERROR_SPEECH_TIMEOUT`，走 [onError] 而不是兜底超时。
+     */
+    private var traceCallbackSeen = false
+
     /** VAD 字段：区分「服务没收到音频」与「收到音频但不出结果」两类卡住。 */
     private fun traceVad(): Array<Pair<String, Any?>> = arrayOf(
         "vad_began" to traceVadBegan,
@@ -124,6 +134,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         traceSession = sessionId ?: AsrTrace.newSessionId()
         traceStartMs = SystemClock.elapsedRealtime()
         traceFirstResultLogged = false
+        traceCallbackSeen = false
         traceVadBegan = false
         traceVadEnded = false
         if (!isAvailable) {
@@ -144,6 +155,11 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         this.lastAsr = asr
         this.retriedBusy = false
         logBind(asr)
+        // 会话硬上限：抬不起手（按住不放）或抬起事件被系统吃掉时，收尾（[finish]）永远不会被调用，
+        // 于是也就没有任何超时挂得上 —— VOCA-231 那次「识别中」75 秒不复位就是这么来的。
+        // 只在这里挂一次：「识别器忙」重建走 [startListening]，不重置这条，它量的是整次会话的长度。
+        mainHandler.removeCallbacks(sessionWatchdog)
+        mainHandler.postDelayed(sessionWatchdog, AsrTiming.SESSION_TIMEOUT_MS)
         startListening(asr)
     }
 
@@ -173,6 +189,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         rec.setRecognitionListener(this)
         recognizer = rec
         isListening = true
+        traceCallbackSeen = false
         AsrTrace.i(
             traceSession,
             AsrTrace.EV_START,
@@ -183,9 +200,15 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
             "model" to asr.model,
             "calling" to callingPackage,
             "busy_retry" to retriedBusy,
-            "watchdog" to "finish_only",
+            "watchdog" to "start+session+finish",
+            "first_limit_ms" to AsrTiming.FIRST_CALLBACK_TIMEOUT_MS,
+            "session_limit_ms" to AsrTiming.SESSION_TIMEOUT_MS,
             "ms" to elapsedMs(),
         )
+        // 先挂表再开收音：桩服务（绑得上、一个回调都不回）到这里就是「有 start、再无一行」，
+        // 没有这条时限的话 UI 会永远停在「识别中」。
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.postDelayed(startWatchdog, AsrTiming.FIRST_CALLBACK_TIMEOUT_MS)
         rec.startListening(buildIntent(asr))
     }
 
@@ -255,7 +278,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
             "listening" to isListening,
             "ms" to elapsedMs(),
         )
-        mainHandler.removeCallbacks(finishWatchdog)
+        clearWatchdogs()
         isListening = false
         clearCallbacks()
         recognizer?.destroy()
@@ -297,14 +320,52 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         AsrTrace.i(
             traceSession,
             AsrTrace.EV_END,
-            "limit_ms" to FINISH_TIMEOUT_MS,
+            "limit_ms" to AsrTiming.FINISH_TIMEOUT_MS,
             "first_result" to traceFirstResultLogged,
             "ms" to elapsedMs(),
             *traceVad(),
         )
         // 兜底：个别识别服务松手后既不回 onResults 也不回 onError。按住-说话没有「再点一次」
         // 可供恢复，若不复位，语音键会一直卡在「收音中」——再按也不会重新开始。
-        mainHandler.postDelayed(finishWatchdog, FINISH_TIMEOUT_MS)
+        // 收音阶段的两个时限到此交棒给收尾时限（会话已经不会再变长了）。
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(sessionWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        mainHandler.postDelayed(finishWatchdog, AsrTiming.FINISH_TIMEOUT_MS)
+    }
+
+    /** 开始收音后的兜底：识别服务一个回调都不回（桩服务）→ 复位并给出可操作文案。 */
+    private val startWatchdog = Runnable {
+        if (!isListening || traceCallbackSeen) return@Runnable
+        AsrTrace.w(
+            traceSession,
+            AsrTrace.EV_TIMEOUT,
+            "stage" to AsrTiming.STAGE_START,
+            "limit_ms" to AsrTiming.FIRST_CALLBACK_TIMEOUT_MS,
+            "ms" to elapsedMs(),
+            *traceVad(),
+        )
+        resetOnTimeout(AsrTiming.STAGE_START)
+    }
+
+    /**
+     * 会话硬上限：到点仍在收音，就按「用户已经松手」处理。
+     *
+     * 走 [finish] 而不是直接取消 —— 用户可能真的说了话，`stopListening()` 后识别服务
+     * 还会把最终结果回过来；收尾若仍无结果，由 [finishWatchdog] 兜住并复位。
+     */
+    private val sessionWatchdog = Runnable {
+        if (!isListening) return@Runnable
+        AsrTrace.w(
+            traceSession,
+            AsrTrace.EV_TIMEOUT,
+            "stage" to AsrTiming.STAGE_SESSION,
+            "limit_ms" to AsrTiming.SESSION_TIMEOUT_MS,
+            "first_result" to traceFirstResultLogged,
+            "ms" to elapsedMs(),
+            *traceVad(),
+        )
+        finish()
     }
 
     /** 松手后等待结果的兜底超时：复位状态并按「没听清」提示用户重说。 */
@@ -313,18 +374,36 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         AsrTrace.w(
             traceSession,
             AsrTrace.EV_TIMEOUT,
-            "limit_ms" to FINISH_TIMEOUT_MS,
-            "stage" to "finish",
+            "stage" to AsrTiming.STAGE_FINISH,
+            "limit_ms" to AsrTiming.FINISH_TIMEOUT_MS,
             "first_result" to traceFirstResultLogged,
             "ms" to elapsedMs(),
             *traceVad(),
         )
+        resetOnTimeout(AsrTiming.STAGE_FINISH)
+    }
+
+    /**
+     * 超时统一出口：销毁识别器、清回调、按阶段给出用户可读文案。
+     *
+     * 三条时限都必须走到这里 —— 「复位但什么都不说」等于把缺陷从「卡住」改成「静默失败」，
+     * 门禁不允许（角色规程：禁止静默失败）。
+     */
+    private fun resetOnTimeout(stage: String) {
+        clearWatchdogs()
         isListening = false
         recognizer?.destroy()
         recognizer = null
         val notify = onError
         clearCallbacks()
-        notify?.invoke(context.getString(R.string.voice_no_match))
+        notify?.invoke(context.getString(AsrTiming.messageFor(stage)))
+    }
+
+    /** 摘掉全部兜底时限（会话结束 / 销毁时调用，避免旧会话的表打到新会话上）。 */
+    private fun clearWatchdogs() {
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(sessionWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
     }
 
     /** 释放识别器（输入法服务 onDestroy 调用）。 */
@@ -339,7 +418,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
                 "ms" to elapsedMs(),
             )
         }
-        mainHandler.removeCallbacks(finishWatchdog)
+        clearWatchdogs()
         isListening = false
         clearCallbacks()
         recognizer?.destroy()
@@ -355,13 +434,14 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     // ── RecognitionListener ──
 
     override fun onPartialResults(partialResults: Bundle?) {
+        traceCallbackSeen = true
         val text = firstResult(partialResults) ?: return
         traceFirstResult("partial", text.length)
         post { onPartial?.invoke(text) }
     }
 
     override fun onResults(results: Bundle?) {
-        mainHandler.removeCallbacks(finishWatchdog)
+        clearWatchdogs()
         isListening = false
         val text = firstResult(results)
         AsrTrace.i(
@@ -396,7 +476,9 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     }
 
     override fun onError(error: Int) {
+        traceCallbackSeen = true
         mainHandler.removeCallbacks(finishWatchdog)
+        mainHandler.removeCallbacks(startWatchdog)
         isListening = false
         AsrTrace.w(
             traceSession,
@@ -420,6 +502,8 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
             return
         }
         val message = errorMessage(error)
+        // 会话到此结束（不再重试）：会话硬上限也摘掉，别把这条已失败的消息再打一遍
+        mainHandler.removeCallbacks(sessionWatchdog)
         post { onError?.invoke(message) }
     }
 
@@ -437,9 +521,13 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         else -> "ERROR_$error"
     }
 
-    override fun onReadyForSpeech(params: Bundle?) = Unit
+    override fun onReadyForSpeech(params: Bundle?) {
+        // 「服务活着」的最早信号：有它就没必要触发 startWatchdog，哪怕用户还没出声
+        traceCallbackSeen = true
+    }
 
     override fun onBeginningOfSpeech() {
+        traceCallbackSeen = true
         traceVadBegan = true
     }
 
@@ -448,6 +536,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     override fun onBufferReceived(buffer: ByteArray?) = Unit
 
     override fun onEndOfSpeech() {
+        traceCallbackSeen = true
         traceVadEnded = true
     }
 
@@ -494,7 +583,6 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         /** 真正的 RecognitionService 必须以该权限自保护（[SpeechRecognizer] 依赖它区分桩服务）。 */
         const val BIND_PERMISSION = "android.permission.BIND_RECOGNITION_SERVICE"
 
-        /** 松手后等待识别结果的上限（毫秒）：超时复位，避免语音键卡在「收音中」。 */
-        const val FINISH_TIMEOUT_MS = 6000L
+        // 超时取值不在这里：全链路时限集中在 [AsrTiming]（VOCA-231，禁止散落魔法值）
     }
 }

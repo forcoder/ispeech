@@ -87,6 +87,56 @@ class FunAsrSpeechEngine(private val context: Context) {
 
     private fun elapsedMs(): Long = (SystemClock.elapsedRealtime() - traceStartMs).coerceAtLeast(0L)
 
+    /** 是否已进入「松手等收尾」阶段（[finish] 之后），决定兜底超时的判读与文案。 */
+    @Volatile
+    private var awaitingFinal = false
+
+    /** 工作线程是否真的开始收音（模型加载完 + `startRecording()` 成功）。 */
+    @Volatile
+    private var recordingStarted = false
+
+    /** 开始收音的兜底：模型加载 / `AudioRecord` 初始化卡住 → 复位并提示，别让语音键永久占住。 */
+    private val startWatchdog = Runnable {
+        if (!isListening || recordingStarted) return@Runnable
+        AsrTrace.w(
+            traceSession,
+            AsrTrace.EV_TIMEOUT,
+            "engine" to "FUNASR",
+            "stage" to AsrTiming.STAGE_START,
+            "limit_ms" to AsrTiming.FIRST_CALLBACK_TIMEOUT_MS,
+            "ms" to elapsedMs(),
+        )
+        resetOnTimeout(AsrTiming.STAGE_START)
+    }
+
+    /** 收尾兜底：松手后工作线程没走完（整段解码卡住 / `read()` 阻塞）→ 强制复位。 */
+    private val finishWatchdog = Runnable {
+        if (!isListening || !awaitingFinal) return@Runnable
+        AsrTrace.w(
+            traceSession,
+            AsrTrace.EV_TIMEOUT,
+            "engine" to "FUNASR",
+            "stage" to AsrTiming.STAGE_FINISH,
+            "limit_ms" to AsrTiming.FINISH_TIMEOUT_MS,
+            "first_result" to traceFirstResultLogged,
+            "ms" to elapsedMs(),
+        )
+        resetOnTimeout(AsrTiming.STAGE_FINISH)
+    }
+
+    /** 超时统一出口：就地复位（不等工作线程）+ 可读文案，禁止静默卡住。 */
+    private fun resetOnTimeout(stage: String) {
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        awaitingFinal = false
+        isListening = false
+        val notify = onError
+        clearCallbacks()
+        running.set(false)
+        releaseAudio()
+        notify?.invoke(context.getString(AsrTiming.messageFor(stage)))
+    }
+
     private fun traceFirstResult(kind: String, chars: Int) {
         if (traceFirstResultLogged) return
         traceFirstResultLogged = true
@@ -146,15 +196,22 @@ class FunAsrSpeechEngine(private val context: Context) {
         this.onError = onError
         this.onLevel = onLevel
         chunks.clear()
+        awaitingFinal = false
+        recordingStarted = false
         isListening = true
         AsrTrace.i(
             traceSession,
             AsrTrace.EV_START,
             "engine" to "FUNASR",
             "model_ready" to true,
-            "watchdog" to "none",
+            "watchdog" to "start+finish",
+            "start_limit_ms" to AsrTiming.FIRST_CALLBACK_TIMEOUT_MS,
+            "finish_limit_ms" to AsrTiming.FINISH_TIMEOUT_MS,
             "ms" to elapsedMs(),
         )
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        mainHandler.postDelayed(startWatchdog, AsrTiming.FIRST_CALLBACK_TIMEOUT_MS)
         // 运行标志必须在起线程「之前」置位，且此后只由 finish / cancel 关闭。
         //
         // 模型加载（几十 MB）+ 录音初始化合计可能 1 秒以上，用户完全可能在这之前就松手：
@@ -166,16 +223,21 @@ class FunAsrSpeechEngine(private val context: Context) {
         Thread({ runSession() }, "funasr-voice").also { worker = it }.start()
     }
 
-    /** 结束说话：置停止标志，收尾（解码并回调）由工作线程完成。 */
+    /** 结束说话：置停止标志，收尾（解码并回调）由工作线程完成；本方法挂收尾兜底时限。 */
     fun finish() {
         AsrTrace.i(
             traceSession,
             AsrTrace.EV_END,
             "engine" to "FUNASR",
             "listening" to isListening,
+            "limit_ms" to AsrTiming.FINISH_TIMEOUT_MS,
             "first_result" to traceFirstResultLogged,
             "ms" to elapsedMs(),
         )
+        awaitingFinal = true
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        mainHandler.postDelayed(finishWatchdog, AsrTiming.FINISH_TIMEOUT_MS)
         running.set(false)
     }
 
@@ -189,16 +251,25 @@ class FunAsrSpeechEngine(private val context: Context) {
             "first_result" to traceFirstResultLogged,
             "ms" to elapsedMs(),
         )
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        awaitingFinal = false
         clearCallbacks()
         running.set(false)
         releaseAudio()
+        // 就地复位：工作线程可能卡在 read() 上，等它自己收尾等于永远等不到（见 [resetOnTimeout]）
+        isListening = false
     }
 
     /** 释放资源（输入法服务 onDestroy 调用）。 */
     fun destroy() {
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        awaitingFinal = false
         clearCallbacks()
         running.set(false)
         releaseAudio()
+        isListening = false
         runCatching { stream?.release() }
         stream = null
         runCatching { recognizer?.release() }
@@ -249,6 +320,9 @@ class FunAsrSpeechEngine(private val context: Context) {
             // 注意：这里**不能**再做 running.set(true)。加载期间用户可能已经松手，
             // finish() 早已把标志置 false，此时重写会吞掉停止请求（见 [start] 的注释）。
             record.startRecording()
+            // 真正开始收音：模型加载 / 录音初始化的兜底时限到此结束，之后由收尾时限接管
+            recordingStarted = true
+            mainHandler.removeCallbacks(startWatchdog)
             AsrTrace.i(
                 traceSession,
                 AsrTrace.EV_START,
@@ -261,6 +335,8 @@ class FunAsrSpeechEngine(private val context: Context) {
             var samplesSinceDecode = 0
             var reads = 0
             var emptyReads = 0
+            var lastSampleMs = SystemClock.elapsedRealtime()
+            var audioDead = false
             while (running.get()) {
                 val read = record.read(buffer, 0, buffer.size)
                 if (read <= 0) {
@@ -278,9 +354,25 @@ class FunAsrSpeechEngine(private val context: Context) {
                             "ms" to elapsedMs(),
                         )
                     }
+                    val idleMs = SystemClock.elapsedRealtime() - lastSampleMs
+                    if (idleMs >= AsrTiming.NO_AUDIO_TIMEOUT_MS) {
+                        // 自旋到上限就主动失败退出：继续转下去语音键会一直卡在「正在聆听」
+                        audioDead = true
+                        AsrTrace.w(
+                            traceSession,
+                            AsrTrace.EV_TIMEOUT,
+                            "engine" to "FUNASR",
+                            "stage" to AsrTiming.STAGE_AUDIO,
+                            "limit_ms" to AsrTiming.NO_AUDIO_TIMEOUT_MS,
+                            "empty_reads" to emptyReads,
+                            "ms" to elapsedMs(),
+                        )
+                        break
+                    }
                     continue
                 }
                 reads++
+                lastSampleMs = SystemClock.elapsedRealtime()
                 // sherpa-onnx 需要 float32 归一化 PCM
                 val f32 = FloatArray(read)
                 var sumSquares = 0.0
@@ -307,6 +399,8 @@ class FunAsrSpeechEngine(private val context: Context) {
 
             // 收尾：等最后一次分段解码结束，避免与它抢识别器
             awaitPartial()
+            awaitingFinal = false
+            mainHandler.removeCallbacks(finishWatchdog)
             AsrTrace.i(
                 traceSession,
                 AsrTrace.EV_END,
@@ -316,6 +410,21 @@ class FunAsrSpeechEngine(private val context: Context) {
                 "empty_reads" to emptyReads,
                 "ms" to elapsedMs(),
             )
+            if (audioDead) {
+                // 整段都没拿到音频，解出来也是空话；给「录音不可用」而不是「没听清」
+                AsrTrace.w(
+                    traceSession,
+                    AsrTrace.EV_EMPTY,
+                    "engine" to "FUNASR",
+                    "reason" to "no_audio",
+                    "ms" to elapsedMs(),
+                )
+                post {
+                    isListening = false
+                    onError?.invoke(context.getString(AsrTiming.messageFor(AsrTiming.STAGE_AUDIO)))
+                }
+                return
+            }
             loaded.decode(session)
             val text = loaded.getResult(session).text
             AsrTrace.i(

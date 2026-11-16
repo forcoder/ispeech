@@ -54,8 +54,10 @@ import com.ispeech.settings.store.KeyboardSettings
 import com.ispeech.settings.store.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -295,6 +297,48 @@ class IspeechImeService : InputMethodService() {
             "ok" to ok,
             "ms" to voiceElapsedMs(),
         )
+    }
+
+    /**
+     * UI 侧超时兜底（VOCA-231）：任何一次「识别中」都必须在
+     * [AsrTiming.UI_SESSION_TIMEOUT_MS] 内离开，不管引擎那边发生了什么。
+     *
+     * 引擎自己也有时限（[AsrTiming]），那条更早、处理得更细（结果还能上屏）；这里是**最后一道**，
+     * 专门兜住引擎彻底没接住的情况：抬起事件被系统吃掉、离线引擎卡在读取音频、识别服务连一个
+     * 回调都不回。旧实现没有这道表，语音键一旦被卡住就再也按不动（每次都被「已在收音」挡回）。
+     */
+    private var voiceSessionGuardJob: Job? = null
+
+    /** 挂兜底表：每次真正开始一次语音会话都要挂上（幂等，重复挂只保留最新一条）。 */
+    private fun armVoiceSessionGuard() {
+        voiceSessionGuardJob?.cancel()
+        voiceSessionGuardJob = serviceScope.launch {
+            delay(AsrTiming.UI_SESSION_TIMEOUT_MS)
+            val stuck = voiceActive ||
+                voiceController?.isListening == true ||
+                voskVoice?.isListening == true
+            if (!stuck) return@launch
+            AsrTrace.w(
+                voiceSessionId,
+                AsrTrace.EV_TIMEOUT,
+                "stage" to AsrTiming.STAGE_SESSION,
+                "limit_ms" to AsrTiming.UI_SESSION_TIMEOUT_MS,
+                "voice_active" to voiceActive,
+                "system_listening" to (voiceController?.isListening == true),
+                "vosk_listening" to (voskVoice?.isListening == true),
+                "ms" to voiceElapsedMs(),
+            )
+            cancelVoice()
+            statusText = getString(AsrTiming.messageFor(AsrTiming.STAGE_SESSION))
+            renderCandidateView()
+            traceVoiceUiReset("session_timeout", ok = false)
+        }
+    }
+
+    /** 摘兜底表：任何正常收尾（上屏 / 取消 / 复位）都要摘，避免打到下一次会话上。 */
+    private fun disarmVoiceSessionGuard() {
+        voiceSessionGuardJob?.cancel()
+        voiceSessionGuardJob = null
     }
 
     override fun onCreate() {
@@ -1567,6 +1611,7 @@ class IspeechImeService : InputMethodService() {
         dismissAiState()
         startVoiceTrace()
         voiceActive = true
+        armVoiceSessionGuard()
         statusText = getString(R.string.voice_listening)
         codeOverride = "语音"
         candidates = emptyList()
@@ -1585,6 +1630,7 @@ class IspeechImeService : InputMethodService() {
             },
             onError = { message ->
                 voiceActive = false
+                disarmVoiceSessionGuard()
                 traceVoiceUiReset("engine_error", ok = false)
                 if (codeOverride == "语音") codeOverride = null
                 statusText = message
@@ -1621,6 +1667,7 @@ class IspeechImeService : InputMethodService() {
     private fun commitVoice() {
         val candidate = candidates.firstOrNull()
         voiceActive = false
+        disarmVoiceSessionGuard()
         traceVoiceUiReset("space_commit", ok = candidate != null)
         if (candidate == null) {
             renderCandidateView()
@@ -1637,6 +1684,7 @@ class IspeechImeService : InputMethodService() {
      */
     private fun commitVoiceText(text: String) {
         voiceActive = false
+        disarmVoiceSessionGuard()
         traceVoiceUiReset("engine_result", ok = text.isNotBlank())
         AsrTrace.i(
             voiceSessionId,
@@ -1686,6 +1734,7 @@ class IspeechImeService : InputMethodService() {
         dismissAiState()
         startVoiceTrace()
         voiceActive = true
+        armVoiceSessionGuard()
         statusText = getString(R.string.voice_listening)
         codeOverride = "语音"
         candidates = emptyList()
@@ -1699,6 +1748,7 @@ class IspeechImeService : InputMethodService() {
             },
             onError = { message ->
                 voiceActive = false
+                disarmVoiceSessionGuard()
                 traceVoiceUiReset("engine_error", ok = false)
                 if (codeOverride == "语音") codeOverride = null
                 statusText = message
@@ -1736,6 +1786,7 @@ class IspeechImeService : InputMethodService() {
     /** 取消语音识别并复位语音状态（不负责渲染）。 */
     private fun cancelVoice() {
         AsrTrace.i(voiceSessionId, AsrTrace.EV_CANCEL, "stage" to "service", "ms" to voiceElapsedMs())
+        disarmVoiceSessionGuard()
         if (voiceController?.isListening == true) voiceController?.stop()
         voskVoice?.cancel()
         voiceActive = false
@@ -2091,6 +2142,7 @@ class IspeechImeService : InputMethodService() {
         }
         if (voiceController?.isListening == true) voiceController?.stop()
         if (voskVoice?.isListening == true) voskVoice?.cancel()
+        disarmVoiceSessionGuard()
         voiceActive = false
         if (codeOverride == "语音") codeOverride = null
         punctor.reset()

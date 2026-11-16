@@ -119,7 +119,7 @@ adb logcat -d -s AsrTrace:* | grep -E 'ev=(timeout|error|blocked)'   # 只看异
 | `end` | `VoiceInputController.finish` / `stopListening` 分支、离线引擎 `finish` | 进入「等收尾结果」阶段，带 `limit_ms` |
 | `result` / `empty` | `VoiceInputController.onResults`、离线引擎收尾、模型下载收尾 | 会话闭环；`empty` = 回调了但没有文本 |
 | `error` | `VoiceInputController.onError`（带 `code` + `name`）、离线引擎各失败阶段 | 失败原因类别 |
-| `timeout` | `VoiceInputController.finishWatchdog` | 兜底超时触发并复位（`limit_ms=6000`） |
+| `timeout` | `VoiceInputController` 的 `startWatchdog` / `sessionWatchdog` / `finishWatchdog`、两个离线引擎的 `startWatchdog` / `finishWatchdog` + 收音循环、`IspeechImeService.armVoiceSessionGuard` | 兜底超时触发并复位；`stage=` 区分是哪一段超时（取值见 §八） |
 | `retry` | `VoiceInputController.onError`（识别器忙）、CUSTOM 建识别器失败回退 | 原地重试 / 静默回退不再静默 |
 | `cancel` | `VoiceInputController.stop` / `destroy`、`IspeechImeService.cancelVoice` / `resetState` | 会话被丢弃 |
 | `commit` | `IspeechImeService.commitVoiceText` | 最终结果写入输入框（只记长度） |
@@ -129,13 +129,47 @@ adb logcat -d -s AsrTrace:* | grep -E 'ev=(timeout|error|blocked)'   # 只看异
 
 单测：`app/src/test/java/com/ispeech/input/AsrTraceTest.kt`（行格式、缺省占位、空白压平、id 递增）。
 
-**当前埋点覆盖不到的（= VOCA-231 的定位结论）**：
+**判读口径**（真机采集时直接分辨触发源）：
 
-- `timeout` 只有 `VoiceInputController.finishWatchdog` 一处，且它只在**松手收尾**阶段挂表；
-  「已按下开始收音、服务一直不回」这一段**没有任何超时**，因此也不可能有 `timeout` 行。
-- `VoskSpeechEngine` / `FunAsrSpeechEngine` **完全没有超时分支**（收尾依赖工作线程自己走到底），
-  `start` 行固定带 `watchdog=none`；若 `AudioRecord.read()` 阻塞，日志会停在 `stage=recording` 之后再无一行。
-- 也就是说，三条判读口径：
-  **有 `begin` 无 `press`** → 松手事件没回来（收尾压根没触发）；
-  **有 `start` 无 `first_result`** → 识别服务收了会话不回话；
-  **有 `first_result` 无 `result` / `ui_reset`** → 只回中间结果、收尾永不来，UI 停在「识别中」。
+| 日志形态 | 结论 |
+| --- | --- |
+| 有 `begin` 无 `press` / `end` | 抬起事件没回来、收尾没被触发（现在会由 `timeout stage=session` 兜住） |
+| 有 `start` 无 `first_result` | 识别服务收了会话不回话（现在会由 `timeout stage=start` 在 10 秒内复位） |
+| 有 `first_result` 无 `result` / `ui_reset` | 只回中间结果、收尾不来（现在会由 `timeout stage=finish` 兜住） |
+| 有 `ui_reset` 且 `ok=true` | 链路正常，UI 已离开「识别中」 |
+
+`grep -c 'session='` 仍是「这个包到底有没有埋点」的判据；`grep -E 'ev=(timeout|error|blocked)'` 直接列出异常。
+
+## 八、语音「识别中」的超时收敛（VOCA-231）
+
+§七 的定位结论是「卡住 = UI 状态机没复位」，根因是**全链路只有一处超时**（松手后等收尾 6 秒），
+而且它只在收到抬起事件之后才挂表 —— 抬起事件丢失、识别服务不回话、离线引擎卡在 `AudioRecord.read()`
+三种情况都没有任何时限，语音键于是永久卡在「识别中」，之后每次按键再开始的尝试又被「已在收音」挡回。
+
+**时限集中在一处**：`app/src/main/java/com/ispeech/input/AsrTiming.kt`（共享规程 §7：不散落魔法值）。
+
+| 常量（毫秒） | 覆盖的阶段 | 到点做什么 |
+| --- | --- | --- |
+| `FIRST_CALLBACK_TIMEOUT_MS = 10_000` | 已下发开始收音 → 第一个回调（系统识别的 `onReadyForSpeech` 等 / 离线引擎真正开始收音） | 复位 + `voice_timeout_service` |
+| `SESSION_TIMEOUT_MS = 60_000` | 系统识别「收音中」硬上限（覆盖按住不放、抬起事件丢失） | 自动按松手处理（走 `finish()`，已说的话还能上屏） |
+| `FINISH_TIMEOUT_MS = 6_000` | 松手 / 二次点击 → 最终结果 | 复位 + `voice_timeout_result` |
+| `UI_SESSION_TIMEOUT_MS = SESSION + FINISH` | UI 侧最后一道（引擎彻底没接住时） | 丢弃会话 + `voice_timeout_session` |
+| `NO_AUDIO_TIMEOUT_MS = 10_000` | 离线引擎收音循环连续拿不到样本 | 退出自旋 + `voice_audio_error` |
+
+任何一条超时都必须做满三件事：①复位状态 ②给用户可读文案（`AsrTiming.messageFor(stage)`）
+③打 `ev=timeout` + `stage=`。缺任一件视为未完成（角色规程：禁止静默失败）。
+
+分层：引擎管**自己阶段**的时限（`VoiceInputController` 三段、两个离线引擎各两段 + 收音循环内的
+无音频判定）；`IspeechImeService.armVoiceSessionGuard` 管**整段 UI**，比引擎侧晚一个收尾窗口，
+所以「自动收尾让已说的话落地」这条正常路径不会被 UI 抢先掐断。离线引擎的 `cancel()` / `destroy()`
+与超时复位都**就地**把 `isListening` 置回 false —— 工作线程可能永远不返回，等它收尾等于永远等不到。
+
+`start` 埋点里的 `watchdog=` 字段就是这一节的接线状态：系统识别 `start+session+finish`、
+离线引擎 `start+finish`；`watchdog=none` 已经不再出现（静态检查会拦住回退）。
+
+回归：`AsrTimingTest`（时限层级、UI 兜底与收尾窗口的关系、每类超时都有独立可读文案）
++ `check_crosscut.py` 8b 段（时限只在 AsrTiming 定义、三段都挂表、收尾都摘表、中英文案齐全）。
+
+**仍未覆盖（下一步）**：抬起事件丢失的护栏目前是「60 秒后自动收尾」，没有把「再按一次 = 结束上一次」
+改成显式语义；桩识别服务（华为 `FakeRecognitionService`）仍需用户在设置里换引擎，代码只能早 10 秒
+告知，不能替它出结果。

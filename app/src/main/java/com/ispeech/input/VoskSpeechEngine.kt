@@ -65,7 +65,67 @@ class VoskSpeechEngine(private val context: Context) {
     /** 本次会话是否已打过 `first_result`。 */
     private var traceFirstResultLogged = false
 
-    /** 离线引擎的收尾完全依赖工作线程走到底：没有兜底超时，`watchdog=none` 恒定打出来。 */
+    /** 是否已进入「松手等收尾」阶段（[finish] 之后），决定兜底超时的判读与文案。 */
+    @Volatile
+    private var awaitingFinal = false
+
+    /** 工作线程是否真的开始收音（模型加载完 + `startRecording()` 成功）。 */
+    @Volatile
+    private var recordingStarted = false
+
+    /**
+     * 开始收音的兜底：模型加载 / `AudioRecord` 初始化卡住时复位并提示。
+     *
+     * 端侧引擎没有「识别服务不回话」这一问题，但有更糟的一种：工作线程压根没走到收音，
+     * `isListening` 一直为真 → 语音键永久卡住（旧实现里 `start` 行固定 `watchdog=none`）。
+     */
+    private val startWatchdog = Runnable {
+        if (!isListening || recordingStarted) return@Runnable
+        AsrTrace.w(
+            traceSession,
+            AsrTrace.EV_TIMEOUT,
+            "engine" to "VOSK",
+            "stage" to AsrTiming.STAGE_START,
+            "limit_ms" to AsrTiming.FIRST_CALLBACK_TIMEOUT_MS,
+            "ms" to elapsedMs(),
+        )
+        resetOnTimeout(AsrTiming.STAGE_START)
+    }
+
+    /** 收尾兜底：松手后工作线程没能走到底（解码卡住 / `read()` 阻塞）→ 强制复位。 */
+    private val finishWatchdog = Runnable {
+        if (!isListening || !awaitingFinal) return@Runnable
+        AsrTrace.w(
+            traceSession,
+            AsrTrace.EV_TIMEOUT,
+            "engine" to "VOSK",
+            "stage" to AsrTiming.STAGE_FINISH,
+            "limit_ms" to AsrTiming.FINISH_TIMEOUT_MS,
+            "first_result" to traceFirstResultLogged,
+            "ms" to elapsedMs(),
+        )
+        resetOnTimeout(AsrTiming.STAGE_FINISH)
+    }
+
+    /**
+     * 超时统一出口：立刻复位（不等工作线程），并把可读文案抛给调用方。
+     *
+     * 工作线程可能正卡在 `AudioRecord.read()` 上，等它自己走到底等于永远不等 ——
+     * 这里主动 `releaseAudio()` 让它拿到错误码退出，[isListening] 也在本线程置回 false。
+     */
+    private fun resetOnTimeout(stage: String) {
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        awaitingFinal = false
+        isListening = false
+        val notify = onError
+        clearCallbacks()
+        running.set(false)
+        releaseAudio()
+        notify?.invoke(context.getString(AsrTiming.messageFor(stage)))
+    }
+
+    /** 会话起点，用于算 `ms=`（与 [AsrTiming] 各条时限同一口径）。 */
     private fun elapsedMs(): Long = (SystemClock.elapsedRealtime() - traceStartMs).coerceAtLeast(0L)
 
     private fun traceFirstResult(kind: String, chars: Int) {
@@ -123,15 +183,24 @@ class VoskSpeechEngine(private val context: Context) {
         this.onPartial = onPartial
         this.onFinal = onFinal
         this.onError = onError
+        awaitingFinal = false
+        recordingStarted = false
         isListening = true
         AsrTrace.i(
             traceSession,
             AsrTrace.EV_START,
             "engine" to "VOSK",
             "model_ready" to true,
-            "watchdog" to "none",
+            "watchdog" to "start+finish",
+            "start_limit_ms" to AsrTiming.FIRST_CALLBACK_TIMEOUT_MS,
+            "finish_limit_ms" to AsrTiming.FINISH_TIMEOUT_MS,
             "ms" to elapsedMs(),
         )
+        // 收音阶段的两个时限：到点还没真正开始收音 → 复位（模型/录音起不来）；
+        // 已松手但工作线程没走完收尾 → 复位（旧实现这里完全没有兜底，isListening 会永久为真）
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        mainHandler.postDelayed(startWatchdog, AsrTiming.FIRST_CALLBACK_TIMEOUT_MS)
         // 模型加载很重（几十 MB），放后台线程；加载完再开始收音
         Thread({ runSession() }, "vosk-voice").also { worker = it }.start()
     }
@@ -143,10 +212,15 @@ class VoskSpeechEngine(private val context: Context) {
             AsrTrace.EV_END,
             "engine" to "VOSK",
             "listening" to isListening,
+            "limit_ms" to AsrTiming.FINISH_TIMEOUT_MS,
             "first_result" to traceFirstResultLogged,
             "ms" to elapsedMs(),
         )
         // 只置停止标志：收尾（读 finalResult 并回调）由工作线程完成，避免跨线程抢 recognizer
+        awaitingFinal = true
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        mainHandler.postDelayed(finishWatchdog, AsrTiming.FINISH_TIMEOUT_MS)
         running.set(false)
     }
 
@@ -160,16 +234,26 @@ class VoskSpeechEngine(private val context: Context) {
             "first_result" to traceFirstResultLogged,
             "ms" to elapsedMs(),
         )
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        awaitingFinal = false
         clearCallbacks()
         running.set(false)
         releaseAudio()
+        // 必须就地复位：旧实现只等工作线程收尾时才置 false，一旦它卡在 read() 上，
+        // 这个引擎就再也起不来（下一次 start 直接被 already_listening 挡掉）。
+        isListening = false
     }
 
     /** 释放资源（输入法服务 onDestroy 调用）。 */
     fun destroy() {
+        mainHandler.removeCallbacks(startWatchdog)
+        mainHandler.removeCallbacks(finishWatchdog)
+        awaitingFinal = false
         clearCallbacks()
         running.set(false)
         releaseAudio()
+        isListening = false
         runCatching { recognizer?.close() }
         recognizer = null
         runCatching { model?.close() }
@@ -215,17 +299,40 @@ class VoskSpeechEngine(private val context: Context) {
             }
             audio = record
             record.startRecording()
+            // 真正开始收音了：模型加载 / AudioRecord 初始化这段的兜底时限到此结束，
+            // 之后交给 finish() 挂的收尾时限与服务侧会话上限（见 AsrTiming）。
+            recordingStarted = true
+            mainHandler.removeCallbacks(startWatchdog)
             running.set(true)
             val buffer = ShortArray(BUFFER_SHORTS)
             var reads = 0
             var emptyReads = 0
+            var lastSampleMs = SystemClock.elapsedRealtime()
+            var audioDead = false
             while (running.get()) {
                 val read = record.read(buffer, 0, buffer.size)
                 if (read <= 0) {
                     emptyReads++
+                    // 连续拿不到样本 = 麦克风被占用 / 录音权限被系统回收。继续自旋只是把语音键
+                    // 按死在这里（旧实现会一直转，isListening 恒为真），到点主动失败退出。
+                    val idleMs = SystemClock.elapsedRealtime() - lastSampleMs
+                    if (idleMs >= AsrTiming.NO_AUDIO_TIMEOUT_MS) {
+                        audioDead = true
+                        AsrTrace.w(
+                            traceSession,
+                            AsrTrace.EV_TIMEOUT,
+                            "engine" to "VOSK",
+                            "stage" to AsrTiming.STAGE_AUDIO,
+                            "limit_ms" to AsrTiming.NO_AUDIO_TIMEOUT_MS,
+                            "empty_reads" to emptyReads,
+                            "ms" to elapsedMs(),
+                        )
+                        break
+                    }
                     continue
                 }
                 reads++
+                lastSampleMs = SystemClock.elapsedRealtime()
                 if (rec.acceptWaveForm(buffer, read)) {
                     val text = textOf(rec.result)
                     if (text.isNotBlank()) {
@@ -240,8 +347,11 @@ class VoskSpeechEngine(private val context: Context) {
                     }
                 }
             }
-            // 收尾：取最终结果（用户点「结束」时）
-            val final = textOf(rec.finalResult)
+            // 收尾：取最终结果（用户点「结束」时）。录音彻底没数据时不去解，
+            // 否则会把「麦克风没信号」说成「你没说话」。
+            val final = if (audioDead) "" else textOf(rec.finalResult)
+            awaitingFinal = false
+            mainHandler.removeCallbacks(finishWatchdog)
             AsrTrace.i(
                 traceSession,
                 if (final.isBlank()) AsrTrace.EV_EMPTY else AsrTrace.EV_RESULT,
@@ -254,7 +364,13 @@ class VoskSpeechEngine(private val context: Context) {
             )
             post {
                 isListening = false
-                if (final.isNotBlank()) onFinal?.invoke(final) else onError?.invoke("没听清，请再说一次")
+                if (final.isNotBlank()) {
+                    onFinal?.invoke(final)
+                } else if (audioDead) {
+                    onError?.invoke(context.getString(AsrTiming.messageFor(AsrTiming.STAGE_AUDIO)))
+                } else {
+                    onError?.invoke("没听清，请再说一次")
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "离线识别失败: ${e.message}")
