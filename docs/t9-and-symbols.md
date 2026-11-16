@@ -68,7 +68,7 @@
 
 ```
 [⌨] [符] [☺] [短语] [剪贴] [AI] [🎤] [⚙]
- 1.0  1.0  1.0  1.3    1.2   1.1  1.1  1.0   ← 权重和 8.8
+ 1.0  1.0  1.0  1.3    1.2   1.1  1.1  1.0   ← 权重和 8.7（`check_t9.py` 打印同值）
 ```
 
 - 第 1 键 `KeyAction.SWITCH_IME`：切系统其它输入法（服务侧实现），键面是键盘图标（`ic_ime_switch`）。
@@ -127,35 +127,19 @@ T9Layouts.t9ToLetterPatterns("2", lookup) // 展开 + 查词库，返回命中�
 
 ### 4.1 已落地（Agent B）
 
-```kotlin
-// KeyDef.kt:188（枚举末尾，既有值 ordinal 不变）
-T9("九宫格"),
-// KeyDef.kt:78（枚举末尾）
-SWITCH_IME,
+只给符号引用，不嵌源码摘录、也不写 `文件:行号` —— 摘录和行号必然随主干腐烂：上一版这一节里的
+11 处行号引用只有 1 处还对（`KeyAction.SWITCH_IME` 那条），工具栏摘录抄的「⌨输入法」/ `weight = 1.6f`
+也与代码不符（键面是「⌨」+ `ic_ime_switch`、权重是 `1f`）。键序 / 键面 / 权重 / 图标的真值看 §1.5，
+`tools/verify/check_t9.py` 直接解析 `SoftKeyboardView.toolbarKeys()` 校验那张表。
 
-// KeyboardLayouts.kt:48-50 —— 数字页底行的九宫格入口（第 137 行调用）
-private fun t9SwitchKey(): KeyDef =
-    KeyDef.fn(KeyAction.LAYOUT, "9键", 1.5f, KeyStyle.SPECIAL, KeyboardLayoutKind.T9)
-
-// KeyboardLayouts.kt:230 —— 符号页末尾追加更多符号
-fun symbols(): List<KeyboardPage> = listOf(/* 符号1、符号2 */) + T9Layouts.moreSymbolPages()
-
-// KeyboardLayouts.kt:251 —— 表情页末尾追加颜文字
-fun emoji(): List<KeyboardPage> = EmojiData.categories.map { /* 现有实现 */ } + T9Layouts.kaomojiPages()
-
-// KeyboardLayouts.kt:256-262 —— 分派
-KeyboardLayoutKind.T9 -> T9Layouts.pages()
-
-// SoftKeyboardView.kt:262-285 —— 8 键工具栏
-// （外层 HorizontalScrollView 见 :249-258，最小宽度常量见 :599）
-private fun toolbarKeys(): List<KeyDef> = listOf(
-    KeyDef.fn(KeyAction.SWITCH_IME, "⌨输入法", weight = 1.6f, style = KeyStyle.SPECIAL),
-    /* 符、☺、短语、剪贴、AI、🎤、⚙ 原样保留（工具栏 8 键；中/英 由字母页 Shift 键承担） */
-)
-
-// SoftKeyboardView.kt:129 —— setLayout 支持 page（默认值不变，旧调用点不受影响）
-fun setLayout(kind: KeyboardLayoutKind, page: Int = 0)
-```
+- `input/keyboard/KeyDef.kt`：`KeyboardLayoutKind.T9("九宫格")`、`KeyAction.SWITCH_IME`（都加在枚举末尾，既有值 ordinal 不变）
+- `input/keyboard/KeyboardLayouts.kt`：`t9SwitchKey()`（数字页底行的九宫格入口，`numbers()` 调用）、
+  `symbols()` 末尾 `+ T9Layouts.moreSymbolPages()`、`emoji()` 末尾 `+ T9Layouts.kaomojiPages()`、
+  `pages()` 分派 `KeyboardLayoutKind.T9 -> T9Layouts.pages()`
+- `input/SoftKeyboardView.kt`：`toolbarKeys()` —— 工具栏 8 键，第 1 键 `KeyAction.SWITCH_IME`，
+  键面「⌨」+ 图标 `iconRes = R.drawable.ic_ime_switch`、`weight = 1f`；`buildToolbar()` 外层
+  `HorizontalScrollView(isFillViewport = true)` + `TOOLBAR_KEY_MIN_WIDTH_DP = 40` 兜底；
+  `setLayout(kind, page: Int = 0)` 支持 pageOffset（默认值不变，旧调用点不受影响）
 
 ### 4.2 服务侧接线（主 Agent，已落地并真机验证）
 

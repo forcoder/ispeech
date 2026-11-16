@@ -348,9 +348,16 @@ def check_switch_ime_chain() -> None:
         "KeyAction 声明了 SWITCH_IME",
         f"{rel(KEYDEF)} 的 KeyAction 未声明 SWITCH_IME",
     )
+    # 键面文案从 toolbarKeys() 现解析：硬编码过一次「⌨输入法」，主干与 v1.6 出包分支的
+    # 键面分别是「⌨」「输」，PASS 文案两边都不符（VOCA-167 AC-1 覆盖范围 ③）。
+    face = re.search(
+        r'KeyDef\.fn\(\s*KeyAction\.SWITCH_IME,\s*"([^"]+)"',
+        function_region(view, r"private fun toolbarKeys\(\)"),
+    )
+    ime_key_face = f"键面「{face.group(1)}」" if face else "toolbarKeys() 里解析不到 SWITCH_IME 键面"
     check(
         "KeyAction.SWITCH_IME" in view,
-        "SoftKeyboardView 工具栏含 KeyAction.SWITCH_IME（「⌨输入法」）",
+        f"SoftKeyboardView 工具栏含 KeyAction.SWITCH_IME（{ime_key_face}）",
         f"{rel(VIEW)} 工具栏未出现 KeyAction.SWITCH_IME",
     )
     check(

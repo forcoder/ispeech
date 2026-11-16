@@ -201,6 +201,12 @@ tools/deploy/deploy.sh --target emulator                  # 从 main 出包并�
 
 ## v1.5 真机实测记录（远端构建机 emulator-5554 / Android 14）
 
+> **这一表属于哪一包**：`dist/ispeech-release-v1.5.apk`（SHA256 `490b152a…`，versionCode 5 / versionName 1.5）。
+> 按那颗包里 `classes3.dex` 的 `toolbarKeys` 常量序，v1.5 那一代工具栏是 8 键
+> `⌨输入法 中/英 符 ☺ 短语 剪贴 AI ⚙`（切换键在第 1 键、键面就是「⌨输入法」，没有「🎤」键）。
+> 主干**现在**的键序见上面「工具栏（8 键）」，与这一代不一样：本表是历史记录，只适用于上面那颗包，
+> **不能当新包的自测凭据**——装了新包请照第 1~13 步现跑。
+
 | 用例 | 结果 |
 | --- | --- |
 | 五笔基本输入 `wqiy` + 空格 | 候选「1 你 2 仰泳(词)」→ 空格上屏「你」；`filesDir/user_dict.txt` 记 `wqiy 你 2` |
