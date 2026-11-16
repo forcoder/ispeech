@@ -90,7 +90,10 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 | `ASSOCIATION_ANCHOR_CHARS` | ≥ 1 | **0** | 1 |
 | 脚本 exit code | 0 | **1（FAIL）** | 0（PASS） |
 
-- 两列数字都是 2026-11-16 由 `dist/ispeech-internal-v1.6.apk`（git blob `6607aafa`，sha256 与设备侧一致）与 VOCA-121 附件 `ispeech-v1.5-voca121-arm64.apk` 实测得到，不是推算。
+- 两列数字都是 2026-11-16 实测，不是推算：试包列取自本分支 git blob `6607aafa`（`git cat-file blob` 导出），
+  并与 `FMR0224913042917` 现装的 `base.apk` 逐字节相同——`adb pull` 后 `shasum -a 256` = `9cddcec5…`、98,416,118 字节、
+  `versionCode=6 / versionName=1.6`，所以「仓库里那份」和「手机上装的这份」是同一份字节，任一边取证都覆盖另一边。
+  对照包列取自 VOCA-121 附件 `ispeech-v1.5-voca121-arm64.apk`（装机专员在 `23F0224224000950` 上验证过的 `ccdbfa83…`）。
 - 正对照包 = 装机专员在 `23F0224224000950` 上验证过的那份（VOCA-192 `01a1da16`），它是 v1.5/5；**不要拿它覆盖已装的 1.6/6**（版本号方向不对，会触发降级），复跑 AC-1…AC-5 只用最终包。
 - 新增修复若带来新类 / 新常量，出包前把它的 dex 符号追加进上面 `for t in …` 与本表；只用 `grep -a` 兜底时判「有没有命中」，不要拿它的行数当计数。
 
