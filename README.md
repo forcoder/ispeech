@@ -181,6 +181,8 @@ tools/deploy/deploy.sh --target emulator                  # 从 main 出包并�
 **主页与「关于智语」显示的版本必须等于 `dumpsys package` 的 `versionName`**。
 版本号只有一个来源 —— `app/build.gradle.kts` 的 `versionName` → `BuildConfig.VERSION_NAME`，
 业务代码里不再存副本（VOCA-233：v1.6 曾因 `ISPEECH_VERSION = "1.5"` 显示旧版本）。
+门禁退出码 1（版本不一致）与 2（层级读不到、关于页没真正验到）都会拦住出包：
+没验到不等于验过了。
 
 ## 安装测试（APK）
 

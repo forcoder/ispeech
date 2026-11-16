@@ -19,8 +19,12 @@
     python3 tools/deploy/check_version_display.py -s emulator-5554
     python3 tools/deploy/check_version_display.py --wait 4        # 慢设备加长进页面等待
 
-输出：每条检查一行 `PASS` / `FAIL` / `WARN`，末尾 `SUMMARY: ...`；任一 FAIL 退出码 1。
-导航失败（机型 / 语言 / 无障碍差异）报 WARN 不阻断；数值不一致报 FAIL。
+输出：每条检查一行 `PASS` / `FAIL` / `WARN`，末尾 `SUMMARY: ...`。
+
+退出码：`0` 全部判定通过；`1` 有 FAIL；`2` 没有 FAIL 但有 WARN（即存在**未判定**的项）。
+WARN 不返回 0 —— v1.6 正是因为门禁「没看到不一致」就放行才漏出去的，一项都没真正
+验过的运行不能算通过。调用方（`deploy.sh` 第 ⑩ 步）需要能区分「不一致」和「没验到」，
+但两者都不该出包。
 """
 
 from __future__ import annotations
@@ -42,6 +46,10 @@ RES_DIRS = (ROOT / "app" / "src" / "main" / "res" / "values",
             ROOT / "app" / "src" / "main" / "res" / "values-en")
 # 「关于智语」入口按资源 id 取文案：设备语言不是中文时也能点进去，改文案不用改脚本
 ABOUT_ENTRY_KEYS = ("about_title", "settings_about_desc")
+# 页面切换判据：用「只有该页才渲染」的资源，不靠坐标与截图
+# 首页卡片用 settings_about_desc，关于页正文用 about_desc —— 两者不同，可作区分依据
+HOME_ONLY_KEYS = ("settings_intro",)
+ABOUT_ONLY_KEYS = ("about_desc",)
 
 _passed = 0
 _failed = 0
@@ -110,8 +118,8 @@ class Device:
         return (int(m.group(1)), int(m.group(2))) if m else (1080, 1920)
 
 
-def about_entry_hints() -> tuple[str, ...]:
-    """首页「关于智语」卡片的标题与副标题（中英各一份）。"""
+def resource_values(ids: tuple[str, ...]) -> tuple[str, ...]:
+    """按资源 id 取中英文文案，用于在 uiautomator 层级里定位页面元素。"""
     hints = []
     for directory in RES_DIRS:
         path = directory / "strings.xml"
@@ -122,9 +130,18 @@ def about_entry_hints() -> tuple[str, ...]:
         except ET.ParseError:
             continue
         for el in root.iter("string"):
-            if el.get("name") in ABOUT_ENTRY_KEYS and (el.text or "").strip():
+            if el.get("name") in ids and (el.text or "").strip():
                 hints.append(el.text.strip())
     return tuple(dict.fromkeys(hints))
+
+
+def about_entry_hints() -> tuple[str, ...]:
+    """首页「关于智语」卡片的标题与副标题（中英各一份）。"""
+    return resource_values(ABOUT_ENTRY_KEYS)
+
+
+def has_text(nodes: list, hints: tuple[str, ...]) -> bool:
+    return any(any(hint in text for hint in hints) for text, _ in nodes)
 
 
 def installed_version(dev: Device) -> str:
@@ -174,6 +191,10 @@ def find_entry(nodes: list, hints: tuple[str, ...], size: tuple[int, int]):
 
 
 def open_home(dev: Device, wait: float) -> list:
+    # 先 force-stop 再启动：首页顶部才有「版本 v…」那行。复用已在栈里的 Activity 会保留
+    # 上一轮的滚动位置（找关于页入口时下滚过），版本行滚出屏幕就读不到 —— 门禁会假 WARN。
+    dev.shell(f"am force-stop {PKG}")
+    time.sleep(1.0)
     dev.shell(f"am start -n {MAIN_ACTIVITY}")
     time.sleep(wait)
     return dump_nodes(dev)
@@ -228,18 +249,33 @@ def main() -> int:
     else:
         dev.shell(f"input tap {entry[0]} {entry[1]}")
         time.sleep(args.wait)
-        about_ver = shown_version(dump_nodes(dev))
-        if about_ver:
-            check(
-                about_ver == pkg_ver,
-                f"「关于智语」页展示版本 = {about_ver}（与包一致）",
-                f"关于页展示「{about_ver}」但包是 {pkg_ver} —— 版本展示没有走 BuildConfig.VERSION_NAME",
-            )
+        about_nodes = dump_nodes(dev)
+        about_only = resource_values(ABOUT_ONLY_KEYS)
+        home_only = resource_values(HOME_ONLY_KEYS)
+        # 必须先证明页面真的切到了关于页，再读那行版本：tap 没生效时层级仍是首页，
+        # 首页的版本行会被当成关于页版本 ——「主页对、关于页错」反而会全 PASS。
+        if not about_nodes:
+            report("WARN", "关于页拿不到 UI 层级（uiautomator 未返回节点），该项未判定")
+        elif not has_text(about_nodes, about_only):
+            report("FAIL", "点「关于智语」后没有进到关于页：层级里找不到关于页独有的正文文案 "
+                            f"{list(about_only)}，这一项没有真的验过")
+        elif has_text(about_nodes, home_only):
+            report("FAIL", "点「关于智语」后仍停在首页：首页独有文案 "
+                            f"{list(home_only)} 还在层级里，关于页版本未被读取")
         else:
-            report("WARN", "关于页未取到版本文本，该项未判定")
+            about_ver = shown_version(about_nodes)
+            if about_ver:
+                check(
+                    about_ver == pkg_ver,
+                    f"「关于智语」页展示版本 = {about_ver}（与包一致）",
+                    f"关于页展示「{about_ver}」但包是 {pkg_ver} —— 版本展示没有走 BuildConfig.VERSION_NAME",
+                )
+            else:
+                report("WARN", "关于页未取到版本文本，该项未判定")
 
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
-    return 1 if _failed else 0
+    # WARN = 有一项没验到。没验到不等于通过，退出码要和「通过」区分开，调用方才有得决定。
+    return 1 if _failed else (2 if _warned else 0)
 
 
 if __name__ == "__main__":

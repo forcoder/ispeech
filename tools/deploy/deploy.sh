@@ -265,11 +265,19 @@ deploy_one() {
 
     # ---------- ⑩ 门禁：应用内展示版本 == 包管理器版本（VOCA-233）----------
     # v1.6 的「显示 1.5」就是从这里漏掉的：badging / dex 只看包侧，看不到用户那一行字。
+    # 退出码 1 = 不一致，2 = 有一项没验到（uiautomator 拿不到层级 / 入口点不到）。
+    # 两者都不出包 —— 「没验到」当「过了」正是这次要堵的静默放行口。
     info "[${serial}] 门禁：应用内展示版本 == dumpsys versionName"
-    if python3 "${SCRIPT_DIR}/check_version_display.py" -s "${serial}"; then
+    rc=0
+    python3 "${SCRIPT_DIR}/check_version_display.py" -s "${serial}" || rc=$?
+    if [ "${rc}" -eq 0 ]; then
         info "[${serial}] 版本显示门禁通过"
-    else
+    elif [ "${rc}" -eq 1 ]; then
         die "[${serial}] 应用内展示版本与包版本不一致（见上方 FAIL），禁止出包"
+    elif [ "${rc}" -eq 2 ]; then
+        die "[${serial}] 版本显示门禁有一项未能判定（见上方 WARN），UI 层级没读到就不算验过，禁止出包"
+    else
+        die "[${serial}] 版本显示门禁异常退出（rc=${rc}），禁止出包"
     fi
 }
 
