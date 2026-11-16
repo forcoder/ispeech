@@ -13,9 +13,11 @@ import java.io.File
  * `app/build/test-results/testDebugUnitTest/TEST-com.ispeech.engine.WubiEngineInitCostTest.xml`。
  *
  * main vs 本分支的对照数（同一台机、同一个 JDK）：把本文件原样拷进 `git archive origin/main`
- * 的导出目录，两边各跑
- * `./gradlew :app:testDebugUnitTest --tests "com.ispeech.engine.WubiEngineInitCostTest" --rerun-tasks`
- * 三遍取中位数；本文件在 main 上同样可编译（只用到了两版都有的四个计数属性）。
+ * 的导出目录，跑
+ * `./gradlew :app:testDebugUnitTest --tests "com.ispeech.engine.WubiEngineInitCostTest" --rerun-tasks`。
+ * **测法必须两树交替 A/B、每棵树丢弃第一遍**，各取三遍有效值再比中位数：单侧连跑会让先跑的那棵树
+ * 独享 `wubi86.dict` 的冷文件缓存（实测比热缓存高出一倍以上），照「一边跑完三遍再跑另一边」得到的
+ * 差值不是本次改动的成本。本文件在 main 上同样可编译（只用到了两版都有的四个计数属性）。
  */
 class WubiEngineInitCostTest {
 

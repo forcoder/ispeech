@@ -35,8 +35,19 @@ adb shell pm clear com.ispeech.ime
 
 ```bash
 adb logcat -c
-adb logcat -s IspeechIme:D IspeechIme:I IspeechIme:W | grep -E "phrase_learn|phrase_remove"
+adb logcat -s IspeechIme:D IspeechIme:I IspeechIme:W UserDictStore:I | grep -E "phrase_learn|phrase_remove"
 ```
+
+> `-s` 是白名单，没列的 tag 会被整条滤掉，`grep` 只能在它已经放行的行里挑。本文涉及两类日志、两个 tag，
+> **两个都必须列**：`phrase_learn` 走 `TAG="IspeechIme"`（发射点 `IspeechImeService.learnPhrase` /
+> `onCommit` 分支），`phrase_remove` 走 `UserDictStore`（发射点 `KeyboardViewModel.removeUserWord`）。
+> 少写 `UserDictStore:I` 会让 §5 的 AC-3.10 永远是 0 命中，那是文档的错，不是功能的错。
+>
+> 忘了挂前台管道（或中途断线重连）时，用同一份 buffer 事后补抓，判据不变：
+>
+> ```bash
+> adb logcat -d | grep -E "phrase_learn|phrase_remove"
+> ```
 
 词库落盘检查（每次验证前后各取一次）：
 
@@ -61,6 +72,13 @@ ADR §1 的 `F1` 风险点是「本服务自己造成的上屏把上一跳误判
 - `user_dict.txt` 实际新增对应条目，`count=1`。
 
 判据（可量化口径，与裁决 §3.5 真机段「① 组连续 10 次无一次误中断」一致）：**10 次拼接 → `commit` 10 条、`reason=interrupt` 0 条**；两项任一不达即 `F1` 成立，按 ADR §1 降级方案处理（调大 `selectionTolerance` 或改回只比位置），并把计数写进报告。
+
+`commit` 不足 10 条时**先归因再判 `F1`**：状态机还会给出 `window` / `existing` / `repeat` /
+`clock_backwards`（`phrase_learn skipped reason=…`）与 `undecidable`
+（`phrase_learn undecidable first=… second=…`，WARN 级）这几类，见
+`PhraseLearningTracker.kt` 的 `PhraseSkipReason`。这几类是**字对没选好**（超出时间窗 / 系统已有 /
+同字连打 / 全码推不出），不是学习失效——换一个不含系统已有词、码可推导的字对重跑，并把实际出现的
+reason 原文记进报告；只有换字对之后 `commit` 仍不足 10 条，才计入上面 `F1` 的判据。
 
 ### ② 拼完第一字后移动宿主光标
 
@@ -195,7 +213,9 @@ python3 /tmp/cand_seq.py ./cand_before.xml
 1. 设置 → 用户词库：能看到学到的「喂猫」条目；
 2. 单条删除它，回到输入框输入 `klqt`，用 §2.1 的命令再抓一张快照：序列中**不再出现「喂猫」**，
    其余同码候选一条不少、「中国银行」回到 **index 0**（AC-3.10 在 v1.1.2 里是序列断言，不写「不再置顶」）；
-   日志出现 `phrase_remove code=klqt text=喂猫`；
+   日志出现 `phrase_remove code=klqt text=喂猫`（**该条 tag 是 `UserDictStore`**、级别 `I`，发射点
+   `KeyboardViewModel.removeUserWord`，不是 `IspeechIme`——§0 的 `-s` 白名单已把它列上；抓不到先按
+   §0 的事后补抓式 `adb logcat -d | grep phrase_remove` 复核，再判 fail）；
 3. 整体「清空用户词库」后再输入 `klqt`：只剩系统词库候选，项数回到 §2.1 的 2。
 
 ## 6. AC-3.11：连续 10 次学习无 ANR
