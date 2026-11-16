@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.ispeech.R
@@ -52,21 +53,35 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
      *
      * [isAvailable] 只判断「有没有服务能被绑定」，但部分 ROM（实测华为 ALN-AL00）只预置了一个桩
      * 服务（`com.huawei.vassistant…FakeRecognitionService`）：绑得上、却永远不返回结果，
-     * 表现就是「说完不出字」。系统规范要求真正的识别服务以 [BIND_PERMISSION] 保护自己，
-     * 桩服务没有该保护权限，据此可把它们区分出来。
+     * 表现就是「说完不出字」。桩服务的可辨识特征是它挂在语音助手接口上、由
+     * `BIND_VOICE_INTERACTION` 保护，据此与真识别服务区分（判据见 [isUsableRecognitionService]）。
+     *
+     * 这条判定是语音键的前置门禁（[IspeechImeService] 拦住「点了没反应」的机器并给出指引），
+     * 判错的方向必须是「放行 + 由 [AsrTiming] 的时限兜住」，而不是「一律拦死」。
      */
     fun hasUsableService(): Boolean = queryServices().any { usableService(it) }
 
-    /** 设备上声明可响应 `ACTION_RECOGNIZE_SPEECH` 的服务（查询失败返回空列表）。 */
-    private fun queryServices(): List<ResolveInfo> = runCatching {
-        context.packageManager.queryIntentServices(
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH),
-            0,
-        )
-    }.getOrNull().orEmpty()
+    /**
+     * 设备上的识别服务（查询失败返回空列表）。
+     *
+     * 真正的识别服务注册在 [RecognitionService.SERVICE_INTERFACE] 上；
+     * `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` 是**启动识别界面的 Activity** 用的 action，
+     * 拿它查服务在实测机上是恒空的（API 34 google_apis：接口 action 命中 2 个服务，
+     * 旧 action 命中 0 个），所以以接口 action 为准、旧 action 只作个别 ROM 的兜底。
+     */
+    private fun queryServices(): List<ResolveInfo> {
+        val pm = context.packageManager
+        val byInterface = runCatching {
+            pm.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
+        }.getOrNull().orEmpty()
+        if (byInterface.isNotEmpty()) return byInterface
+        return runCatching {
+            pm.queryIntentServices(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0)
+        }.getOrNull().orEmpty()
+    }
 
     private fun usableService(service: ResolveInfo): Boolean =
-        service.serviceInfo?.permission == BIND_PERMISSION
+        isUsableRecognitionService(service.serviceInfo?.permission)
 
     private var onPartial: ((String) -> Unit)? = null
     private var onFinal: ((String) -> Unit)? = null
@@ -164,9 +179,10 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     }
 
     /**
-     * 识别服务探测埋点：把「设备上有哪些识别服务、其中几个真正受
-     * [BIND_PERMISSION] 保护」打出来 —— 华为 ALN-AL00 的 `FakeRecognitionService`
-     * 就是「绑得上、永不回结果」的典型，只靠 [isAvailable] 完全看不出来。
+     * 识别服务探测埋点：把「设备上有哪些识别服务、几个可用、几个是语音助手挂出来的桩」打出来 ——
+     * 华为 ALN-AL00 的 `FakeRecognitionService` 就是「绑得上、永不回结果」的典型，
+     * 只靠 [isAvailable] 完全看不出来。`usable=0` 与 `stubs>0` 同时出现，才说明这台机器
+     * 需要换引擎而不是催用户重试。
      */
     private fun logBind(asr: AsrSettings) {
         val services = queryServices()
@@ -177,6 +193,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
             "requested" to if (asr.engine == AsrEngine.CUSTOM) asr.serviceComponent.ifBlank { "system_default" } else "system_default",
             "services" to services.size,
             "usable" to services.count { usableService(it) },
+            "stubs" to services.count { !usableService(it) },
             "first" to services.firstOrNull()?.let { "${it.serviceInfo.packageName}/${it.serviceInfo.name}" },
             "ms" to elapsedMs(),
         )
@@ -579,10 +596,32 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         mainHandler.post(block)
     }
 
-    private companion object {
-        /** 真正的 RecognitionService 必须以该权限自保护（[SpeechRecognizer] 依赖它区分桩服务）。 */
-        const val BIND_PERMISSION = "android.permission.BIND_RECOGNITION_SERVICE"
-
-        // 超时取值不在这里：全链路时限集中在 [AsrTiming]（VOCA-231，禁止散落魔法值）
-    }
+    // 超时取值不在这里：全链路时限集中在 [AsrTiming]（VOCA-231，禁止散落魔法值）
 }
+
+/**
+ * 语音助手桩服务的保护权限：识别服务声明它，说明这个服务不是给转写用的（实测华为 ALN-AL00）。
+ * 判据见 [isUsableRecognitionService]。
+ */
+internal const val STUB_RECOGNITION_PERMISSION = "android.permission.BIND_VOICE_INTERACTION"
+
+/**
+ * 「声明了 [permission] 的识别服务能不能用」——[VoiceInputController.hasUsableService] 的判据，
+ * 抽成纯函数便于单测（这条判错了就是「点语音键没反应」，不该只能靠真机才发现）。
+ *
+ * 实测依据（2026-11-16，API 34 google_apis 镜像 / 华为 ALN-AL00）：
+ * - 真识别服务（`com.google.android.as/.AiAiSpeechRecognitionService`、
+ *   `com.google.android.tts/.GoogleTTSRecognitionService`）在接口 action 下命中，且 **permission=null**；
+ * - 该镜像 `pm list permissions` 里既没有 `BIND_SPEECH_RECOGNITION_SERVICE`，也没有旧代码写的
+ *   `BIND_RECOGNITION_SERVICE`（后者在系统里根本不存在）；
+ * - 华为 ALN-AL00 的 `FakeRecognitionService` 声明 [STUB_RECOGNITION_PERMISSION]，
+ *   实测唯一要拦的就是它。
+ *
+ * 旧实现要求「权限恰好等于 `android.permission.BIND_RECOGNITION_SERVICE`」：那个字符串不存在，
+ * `usable` 于是恒为 0，语音键在**任何一台正常机器**上都被拦成 `blocked reason=no_usable_service`，
+ * 压根进不到「识别中」（本单要复测的超时分支因此永远复测不到）。
+ * 现在只拦「明确挂在语音助手权限上的桩」，其余一律放行：判错的代价从「功能永久不可用」
+ * 降为「由 [AsrTiming] 的时限在 10 秒内复位并给出可读文案」——可恢复的错误才是可接受的错误。
+ */
+internal fun isUsableRecognitionService(permission: String?): Boolean =
+    permission != STUB_RECOGNITION_PERMISSION
