@@ -229,3 +229,43 @@ sherpa-onnx），它的模型源 `http://cvm.agentai0.com/funasr/sherpa-onnx-par
 仍未解释的一条：报障截图里那个单候选「饭」。模型若从未下成，离线引擎不该出字；但现装包非 debuggable
 （`run-as: package not debuggable`），拿不到 `filesDir` 去证明模型在不在。复测时按日志判，不要靠猜——
 `ev=start model_ready=true` 与 `ev=first_result` 同时出现才说明那次出字来自 ASR。
+
+## 十、`hasUsableService()` 恒为假：语音键根本进不到「识别中」（2026-11-16 实测坐实并修复）
+
+§九 只解释了「这台华为机器为什么跑不到超时分支」。本轮在 API 34 `google_apis` 镜像（AVD
+`ispeech_test`，`sdk_gphone64_arm64`）上用只读的 PackageManager 查询复核，发现判据本身是错的，
+而且**不止华为那一台**：
+
+```
+$ adb -s emulator-5554 shell cmd package query-services -a android.speech.action.RECOGNIZE_SPEECH
+No services found                                    ← 旧代码查的就是这个 action，恒空
+
+$ adb -s emulator-5554 shell cmd package query-services -a android.speech.RecognitionService
+2 services found:
+  AiAiSpeechRecognitionService   (com.google.android.as)   permission=null
+  GoogleTTSRecognitionService    (com.google.android.tts)  permission=null
+
+$ adb -s emulator-5554 shell pm list permissions | grep -iE 'speech|recogn'
+permission:android.permission.MANAGE_SPEECH_RECOGNITION
+permission:android.permission.BIND_MUSIC_RECOGNITION_SERVICE      ← 没有 BIND_SPEECH_RECOGNITION_SERVICE
+$ … | grep -c BIND_RECOGNITION_SERVICE  → 0                        ← 旧代码比对的字符串在系统里不存在
+```
+
+**结论**：修复前 `hasUsableService()` = 「用 Activity 的 action 查服务」∩「权限恰好等于一个不存在的
+字符串」，两个条件各自都恒假，所以它在**任何**机器上都返回 false。`IspeechImeService.kt:1585` 拿它当
+语音键的前置门禁，于是每次点麦克风都直接落到 `blocked reason=no_usable_service` + 「服务不可用」，
+`SYSTEM` 引擎永久不可用，本单要复测的 `ev=timeout stage=` 三条分支也就永远复测不到。
+
+判据不能反过来写成「权限必须等于 `BIND_SPEECH_RECOGNITION_SERVICE`」——实测真服务声明的是
+`permission=null`，那样写还是恒假。现在的规则只拦**实测唯一确认的桩特征**（语音助手的
+`BIND_VOICE_INTERACTION`，见 §9.2），其余一律放行：误拦的代价是功能永久不可用且没有日志可循，
+误放的代价由 §八 的 `FIRST_CALLBACK_TIMEOUT_MS` 在 10 秒内复位并给出可读文案，是可恢复的错误。
+判据抽成纯函数 `isUsableRecognitionService()`，四种实测取值都有单测
+（`RecognitionServiceUsabilityTest`）。
+
+`ev=bind` 因此多了一个 `stubs=` 字段：`services=2 usable=2 stubs=0` 说明这台机器该正常出字，
+`services=1 usable=0 stubs=1` 说明命中的是助手桩、该换引擎——这两种情况以前在日志里长得一模一样。
+
+**与 VOCA-310 的关系**：310 登记的是「查询 action 用错」这半条，本轮把 action 与权限判据一起改了，
+因为只修 action 在这台 AVD 上仍然 `usable=0`（真服务 `permission=null`），本单验收照旧过不去。
+310 的代码部分已并入本 PR，剩下的应是真机验证与关单。
