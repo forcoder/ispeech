@@ -1,0 +1,4 @@
+AC2_soft2x	host='。'	wall_ms=179
+AC2_soft2x_gap500ms	host='  '
+AC2_soft3x	host='。 '
+AC3_buffer	after1='是'	after2='是疑是地上霜'

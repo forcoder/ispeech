@@ -1,0 +1,22 @@
+START	frame=988	host='shi'
+AC4_STEP	i=1	shift=198	err=2.8	cum=198
+AC4_STEP	i=2	shift=198	err=1.7	cum=396
+AC4_STEP	i=3	shift=198	err=2.57	cum=594
+AC4_STEP	i=4	shift=198	err=1.56	cum=792
+AC4_STEP	i=5	shift=198	err=1.66	cum=990
+AC4_STEP	i=6	shift=198	err=2.67	cum=1188
+CLAMP_AT	press=26	cum_px=4892
+CLAMP_AT	press=29	cum_px=4892
+CLAMP_AT	press=32	cum_px=4892
+CLAMP_AT	press=34	cum_px=4892
+CLAMP_AT	press=37	cum_px=4892
+CLAMP_TAIL	identical_pairs=3	press=39	cum_px=4892
+AC6_TAIL	i=1	diff_bbox=(242, 430, 248, 492)
+AC6_TAIL	i=2	diff_bbox=None
+AC6_TAIL	i=3	diff_bbox=None
+AC5_REV	shift=-198	err=2.52
+LEFT_CLAMP_AT	press=25
+LEFT_CLAMP_AT	press=28
+LEFT_CLAMP_TAIL	identical_pairs=3
+AC7_FROM_LEFT	shift=198	err=2.8
+HOSTTEXT	v='shi'

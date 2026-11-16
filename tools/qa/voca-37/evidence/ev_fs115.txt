@@ -1,0 +1,6 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=04:59:35	match=True	ime=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME	pid=	h=833
+RESULT	fs=1.0	host=FAIL	ok=False
+RESULT	fs=1.15	host=FAIL	ok=False
+IDENT	name=end	t=05:00:13	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=10339	h=None

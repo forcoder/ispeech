@@ -1,0 +1,4 @@
+ISPEECH_520_115	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=1140	top=1172	h=1168	pp=49.91
+ROWS	bands=[(1486, 1631), (1660, 1807), (1839, 1900), (1903, 1978), (2019, 2071), (2074, 2094), (2096, 2110), (2114, 2152)]	dp=[44.6, 45.2, 18.8, 23.1, 16.0, 6.2, 4.3, 11.7]
+ROWY	r1=1558	r2=1733	r3=1869
+COMP	host='shhuo'	frame=1168

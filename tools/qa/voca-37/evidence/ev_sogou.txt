@@ -1,0 +1,3 @@
+TRY1	top=None	h=None
+TRY2	top=None	h=None
+com.sohu.inputmethod.sogou/.SogouIME

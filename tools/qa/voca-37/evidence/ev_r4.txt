@@ -1,0 +1,5 @@
+S0_empty	host='搜索设置'
+S1_after_space	host=' '
+S2_after_host_del	host='搜索设置'
+S3_double_space	host='  '	inject_ms=131
+LOG_SAMPLE:

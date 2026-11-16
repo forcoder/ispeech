@@ -1,0 +1,4 @@
+IME	v=com.ispeech.ime/com.ispeech.input.IspeechImeService	fs=1.15	dens=Physical density: 440
+AC1_440_115	rep=1	empty=1050	comp=1062	delta=12	host='shou'
+AC1_440_115	rep=2	empty=1050	comp=1062	delta=12	host='shou'
+AC1_440_115	rep=3	empty=1050	comp=1062	delta=12	host='shou'

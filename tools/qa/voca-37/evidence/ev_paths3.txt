@@ -1,0 +1,4 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=05:08:20	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+HOST	ok=False
