@@ -362,7 +362,13 @@ class IspeechImeService : InputMethodService() {
         super.onWindowShown()
         micJumpInFlight = false
         if (micPromptText == null) return
-        if (isMicPermissionGranted()) clearMicPrompt()
+        if (isMicPermissionGranted()) {
+            // S8 授权成功回场：ADR-001 决策 4 不承诺宿主自动重显键盘，「回来该干什么」全靠这一句
+            // 一次性指引兜着，否则用户回到输入框却没有下一步（BA 反向风险 #5）。
+            // 任何一次按键都会经 dismissAiState() 改写 statusText，所以它天然只出现一次。
+            clearMicPrompt()
+            statusText = getString(R.string.voice_permission_granted)
+        }
         renderCandidateView()
     }
 
@@ -1172,7 +1178,9 @@ class IspeechImeService : InputMethodService() {
         // codeOverride（「联想」「语音」「快捷短语」「AI回复」等）仍作为状态机参与上屏判断，
         // 但不再渲染到候选条左侧，避免候选区出现来源标识。
         val code = statusText ?: buffer
-        candidateView?.update(code, candidates, micActionLabel())
+        // 按钮可用性与 in-flight 同一个真相源：任何一次渲染都按当前状态决定，
+        // 不存在「看着能点、点了没反应」的第二条写入通道
+        candidateView?.update(code, candidates, micActionLabel(), actionEnabled = !micJumpInFlight)
     }
 
     /**
@@ -1739,8 +1747,11 @@ class IspeechImeService : InputMethodService() {
         }
         if (micJumpInFlight) return
         micJumpInFlight = true
-        candidateView?.setMicActionEnabled(false)
-        if (micPermanentlyDenied) openAppPermissionSettings() else requestMicPermission()
+        // 按钮立刻转灰：可见状态与 micJumpInFlight 同源，不给 UI 开第二条写入通道
+        renderCandidateView()
+        // 首个成功即止：一次点击最多把前台切走一次
+        val jumped = MicGrantAction.jumpPlan(micPermanentlyDenied).firstOrNull { launchMicIntent(it) }
+        if (jumped == null) showMicJumpFailure()
     }
 
     /** 撤掉授权提示；那一行文本只在仍是提示时清，不覆盖用户之后打出的组合码。 */
@@ -1750,45 +1761,46 @@ class IspeechImeService : InputMethodService() {
         if (statusText == prompt) statusText = null
     }
 
-    /** 由用户点击触发：拉起设置页，由其代为申请 RECORD_AUDIO（输入法自身弹不出系统对话框）。 */
-    private fun requestMicPermission() {
-        val intent = Intent().apply {
-            setClassName(this@IspeechImeService, SETTINGS_ACTIVITY)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(REQUEST_MIC_EXTRA, true)
-        }
-        try {
-            startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
-            showMicJumpFailure(e)
-        }
-    }
+    /**
+     * 发起一次跳转尝试，返回是否已交给系统。
+     *
+     * 跳转目标是跨进程系统组件，ROM（EMUI「后台弹出界面」拦截等）可抛 SecurityException /
+     * IllegalArgumentException，而这里跑在**输入法进程**的点击回调里：未捕获就是 IME 崩溃、
+     * 键盘整个消失——正是本 issue 要修的 P1 症状本身。因此按 ADR-001 决策 3 兜到 Throwable：
+     * 记一条带异常类型的日志（保留栈）后交给 [showMicJumpFailure]，绝不外抛。
+     * 只包跳转，识别链路有它自己的错误边界，不在这里动。
+     */
+    private fun launchMicIntent(target: MicJumpTarget): Boolean = try {
+        startActivity(
+            when (target) {
+                MicJumpTarget.APP_DETAILS -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
 
-    /** 永久拒绝的授权入口：系统应用信息页；打不开则回落到设置页代申请桥，不留死胡同。 */
-    private fun openAppPermissionSettings() {
-        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", packageName, null)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        try {
-            startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
-            Log.w(TAG, "mic_auth 应用信息页不可用，回落设置页代申请: ${e.message}")
-            requestMicPermission()
-        }
+                MicJumpTarget.SETTINGS_BRIDGE -> Intent().apply {
+                    setClassName(this@IspeechImeService, SETTINGS_ACTIVITY)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(REQUEST_MIC_EXTRA, true)
+                }
+            },
+        )
+        true
+    } catch (t: Throwable) {
+        Log.w(TAG, "mic_auth_jump_failed target=$target type=${t.javaClass.name} msg=${t.message}", t)
+        false
     }
 
     /**
-     * 跳转失败的可读兜底（X1）。旧实现只 `Log.w` 一行，用户面对的是一次彻底静默的点击。
+     * 跳转全部失败的兜底（X1）。旧实现只 `Log.w` 一行，用户面对的是一次彻底静默的点击。
      *
-     * 提示换成失败文案且按钮保留（允许再试一次）；不自动重试、不循环弹。
+     * 提示换成失败文案、按钮保留可重试（下一次点击同样最多跳一次）；不自动重试、不循环弹。
      */
-    private fun showMicJumpFailure(e: ActivityNotFoundException) {
+    private fun showMicJumpFailure() {
         micJumpInFlight = false
         val message = getString(R.string.voice_permission_open_failed)
         micPromptText = message
         statusText = message
-        Log.w(TAG, "mic_auth_jump_failed target=$SETTINGS_ACTIVITY msg=${e.message}")
         renderCandidateView()
     }
 

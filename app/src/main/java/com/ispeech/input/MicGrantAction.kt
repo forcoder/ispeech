@@ -1,5 +1,14 @@
 package com.ispeech.input
 
+/** 「去授权 / 去设置」一次点击可以发起的跳转目标（ADR-001 决策 1 / 决策 5）。 */
+internal enum class MicJumpTarget {
+    /** 应用信息页：永久拒绝（不再询问）时系统不弹框，只能来这里开 */
+    APP_DETAILS,
+
+    /** 设置页代申请桥（[com.ispeech.settings.REQUEST_MIC_EXTRA]）：由设置页弹系统授权框 */
+    SETTINGS_BRIDGE,
+}
+
 /**
  * 候选条麦克风授权按钮的动作档位（VOCA-166）。
  *
@@ -37,5 +46,19 @@ internal enum class MicGrantAction {
             permanentlyDenied -> OPEN_SETTINGS
             else -> REQUEST
         }
+
+        /**
+         * 一次点击要**依次**尝试的跳转目标：首个成功即止，所以一次点击最多改一次前台。
+         *
+         * 永久拒绝时系统不再弹框，先直达应用信息页；只有它确实没起来才回落到设置页代申请桥
+         * （ADR-001 决策 3），授权入口因此不会因某个 ROM 缺应用信息页而变成死胡同（AC-6）。
+         * 非永久拒绝只有桥一条：多跳一步去系统设置是骚扰，不是兜底。
+         */
+        fun jumpPlan(permanentlyDenied: Boolean): List<MicJumpTarget> =
+            if (permanentlyDenied) {
+                listOf(MicJumpTarget.APP_DETAILS, MicJumpTarget.SETTINGS_BRIDGE)
+            } else {
+                listOf(MicJumpTarget.SETTINGS_BRIDGE)
+            }
     }
 }

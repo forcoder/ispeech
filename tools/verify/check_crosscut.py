@@ -938,23 +938,41 @@ def check_voice_chain() -> None:
         "语音键未授权只出候选条提示，不再自动跳页（toggleVoiceInput / toggleVoskVoice）",
         f"{rel(SERVICE)} 仍在语音键路径上自动跳页（键盘会随宿主退后台）：{auto_jump}",
     )
+    # 语义断言而不是「调用点数 == N」：将来接第三条语音链路（E3 设置页入口）时，
+    # 计数断言会以门禁失败的形式误伤，而按函数名逐条要求只会在真的漏改时红。
+    wired = [name for name, region in (("toggleVoiceInput", sys_entry), ("toggleVoskVoice", vosk_entry))
+             if "showMicPermissionPrompt()" in region]
     check(
-        service.count("showMicPermissionPrompt()") == 3,  # 定义 + 两条引擎链路各一处
-        "两条语音链路（系统识别 / VOSK）都接到同一个授权提示入口",
-        f"{rel(SERVICE)} showMicPermissionPrompt 调用点数异常，可能有一条链路漏改",
+        len(wired) == 2,
+        "两条语音链路（系统识别 / VOSK）各自都接到同一个授权提示入口",
+        f"{rel(SERVICE)} 有语音入口没走 showMicPermissionPrompt：漏 {sorted({'toggleVoiceInput', 'toggleVoskVoice'} - set(wired))}",
     )
+    jump_region = function_region(service, r"private fun launchMicIntent\(")
     check(
         "onMicActionClicked = { openMicAuthorization() }" in service
         and "micActionLabel()" in service
-        and "openAppPermissionSettings()" in service
+        and "MicGrantAction.jumpPlan(micPermanentlyDenied)" in service
+        and "firstOrNull { launchMicIntent(it) }" in service
         and "Settings.ACTION_APPLICATION_DETAILS_SETTINGS" in service,
-        "授权跳转只由候选条按钮点击发起，永久拒绝时直达应用权限页",
-        f"{rel(SERVICE)} 缺「按钮 -> 跳转」闭环（openMicAuthorization / 应用详情页兜底）",
+        "授权跳转只由候选条按钮点击发起：永久拒绝直达应用权限页、逐项尝试且首个成功即止（一次点击最多切一次前台）",
+        f"{rel(SERVICE)} 缺「按钮 -> 跳转」闭环，或跳转不再受 jumpPlan 约束",
     )
+    # 跳转目标是跨进程系统组件，EMUI 等 ROM 可抛 SecurityException / IllegalArgumentException；
+    # 这些调用在输入法进程的点击回调里，未捕获 = IME 崩、键盘整个消失（就是本 issue 的 P1 症状）。
     check(
-        "voice_permission_open_failed" in service,
-        "跳转失败有可读兜底文案（不再只写一行 Log 静默）",
-        f"{rel(SERVICE)} 未使用 voice_permission_open_failed 兜底文案",
+        bool(jump_region) and "catch (t: Throwable)" in jump_region
+        and "mic_auth_jump_failed" in jump_region and "t.javaClass.name" in jump_region
+        and ", t)" in jump_region,
+        "跳转按 Throwable 兜底，并记一条含异常类型、带栈的 mic_auth_jump_failed（ADR-001 决策 3）",
+        f"{rel(SERVICE)} launchMicIntent 的异常边界不合规，跳转失败会变成输入法崩溃",
+    )
+    failure_region = function_region(service, r"private fun showMicJumpFailure\(")
+    check(
+        "voice_permission_open_failed" in service
+        and "micJumpInFlight = false" in failure_region
+        and "renderCandidateView()" in failure_region,
+        "跳转失败有可读兜底文案 + 复位在途状态并保留按钮可重试（不静默、不自动循环弹）",
+        f"{rel(SERVICE)} 跳转失败兜底缺文案或未复位 micJumpInFlight（按钮会永久灰着）",
     )
     # 授权按钮必须是候选区的「兄弟控件」：做成候选项会被空格 / 数字键按上屏语义误触发，
     # 放进 itemContainer 会被每次刷新的 removeAllViews() 清掉（UX 硬约束）
@@ -971,12 +989,25 @@ def check_voice_chain() -> None:
         f"{rel(CANDIDATE_VIEW_XML)} 授权按钮位置 / 尺寸不合规（不能是候选项）",
     )
     check(
-        "fun update(code: String, list: List<LookupCandidate>, actionLabel: String? = null)"
-        in candidate_view
-        and "setMicActionEnabled" in candidate_view
-        and "onMicActionClicked" in candidate_view,
-        "CandidateView 暴露 actionLabel / 置灰 / 点击回调三件套（提示态渲染所需）",
-        f"{rel(CANDIDATE_VIEW)} 缺授权按钮渲染 API",
+        "actionLabel: String? = null" in candidate_view
+        and "actionEnabled: Boolean = true" in candidate_view
+        and "private fun renderMicAction(actionLabel: String?, enabled: Boolean)" in candidate_view
+        and "onMicActionClicked" in candidate_view
+        # 按钮状态若另开一条公开写入通道，任何一次 update() 都会把它恢复成可点，
+        # 于是「点了没反应」的在途态在界面上仍显示可用（UX 硬约束①同源）
+        and "fun setMicActionEnabled" not in candidate_view
+        and "actionEnabled = !micJumpInFlight" in service,
+        "候选条按钮的文案与可用性只从 update() 一个入口渲染（服务侧按实时状态传参）",
+        f"{rel(CANDIDATE_VIEW)} 又开了一条按钮状态写入通道，或未把在途状态接进 update()",
+    )
+    # 设置页 finish() 后宿主不一定重显键盘（ADR-001 决策 4 不承诺平台行为），
+    # 「回来该干什么」全靠 S8 这句一次性指引兜着，缺它就是「修完比现状更像故障」。
+    shown_region = function_region(service, r"override fun onWindowShown\(")
+    check(
+        "R.string.voice_permission_granted" in shown_region
+        and "micJumpInFlight = false" in shown_region,
+        "授权成功回场补一次性指引（S8），同时复位在途状态让按钮重新可点",
+        f"{rel(SERVICE)} onWindowShown 缺 S8 一次性提示（用户回到输入框却没有下一步）",
     )
     check(
         "micPermanentlyDeniedFlow" in service

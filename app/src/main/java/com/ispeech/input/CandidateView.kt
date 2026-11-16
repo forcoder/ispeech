@@ -90,8 +90,15 @@ class CandidateView @JvmOverloads constructor(
      * @param list 候选列表（服务侧按「每屏候选数 × 倍数」取回，横向滑动浏览）
      * @param actionLabel 麦克风授权按钮文案；非空即显示按钮，null 即隐藏。
      *   **不由 [code] 是否为空推断**：常态第 1 行是用户正在打的组合码，不能被当成授权态。
+     * @param actionEnabled 按钮是否可点：跳转在途时给 false（连点会弹两个授权框、把前台连切两次）。
+     *   与 [actionLabel] 一样由服务侧作为**显式入参**渲染，本视图不自己记状态。
      */
-    fun update(code: String, list: List<LookupCandidate>, actionLabel: String? = null) {
+    fun update(
+        code: String,
+        list: List<LookupCandidate>,
+        actionLabel: String? = null,
+        actionEnabled: Boolean = true,
+    ) {
         codeLabel.text = code
         codeLabel.visibility = if (code.isEmpty()) View.GONE else View.VISIBLE
 
@@ -108,21 +115,14 @@ class CandidateView @JvmOverloads constructor(
             scrollView.post { scrollView.scrollTo(0, 0) }
         }
 
-        renderMicAction(actionLabel)
+        renderMicAction(actionLabel, actionEnabled)
     }
 
     /**
-     * 授权按钮的显示与置灰。
-     *
-     * 跳转在途时置灰（`isEnabled = false`）：连点两次会弹两个授权框，
-     * 下一次 [update] 会按服务侧的实时状态重新决定文案与可用性。
+     * 授权按钮的显示与可用性，只从 [update] 进来：按钮状态若另开一条写入通道，
+     * 任何一次 [update] 都会把它恢复成可点，而出现「看着能点、点了没反应」的假可用。
      */
-    fun setMicActionEnabled(enabled: Boolean) {
-        micAction.isEnabled = enabled
-        micAction.alpha = if (enabled) 1f else ALPHA_DISABLED
-    }
-
-    private fun renderMicAction(actionLabel: String?) {
+    private fun renderMicAction(actionLabel: String?, enabled: Boolean) {
         if (actionLabel == null) {
             micAction.visibility = View.GONE
             // 按钮隐藏时组合码恢复按内容宽度，把横向空间让回候选区
@@ -131,7 +131,8 @@ class CandidateView @JvmOverloads constructor(
         }
         micAction.text = actionLabel
         micAction.visibility = View.VISIBLE
-        setMicActionEnabled(true)
+        micAction.isEnabled = enabled
+        micAction.alpha = if (enabled) 1f else ALPHA_DISABLED
         // 「请到系统设置…」这类长路径指引要能换行读完整，被裁成半句等于没给指引，
         // 所以提示文本占满剩余宽度（不截断），按钮按内容宽度靠右，不会被挤出屏幕
         setCodeLabelWeight(weighted = true)

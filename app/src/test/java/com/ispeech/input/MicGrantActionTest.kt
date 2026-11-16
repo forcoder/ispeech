@@ -61,6 +61,24 @@ class MicGrantActionTest {
         )
     }
 
+    @Test
+    fun `未永久拒绝时一次点击只有一条跳转 不多送用户去系统设置`() {
+        // 计划逐项尝试、首个成功即止：只有一项 ⇒ 一次点击最多切一次前台（AC-1/AC-8）
+        assertEquals(
+            listOf(MicJumpTarget.SETTINGS_BRIDGE),
+            MicGrantAction.jumpPlan(permanentlyDenied = false),
+        )
+    }
+
+    @Test
+    fun `永久拒绝时先直达应用信息页 打不开才回落设置页代申请桥`() {
+        // 顺序即兜底语义：系统此时不弹框，先给能开的页面；回落项必须排在后面，AC-6 才不是死胡同
+        assertEquals(
+            listOf(MicJumpTarget.APP_DETAILS, MicJumpTarget.SETTINGS_BRIDGE),
+            MicGrantAction.jumpPlan(permanentlyDenied = true),
+        )
+    }
+
     private companion object {
         const val PROMPT = "请先授予麦克风权限"
         const val VOICE_NO_MATCH = "没有识别到内容"
