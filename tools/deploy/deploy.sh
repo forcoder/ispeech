@@ -176,11 +176,18 @@ info "sha256：${APK_SHA}"
 
 # 清单唯一写入路径是 --regen：整份按当前字节重写，天然覆盖改名 / 重打 / 移除三种情况。
 # 不要 `>> SHA256SUMS` —— 追加会让同一路径出现两行，`shasum -c` 只认后一行，前一行永久静默。
-python3 "${REPO_ROOT}/tools/verify/check_dist_manifest.py" --regen >/dev/null \
-    || die "dist/SHA256SUMS 重生成失败"
-python3 "${REPO_ROOT}/tools/verify/check_dist_manifest.py" >/dev/null \
-    || die "dist/SHA256SUMS 回读校验失败：本包未被正确记录"
-info "已记录进 dist/SHA256SUMS（check_dist_manifest.py --regen）"
+python3 "${REPO_ROOT}/tools/verify/check_dist_manifest.py" --regen \
+    || die "dist/SHA256SUMS 重生成失败：按上面 FAIL 行处置后重跑（本项不可 --skip-verify）"
+
+# --regen 只记「该入册的集合」= git 里已跟踪 + 会被 git add 扫进来的。
+# .gitignore 排除的默认 debug 产物不在其中，所以不能无条件说「已记录」（VOCA-400）。
+APK_REL="${APK#"${DIST_DIR}/"}"
+if awk -v p="${APK_REL}" '$2==p{found=1} END{exit !found}' "${DIST_DIR}/SHA256SUMS"; then
+    info "本包已入 dist/SHA256SUMS：${APK_REL}"
+else
+    warn "本包未入 dist/SHA256SUMS：${APK_REL} 被 .gitignore 排除，按政策不入库，清单答不了它的字节。"
+    warn "自查这包：本次日志中的 sha256=${APK_SHA}；设备上对读 adb -s <serial> shell dumpsys package ${PKG}"
+fi
 
 # ---------- ⑥ 解析设备 ----------
 

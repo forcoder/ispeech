@@ -91,10 +91,17 @@ tools/deploy/deploy.sh --merge-all --target auto  # 先 land-all 再部署
 
 1. 校验分支是 `main` 且工作区干净（不干净直接失败，提示去 worktree）；
 2. `--merge-all` 时先 `tools/dev/worktree.sh land-all`；
-3. 跑 `check_static / input_logic / t9 / stats / phrase_usage / pinyin / crosscut / quick_trigger`
-   （失败即停；`--skip-verify` 可跳过但会打印醒目的风险告警）；
+3. **先**跑第五条门禁 `check_dist_manifest.py`（`dist/SHA256SUMS` 与包字节一致且穷尽覆盖，
+   **不受 `--skip-verify` 管辖** —— 跳过它等于允许带一份会说谎的清单出包，失败即停并提示 `--regen`）；
+   再跑 `check_static / input_logic / t9 / stats / phrase_usage / pinyin / crosscut / quick_trigger`
+   八项（失败即停；这八项 `--skip-verify` 可跳过，会打印醒目的风险告警）；
 4. `export JAVA_HOME=/opt/homebrew/opt/openjdk@17` 后 `./gradlew assembleDebug | assembleRelease`；
 5. 复制到 `dist/ispeech-<debug|release>-<versionName>-<yyyyMMdd-HHmm>.apk`，打印路径、大小、sha256；
+   **随后跑 `check_dist_manifest.py --regen` 重写 `dist/SHA256SUMS` 并整份回读校验**（FAIL 即中止，
+   不会继续装机）。两点后果要知道：① 跑一次 `--release` 出包会改动工作区里的 `dist/SHA256SUMS`
+   （生成物，须随新包一起提交），否则下一次出包会卡在流程 1 的「工作区不干净」；② **默认（debug）产物
+   被 `.gitignore` 排除，不会入册**，脚本会打 `[warn] 本包未入 dist/SHA256SUMS …` 并给出自查方式，
+   清单只覆盖 `--release` 路径，口径见 ADR-0003 D2；
 6. 解析设备：`emulator` 取 `emulator-*`；`phone` 取非 emulator 序列号；模拟器没起时自动
    `emulator -avd ispeech_test -no-snapshot -no-audio -no-boot-anim`（可用 `ISPEECH_AVD` 覆盖）并等 `sys.boot_completed=1`；
    无设备时打印 `adb devices` 与接真机命令后失败退出；
@@ -103,7 +110,8 @@ tools/deploy/deploy.sh --merge-all --target auto  # 先 land-all 再部署
 9. 截图到 `dist/screenshots/deploy-<ts>-<serial>.png`；
 10. 全流程日志写 `dist/deploy-<ts>.log`。
 
-其他参数：`--release`、`--no-build`（复用 `app/build/outputs/apk/...` 现有产物）、`--skip-verify`。
+其他参数：`--release`、`--no-build`（复用 `app/build/outputs/apk/...` 现有产物）、`--skip-verify`
+（只跳过上面八项 `check_*`，**跳不过 `check_dist_manifest`**）。
 
 ## 6. 装真机
 

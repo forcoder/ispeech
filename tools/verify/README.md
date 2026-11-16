@@ -63,22 +63,29 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 | 3 | 每条记录指向的文件真实存在 | 防止「包已删除、记录还在」的孤儿行 |
 | 4 | 每条记录的 sha256 == 实际字节 | 等价 `cd dist && shasum -a 256 -c SHA256SUMS`；main 上曾有 2 条 FAILED |
 | 5 | **穷尽覆盖**：`dist` 下每个该记录的 APK 都有一行 | 只校验「清单里有的」，漏记的包一声不吭 —— `_archive/` 三个历史包就是这么漏掉的 |
+| 6 | 未跟踪且 >100 MB 的包不入册即中止 | 记了也推不上 GitHub（GH001），清单会指向仓库里永远不存在的字节；已跟踪超限只 `WARN`，那半归 VOCA-292 |
 
 「该记录的集合」= `git ls-files --cached --others --exclude-standard -- dist` 里的 `*.apk`
 （已跟踪 + 会被 `git add -A` 扫进来的），因此刚 `cp` 进 `dist/` 还没入库的新包立刻要求记录；
 `.gitignore` 排除的本机残留不强加。无 git 元数据时（`git archive` 解出来的包）退回目录扫描。
 
-单文件 >100 MB 记 `WARN` 不记 `FAIL`（产物治理归 VOCA-292，不在此抢判定权）。
+**这条口径有一个必须知道的边界**：`deploy.sh` 不带 `--release` 时的产物名
+`dist/ispeech-debug-<versionName>-<ts>.apk` 正落在 `.gitignore:43` 里，所以它**既不被要求入册、
+`--regen` 也不会记它** —— 第五条门禁的「归档即记录」只对 `--release` 路径成立。
+debug 包归手机自查用出包日志里的 `sha256=` 行 + 设备侧 `dumpsys package`，清单答不了它。
+理由与待拍板冲突见 ADR-0003 D2。
 
 ```bash
 python3 tools/verify/check_dist_manifest.py           # 校验；任一 FAIL 退出码 1
 python3 tools/verify/check_dist_manifest.py --regen   # 按当前字节整份重写清单（唯一写入路径）
-python3 tools/verify/check_dist_manifest.py --self-test  # 7 场景双向验判定逻辑本身，不动仓库
+python3 tools/verify/check_dist_manifest.py --self-test  # 8 场景双向验判定逻辑本身，不动仓库
 ```
 
 **出包门禁（第五条）**：`tools/deploy/deploy.sh` 在 ③ 校验段调用它，位置在 `--skip-verify`
 分支**之外** —— 跳过这项等于允许带着一份会说谎的清单出包，而「会说谎」正是 VOCA-400 的原始故障。
-⑤ 归档段在 `cp` 之后立即 `--regen` + 回读校验，新包离开工位前就已被记录。
+⑤ 归档段在 `cp` 之后立即 `--regen`（重写 + 整份回读校验，FAIL 即中止出包），随后按本包是否真进了
+清单分支打印：入册报「本包已入 dist/SHA256SUMS：<路径>」，被 `.gitignore` 排除则 `[warn]` 明说未入册
+并给出自查方式。**不会对着一个没记录的 debug 包说「已记录」。**
 
 ## check_model_host.py —— 模型托管源可用性（**需联网**）
 

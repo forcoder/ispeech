@@ -17,6 +17,10 @@
 已排除的本机残留（如 `dist/ispeech-debug-*.apk`）挡在门外，同时让**刚拷进 dist 还没入库**的
 新包立刻要求一行记录 —— 出包流程里漏记就是靠这一条堵住的。
 
+覆盖范围的边界（不是 bug，是 `.gitignore` 的既有政策）：被 gitignore 排除的包既不入册、
+也不被要求入册，所以 `deploy.sh` 默认（debug）产物**不在清单里**。清单只能回答「仓库里那份
+是不是这字节」，答不了手机上的 debug 包 —— 口径见 `docs/adr/VOCA-400-dist-checksum-manifest.md` D2。
+
 用法：
     python3 tools/verify/check_dist_manifest.py            # 校验，任一 FAIL 退出码 1
     python3 tools/verify/check_dist_manifest.py --regen    # 按当前字节重写清单
@@ -98,6 +102,15 @@ def required_apks() -> list[str]:
     return sorted(p[len("dist/"):] if p.startswith("dist/") else p for p in paths)
 
 
+def tracked_apks() -> set[str] | None:
+    """已跟踪的包；无 git 元数据时返回 None —— 那时分不清跟踪与否，不能判 FAIL。"""
+    stdout = run_git(["ls-files", "-z", "--cached", "--", "dist"])
+    if stdout is None:
+        return None
+    return {p[len("dist/"):] if p.startswith("dist/") else p
+            for p in stdout.split("\0") if p.endswith(".apk")}
+
+
 def parse_manifest() -> tuple[list[tuple[str, str]], list[str]]:
     entries: list[tuple[str, str]] = []
     errors: list[str] = []
@@ -154,15 +167,21 @@ def check_manifest() -> int:
     ordered = [p for _, p in entries] == sorted(p for _, p in entries)
     check(ordered, "清单按路径升序（--regen 的输出顺序）", warn=True)
 
+    tracked = tracked_apks()
     for p in sorted(set(required_apks()) | set(present)):
         apk = DIST / p
         if not apk.is_file():
             continue
         size = apk.stat().st_size
-        if size > SIZE_WARN_BYTES:
-            check(False,
-                  f"{p} 体积 {size:,} B 超 GitHub 100 MB 硬限，含它的分支推不上去"
-                  "（产物治理见 VOCA-292）", warn=True)
+        if size <= SIZE_WARN_BYTES:
+            continue
+        # 未跟踪 + 超 100 MB：记录进清单也推不上去（GH001），等于凭空造一行假记录
+        untracked_oversize = tracked is not None and p not in tracked
+        check(not untracked_oversize,
+              f"{p} 体积 {size:,} B 超 GitHub 单文件 100 MB 硬限"
+              + ("（未跟踪）：先进不了仓库，清单记了就是假答案 —— 把它移出 dist/ 再 --regen"
+                 if untracked_oversize else "（已跟踪），含它的分支推不上去（产物治理见 VOCA-292）"),
+              warn=not untracked_oversize)
 
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
@@ -189,7 +208,7 @@ def regen() -> int:
 
 
 def self_test() -> int:
-    """在临时目录里伪造 6 种仓库状态，验证判定逻辑**双向**准确。
+    """在临时目录里伪造 8 种仓库状态，验证判定逻辑**双向**准确。
 
     门禁自己必须是可验的：只测「好状态放行」等于没测 —— 一个恒真的检查器照样让
     清单与字节漂移过去。改判定逻辑后先跑这个。
@@ -215,7 +234,8 @@ def self_test() -> int:
             capture_output=True, text=True,
         ).returncode
 
-    def scenario(name: str, apks: dict[str, bytes], manifest_lines: list[str], expect_ok: bool) -> None:
+    def scenario(name: str, apks: dict[str, bytes], manifest_lines: list[str], expect_ok: bool,
+                 untracked: dict[str, int] | None = None) -> None:
         tmp = Path(tempfile.mkdtemp(prefix="distsum-selftest-"))
         try:
             (tmp / "tools" / "verify").mkdir(parents=True)
@@ -223,6 +243,11 @@ def self_test() -> int:
             subprocess.run(["git", "init", "-q", "."], cwd=tmp, capture_output=True)
             build(tmp, apks, manifest_lines)
             subprocess.run(["git", "add", "-A"], cwd=tmp, capture_output=True)
+            # git add 之后再放：模拟「baseline 从工作目录扫进来的未跟踪大二进制」
+            for rel_path, size in (untracked or {}).items():
+                f = tmp / "dist" / rel_path
+                with f.open("wb") as fh:
+                    fh.truncate(size)
             rc = run_check(tmp)
             check((rc == 0) == expect_ok,
                   f"[self-test] {name}：期望 {'PASS' if expect_ok else 'FAIL'}，实得 rc={rc}")
@@ -256,6 +281,14 @@ def self_test() -> int:
     scenario("格式非法（缺一个空格）", good, [lines_for(good)[0].replace("  ", " ", 1),
                                             lines_for(good)[1]], False)
 
+    # 未跟踪的超限包按实际字节入册：其余检查全过，只有体积规则能挡住它
+    h = hashlib.sha256()
+    for _ in range(101):
+        h.update(b"\0" * (1024 * 1024))
+    scenario("未跟踪且超 100 MB 的包（记了也推不上去）", good,
+             lines_for(good) + [f"{h.hexdigest()}  big.apk"], False,
+             untracked={"big.apk": 101 * 1024 * 1024})
+
     tmp = Path(tempfile.mkdtemp(prefix="distsum-selftest-nogit-"))
     try:
         (tmp / "tools" / "verify").mkdir(parents=True)
@@ -275,7 +308,7 @@ def main() -> int:
     ap.add_argument("--regen", action="store_true",
                     help="按当前包字节重生成清单，然后校验")
     ap.add_argument("--self-test", action="store_true",
-                    help="在临时目录伪造 7 种状态，验证判定逻辑双向准确（不动仓库）")
+                    help="在临时目录伪造 8 种状态，验证判定逻辑双向准确（不动仓库）")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
