@@ -183,11 +183,15 @@ adb logcat -d -s AsrTrace:* | grep -E 'ev=(timeout|error|blocked)'   # 只看异
 
 | 项 | 机上现装 | 本单诊断包 |
 | --- | --- | --- |
-| versionCode / versionName | `6` / `1.6`（对应 `origin/release/voca-186-v1.6`） | `5` / `1.5` |
+| versionCode / versionName | `6` / `1.6` | `5` / `1.5` |
 | base.apk sha256 | `9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42` | `1f21e23c21b95ae580619be5558e560a85f4ac5aad6b128d2a3277c191f17621` |
 | 签名证书 | `CN=Android Debug` → `857ce64e…a0ed` | `CN=iSpeech Prototype` → `70b4f4a2…2ac7` |
 | `lastUpdateTime` | 2026-11-15 10:29:20 | — |
 | 是否含 §七/§八 代码 | **否**：dex 里 `AsrTrace` / `AsrTiming` / `armVoiceSessionGuard` / `voice_timeout_result` 全 0 命中，`FunAsrSpeechEngine` 7 命中 | 是 |
+
+分支归属（推断，非包内构建元数据坐实）：`origin/main` 是 `versionCode 5 / 1.5`，只有
+`origin/release/voca-186-v1.6` 是 `6 / 1.6` 且 `AsrSettings` 默认引擎仍为 `FUNASR` —— 与上表的版本号
+和 dex 符号同时吻合，所以判定机上装的是 186 那条发布线的包。要坐实只需在出包机上比对 `dist` 产物的 sha256。
 
 - 签名者不同 → `adb install -r` 必失败（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）；再叠加 6→5 是降级，
   还需 `-d`。**唯一可行路径是先卸载现装包 = 清空应用数据**（学习词库、设置、剪贴板），属生产操作，
