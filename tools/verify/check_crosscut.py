@@ -17,7 +17,8 @@
   6. 短语使用记录 PhraseUsageStore：是否只从 AppContainer 单例获取、面板是否零 IO
   7. 口径一致性：版本号常量 vs build.gradle、注释 vs 枚举、校验脚本 vs 源码
   8. 语音输入（VOICE / ASR）全链路：KeyDef -> 工具栏 -> 服务状态机 -> VoiceInputController
-     -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
+     -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风授权提示
+     （VOCA-166：未授权跳转只由用户点候选条「去授权」触发，语音键路径不再自动跳页）
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -49,6 +50,7 @@ SERVICE = JAVA / "input" / "IspeechImeService.kt"
 PANEL = JAVA / "input" / "InputMethodPanel.kt"
 QUICK_PANEL = JAVA / "input" / "QuickPhrasePanel.kt"
 CANDIDATE_VIEW = JAVA / "input" / "CandidateView.kt"
+CANDIDATE_VIEW_XML = RES / "layout" / "candidate_view.xml"
 LAYOUT_XML = RES / "layout" / "ime_input_view.xml"
 STRINGS = RES / "values" / "strings.xml"
 STRINGS_EN = RES / "values-en" / "strings.xml"
@@ -832,6 +834,7 @@ def check_voice_chain() -> None:
     nav = read(NAV_GRAPH)
     home = read(HOME_SCREEN)
     activity = read(MAIN_ACTIVITY)
+    candidate_view = read(CANDIDATE_VIEW)
 
     # 8.1 语音键：声明 -> 工具栏 -> 服务分支
     check(
@@ -911,7 +914,7 @@ def check_voice_chain() -> None:
         f"{rel(SERVICE)} 语音接线缺项：{missing}",
     )
 
-    # 8.4 权限：Manifest 声明 + 包可见性 + 设置页代申请
+    # 8.4 麦克风授权（VOCA-166）：Manifest 声明 + 包可见性 + 「点击才跳」桥
     check(
         "android.permission.RECORD_AUDIO" in manifest
         and "android.speech.RecognitionService" in manifest
@@ -919,17 +922,90 @@ def check_voice_chain() -> None:
         "Manifest 声明 RECORD_AUDIO 且 queries 暴露 RecognitionService（targetSdk 34 包可见性）",
         f"{rel(MANIFEST)} 缺 RECORD_AUDIO 或 queries/RecognitionService",
     )
+    # 根因：语音键自己 startActivity 抢前台 -> 宿主退后台、mInputShown=false、整个键盘消失。
+    # 现在未授权只挂候选条提示，跳转只由用户点按钮发起（两处语音入口都不许再直接跳页）。
+    sys_entry = function_region(service, r"private fun toggleVoiceInput\(")
+    vosk_entry = function_region(service, r"private fun toggleVoskVoice\(")
+    auto_jump = [
+        name
+        for name, region in (("toggleVoiceInput", sys_entry), ("toggleVoskVoice", vosk_entry))
+        if "requestMicPermission" in region or "startActivity" in region
+        or "openMicAuthorization" in region
+    ]
     check(
-        "REQUEST_MIC_EXTRA" in service and "requestMicPermission()" in service,
-        "输入法服务未授权时请求麦克风（requestMicPermission -> 设置页 extra）",
-        f"{rel(SERVICE)} 未实现麦克风代申请请求",
+        bool(sys_entry) and bool(vosk_entry) and not auto_jump
+        and "showMicPermissionPrompt()" in service,
+        "语音键未授权只出候选条提示，不再自动跳页（toggleVoiceInput / toggleVoskVoice）",
+        f"{rel(SERVICE)} 仍在语音键路径上自动跳页（键盘会随宿主退后台）：{auto_jump}",
+    )
+    check(
+        service.count("showMicPermissionPrompt()") == 3,  # 定义 + 两条引擎链路各一处
+        "两条语音链路（系统识别 / VOSK）都接到同一个授权提示入口",
+        f"{rel(SERVICE)} showMicPermissionPrompt 调用点数异常，可能有一条链路漏改",
+    )
+    check(
+        "onMicActionClicked = { openMicAuthorization() }" in service
+        and "micActionLabel()" in service
+        and "openAppPermissionSettings()" in service
+        and "Settings.ACTION_APPLICATION_DETAILS_SETTINGS" in service,
+        "授权跳转只由候选条按钮点击发起，永久拒绝时直达应用权限页",
+        f"{rel(SERVICE)} 缺「按钮 -> 跳转」闭环（openMicAuthorization / 应用详情页兜底）",
+    )
+    check(
+        "voice_permission_open_failed" in service,
+        "跳转失败有可读兜底文案（不再只写一行 Log 静默）",
+        f"{rel(SERVICE)} 未使用 voice_permission_open_failed 兜底文案",
+    )
+    # 授权按钮必须是候选区的「兄弟控件」：做成候选项会被空格 / 数字键按上屏语义误触发，
+    # 放进 itemContainer 会被每次刷新的 removeAllViews() 清掉（UX 硬约束）
+    bar_xml = read(CANDIDATE_VIEW_XML)
+    idx_items = bar_xml.find("@+id/candidate_items")
+    idx_scroll_close = bar_xml.find("</HorizontalScrollView>")
+    idx_mic = bar_xml.find("@+id/candidate_mic_action")
+    check(
+        -1 not in (idx_items, idx_scroll_close, idx_mic)
+        and idx_items < idx_scroll_close < idx_mic
+        and 'android:minHeight="44dp"' in bar_xml[idx_mic:]
+        and "R.id.candidate_mic_action" in candidate_view,
+        "候选条授权按钮在候选区之外（兄弟控件）且触摸目标 ≥44dp",
+        f"{rel(CANDIDATE_VIEW_XML)} 授权按钮位置 / 尺寸不合规（不能是候选项）",
+    )
+    check(
+        "fun update(code: String, list: List<LookupCandidate>, actionLabel: String? = null)"
+        in candidate_view
+        and "setMicActionEnabled" in candidate_view
+        and "onMicActionClicked" in candidate_view,
+        "CandidateView 暴露 actionLabel / 置灰 / 点击回调三件套（提示态渲染所需）",
+        f"{rel(CANDIDATE_VIEW)} 缺授权按钮渲染 API",
+    )
+    check(
+        "micPermanentlyDeniedFlow" in service
+        and "micPermanentlyDeniedFlow" in store
+        and "setMicPermanentlyDenied" in store,
+        "「永久拒绝」标志：设置页写、输入法订阅（跨组件同一 DataStore）",
+        f"{rel(SERVICE)} / {rel(SETTINGS_STORE)} 永久拒绝标志链路断裂",
     )
     check(
         "REQUEST_MIC_EXTRA" in activity
-        and "requestMicrophonePermissionIfNeeded" in activity
-        and "Manifest.permission.RECORD_AUDIO" in activity,
-        "设置页按 REQUEST_MIC_EXTRA 拉起系统麦克风授权（输入法无法自弹对话框）",
-        f"{rel(MAIN_ACTIVITY)} 未实现 REQUEST_MIC_EXTRA 代申请",
+        and "beginMicSession" in activity
+        and "onNewIntent" in activity
+        and "micPermissionLauncher.launch" in activity
+        and "Manifest.permission.RECORD_AUDIO" in activity
+        and "shouldShowRequestPermissionRationale" in activity
+        and "setMicPermanentlyDenied" in activity
+        and "finish()" in activity,
+        "设置页代申请系统授权（新建 + 复用实例 onNewIntent 两条路都要认会话）+ 落「永久拒绝」标志 + 会话结束 finish() 回输入框（ADR-001 决策 2/4）",
+        f"{rel(MAIN_ACTIVITY)} 代申请 / 标志落库 / finish 回场缺项",
+    )
+    main_activity_decl = re.search(
+        r'<activity\s+android:name="com\.ispeech\.settings\.MainActivity"[^>]*>',
+        manifest,
+    )
+    check(
+        main_activity_decl is not None
+        and 'android:launchMode="singleTask"' in main_activity_decl.group(0),
+        "设置页 singleTask：输入法复用实例时才能收到 onNewIntent，否则授权框不弹、用户被丢在设置页",
+        f"{rel(MANIFEST)} MainActivity 未声明 singleTask（ADR-001 决策 4 回场链路会断）",
     )
 
     # 8.5 ASR 设置模型 + DataStore 读写
@@ -1001,6 +1077,7 @@ def check_voice_chain() -> None:
     required = {
         "voice_listening", "voice_need_permission", "voice_no_match",
         "voice_error", "voice_cancel", "voice_unavailable",
+        "voice_action_grant", "voice_action_open_settings", "voice_permission_open_failed",
         "asr_title", "asr_description", "asr_engine_system", "asr_engine_custom",
         "asr_partial_desc", "asr_offline_desc", "asr_saved", "asr_save_failed",
     }

@@ -68,6 +68,23 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 长度不符 / 不支持 Range），**不联网**验证判定逻辑双向准确；判定逻辑改动后先跑它。
 处置流程见 `docs/model-host-runbook.md`。
 
+## check_crosscut.py —— 跨组件接线（8.1–8.8）
+
+按「一条能力要穿过几层文件」组织的连线检查：词库/编码（8.1）、键盘布局与按键动作
+（8.2）、候选栏（8.3）、语音输入链路（8.4）、ASR 设置与 DataStore（8.5）、快捷短语
+（8.6）、主题与令牌（8.7）、资源与字符串（8.8）。任一断言 `FAIL` 退出码 1。
+
+8.4 语音链路的口径（VOCA-166 起）：**未授予 `RECORD_AUDIO` 不再是从输入法自动拉起
+设置页的理由**，脚本改为断言「跳页只能由用户在候选条上主动点击触发」——即服务侧
+`showMicPermissionPrompt()` / `openMicAuthorization()` 与 `MicGrantAction` 决策分离、
+`MainActivity` 认 `REQUEST_MIC_EXTRA` 会话（新建与 `onNewIntent` 复用两条路都要认）、
+manifest 里 `MainActivity` 声明 `singleTask`（否则复用实例时 `onNewIntent` 不发、
+授权框弹不出来，用户被丢在设置页）、会话结束 `finish()` 回原输入框。
+
+```bash
+python3 tools/verify/check_crosscut.py
+```
+
 ## 局限（这些脚本覆盖不到的东西）
 
 - **不能替代编译**：Kotlin 类型推断、泛型、签名匹配、import 缺失、Compose API
