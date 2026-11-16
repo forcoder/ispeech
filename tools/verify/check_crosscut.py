@@ -15,7 +15,8 @@
   5. 输入统计：InputStats -> 服务埋点 -> StatsViewModel/StatsScreen -> 导航 STATS ->
      首页卡片
   6. 短语使用记录 PhraseUsageStore：是否只从 AppContainer 单例获取、面板是否零 IO
-  7. 口径一致性：版本号常量 vs build.gradle、注释 vs 枚举、校验脚本 vs 源码
+  7. 口径一致性：版本号唯一来源（build.gradle -> BuildConfig -> 两处展示）、注释 vs 枚举、
+     校验脚本 vs 源码
   8. 语音输入（VOICE / ASR）全链路：KeyDef -> 工具栏 -> 服务状态机 -> VoiceInputController
      -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
@@ -91,6 +92,7 @@ STATS_SCREEN = JAVA / "settings" / "StatsScreen.kt"
 STATS_VM = JAVA / "settings" / "stats" / "StatsViewModel.kt"
 NAV_GRAPH = JAVA / "settings" / "nav" / "IspeechNavGraph.kt"
 HOME_SCREEN = JAVA / "settings" / "HomeScreen.kt"
+ABOUT_SCREEN = JAVA / "settings" / "AboutScreen.kt"
 MAIN_ACTIVITY = JAVA / "settings" / "MainActivity.kt"
 BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
 
@@ -729,18 +731,38 @@ def check_phrase_usage_singleton() -> None:
 # ═════════════════════════════════════════════════════════════
 
 def check_consistency() -> None:
-    # 7.1 版本号：代码常量 vs build.gradle
+    # 7.1 版本号唯一来源：app/build.gradle.kts 的 versionName -> BuildConfig.VERSION_NAME
+    #     （VOCA-233：原先 MainActivity 另存一份 ISPEECH_VERSION="1.5"，出 1.6 包后
+    #      主页 / 关于页仍显示 1.5，用户可见面的「凭版本号分辨包」失效）
     gradle = read(BUILD_GRADLE)
     m = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
     gradle_ver = m.group(1) if m else "?"
-    m2 = re.search(r'const val ISPEECH_VERSION\s*=\s*"([^"]+)"', read(MAIN_ACTIVITY))
-    const_ver = m2.group(1) if m2 else "?"
+    hardcoded = sorted(
+        rel(p) for p in JAVA.rglob("*.kt")
+        if re.search(r'const val\s+\w*VERSION\w*\s*=\s*"[0-9][^"]*"', read(p))
+    )
     check(
-        gradle_ver == const_ver and gradle_ver != "?",
-        f"版本号一致：gradle versionName={gradle_ver} == ISPEECH_VERSION={const_ver}",
-        f"版本号不一致：app/build.gradle.kts versionName={gradle_ver} 但 "
-        f"{rel(MAIN_ACTIVITY)} ISPEECH_VERSION={const_ver}"
-        "（设置页「关于 / 首页」会显示旧版本号）",
+        gradle_ver != "?",
+        f"版本号来源存在：app/build.gradle.kts versionName={gradle_ver}",
+        "app/build.gradle.kts 未解析出 versionName（BuildConfig.VERSION_NAME 会是空串）",
+    )
+    check(
+        not hardcoded,
+        "版本号无第二处硬编码常量（唯一来源 = build.gradle versionName）",
+        f"以下文件又写了版本常量，会和包版本脱节：{hardcoded}",
+    )
+    display_offenders = []
+    for name, path, marker in (
+        ("HomeScreen", HOME_SCREEN, '"版本 v${BuildConfig.VERSION_NAME}"'),
+        ("AboutScreen", ABOUT_SCREEN, "R.string.about_version, BuildConfig.VERSION_NAME"),
+    ):
+        text = read(path)
+        if "import com.ispeech.BuildConfig" not in text or marker not in text:
+            display_offenders.append(name)
+    check(
+        not display_offenders,
+        "主页「版本 v*」与关于页「版本 *」都读 BuildConfig.VERSION_NAME",
+        f"版本展示未改读 BuildConfig（会显示旧版本号）：{display_offenders}",
     )
 
     # 7.2 排序注释口径：CandidateRanking / CompositeEngine 的注释是否提到新档位

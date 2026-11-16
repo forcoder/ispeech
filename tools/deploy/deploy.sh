@@ -262,6 +262,15 @@ deploy_one() {
     info "[${serial}] 已安装包信息："
     "${ADB}" -s "${serial}" shell dumpsys package "${PKG}" 2>/dev/null \
         | grep -E 'versionName|versionCode|firstInstallTime' | head -3 || true
+
+    # ---------- ⑩ 门禁：应用内展示版本 == 包管理器版本（VOCA-233）----------
+    # v1.6 的「显示 1.5」就是从这里漏掉的：badging / dex 只看包侧，看不到用户那一行字。
+    info "[${serial}] 门禁：应用内展示版本 == dumpsys versionName"
+    if python3 "${SCRIPT_DIR}/check_version_display.py" -s "${serial}"; then
+        info "[${serial}] 版本显示门禁通过"
+    else
+        die "[${serial}] 应用内展示版本与包版本不一致（见上方 FAIL），禁止出包"
+    fi
 }
 
 TARGETS="$(resolve_targets "${TARGET}")"
