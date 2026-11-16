@@ -90,14 +90,19 @@ internal const val CELL_DICT_WEIGHT = 80_000
 /** 同档候选排序：权重相同（分类词库权重固定），按词条文本升序。 */
 private val DISPLAY_RANK: Comparator<LookupCandidate> = Comparator { a, b -> a.display.compareTo(b.display) }
 
-/** 词条 → 统一候选：五笔态单字 / 词组分档，拼音态一律拼音档。 */
+/**
+ * 词条 → 统一候选：五笔态单字 / 词组分档，拼音态一律拼音档。
+ *
+ * 多字条目走 [LookupKind.WUBIPHRASE]（词库词组）而不是 [LookupKind.PHRASE]（快捷短语）：
+ * 候选条按「快捷短语 → 单字 → 词组 / 句子」分组，分类词库的词条属于词组组。
+ */
 private fun CellDictEntry.toCandidate(): LookupCandidate = LookupCandidate(
     code = code,
     display = text,
     insertText = text,
     weight = CELL_DICT_WEIGHT,
     kind = when (mode) {
-        UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE
+        UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE
         UserDictMode.PINYIN -> LookupKind.PINYIN
     },
 )

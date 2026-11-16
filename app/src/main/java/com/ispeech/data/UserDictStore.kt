@@ -352,6 +352,9 @@ private val COUNT_RANK: Comparator<UserDictEntry> = Comparator { a, b ->
 /**
  * 条目 → 统一候选：五笔模式单选字走五笔、多字走词组档；拼音模式一律走拼音档，
  * 与拼音词表的候选同档竞争，靠 +10 万权重排到前面。
+ *
+ * 多字条目用 [LookupKind.WUBIPHRASE]（词库词组）而不是 [LookupKind.PHRASE]（快捷短语）：
+ * 候选条按「快捷短语 → 单字 → 词组 / 句子」分组，学到的词属于词组，不该混进快捷短语组。
  */
 private fun UserDictEntry.toCandidate(): LookupCandidate = LookupCandidate(
     code = code,
@@ -359,7 +362,7 @@ private fun UserDictEntry.toCandidate(): LookupCandidate = LookupCandidate(
     insertText = text,
     weight = weight,
     kind = when (mode) {
-        UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.PHRASE
+        UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE
         UserDictMode.PINYIN -> LookupKind.PINYIN
     },
 )

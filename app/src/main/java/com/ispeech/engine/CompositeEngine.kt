@@ -8,8 +8,8 @@ class CompositeEngine(val engines: List<LookupEngine>) : LookupEngine {
     /**
      * 汇总各引擎候选（每个引擎取 max(limit * 2, 18) 条），
      * 统一排序后按 display 去重，取前 limit 条。
-     * 排序：精确码优先 → 应用 < 短语 < 词库单字 < 词库词组 < 拼音 → 权重降序 → display 升序
-     * （档位顺序见 [LookupKind.order]）。
+     * 排序：快捷短语 → 单字 → 词组 / 句子 → 精确码优先 → 应用 < 短语 < 词库单字
+     * < 词库词组 < 拼音 → 权重降序 → display 升序（见 [CandidateRanking]）。
      */
     override fun lookup(input: String, limit: Int): List<LookupCandidate> {
         if (input.isEmpty() || limit <= 0) return emptyList()
@@ -34,7 +34,8 @@ class CompositeEngine(val engines: List<LookupEngine>) : LookupEngine {
 
     /**
      * 词语联想：把实现了 [AssociationSource] 的引擎（五笔词库、快捷短语、用户词库）
-     * 的联想结果合并去重，按权重降序返回。
+     * 的联想结果合并去重，按与候选条相同的来源分组（快捷短语 → 单字 → 词组 / 句子）
+     * 排序，组内再看权重降序、display 升序。
      */
     fun related(text: String, limit: Int): List<LookupCandidate> {
         if (text.isBlank() || limit <= 0) return emptyList()
@@ -46,8 +47,11 @@ class CompositeEngine(val engines: List<LookupEngine>) : LookupEngine {
             }
         }
         if (pool.isEmpty()) return emptyList()
-        // 联想结果按权重降序；同权重时保持引擎顺序（词库词优先于短语）。
-        pool.sortWith(Comparator { a, b -> b.weight.compareTo(a.weight) })
+        pool.sortWith(
+            compareBy<LookupCandidate> { CandidateRanking.tier(it) }
+                .thenByDescending { it.weight }
+                .thenBy { it.display },
+        )
 
         val seen = HashSet<String>()
         val result = ArrayList<LookupCandidate>()
