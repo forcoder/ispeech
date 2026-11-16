@@ -46,6 +46,14 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         get() = SpeechRecognizer.isRecognitionAvailable(context)
 
     /**
+     * 点语音键的前置判定：能进「识别中」返回 `null`，否则返回机器可判的 `reason`，
+     * 由调用方据此打 `AsrTrace ev=blocked`（VOCA-310 打回项 2：拦下会话不许没有日志）。
+     * 拦下的两种原因怎么分见 [RecognitionServices.blockedReason]。
+     */
+    fun probeBlockedReason(asr: AsrSettings): String? =
+        RecognitionServices.blockedReason(isAvailable, probeUsableServices(asr))
+
+    /**
      * 探测设备上的识别服务：返回**真服务**（受 [RecognitionServices.BIND_PERMISSION] 保护）数量，
      * 并打一行 `AsrTrace ev=bind`（候选数 / 真服务数 / 被过滤数 / 会用哪个组件）。
      *
@@ -61,7 +69,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
      * 埋点必须在拦下会话**之前**打：只留 `ev=blocked reason=no_usable_service` 分不出「真没服务」
      * 和「查错了 action」，那正是本单最初的排查困境。
      */
-    fun probeUsableServices(asr: AsrSettings): Int {
+    private fun probeUsableServices(asr: AsrSettings): Int {
         val candidates = queryRecognizers()
         val usable = RecognitionServices.usable(candidates)
         AsrTrace.i(
@@ -148,7 +156,12 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         if (rec == null) {
             // 服务在（探测到了真服务）但识别器建不起来 = 绑定失败。归类清楚，
             // 不静默、也不让整个输入法崩在这一按上（VOCA-310 验收口径 1）。
-            AsrTrace.w(null, AsrTrace.EV_BLOCKED, "reason" to "service_bind_failed", "engine" to asr.engine.name)
+            AsrTrace.w(
+                null,
+                AsrTrace.EV_BLOCKED,
+                "reason" to RecognitionServices.REASON_SERVICE_BIND_FAILED,
+                "engine" to asr.engine.name,
+            )
             isListening = false
             recognizer = null
             // 回调在 post 里读：期间用户若已取消（[stop] 清空回调），这里就不该再弹提示
@@ -396,4 +409,26 @@ internal object RecognitionServices {
      */
     fun usable(candidates: List<Candidate>): List<Candidate> =
         candidates.filter { it.permission == BIND_PERMISSION }
+
+    /**
+     * 「点了语音键却没进『识别中』」的机器可判原因，进 `AsrTrace ev=blocked reason=`。
+     *
+     * 字面量是取证契约的一部分（`docs/voice-input.md` 的命令按它 grep），改名等于把线上日志读断，
+     * 所以取值由 `tools/verify/check_crosscut.py` 8.2b 与单测双向钉住。
+     */
+    const val REASON_NO_RECOGNITION_AVAILABLE = "no_recognition_available"
+    const val REASON_NO_USABLE_SERVICE = "no_usable_service"
+    const val REASON_SERVICE_BIND_FAILED = "service_bind_failed"
+
+    /**
+     * 前置判定：系统侧有没有可绑定的识别服务 + 枚举到的真服务数量 → 拦下会话的原因（`null` = 放行）。
+     *
+     * 抽成纯函数是因为这一按到底该不该拦、该记哪个 reason 是纯判定，而真机查询只能在设备上跑；
+     * 「服务可绑定 / 不可绑定」两态于是能在 JVM 单测里守住（VOCA-310）。
+     */
+    fun blockedReason(recognitionAvailable: Boolean, usableServices: Int): String? = when {
+        !recognitionAvailable -> REASON_NO_RECOGNITION_AVAILABLE
+        usableServices == 0 -> REASON_NO_USABLE_SERVICE
+        else -> null
+    }
 }

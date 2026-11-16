@@ -47,11 +47,30 @@
 - 松手收尾的兜底：`finish()` 后 6s 仍未收到 `onResults` / `onError` 时由 `finishWatchdog` 复位并提示「没听清」——按住-说话没有「再点一次」可用于恢复，不复位就会卡在「收音中」。
 - 取消即 `destroy()`：只 `stopListening()` 会让系统继续占麦克风，导致下一次 `ERROR_RECOGNIZER_BUSY`；因此取消 / 销毁都释放识别器。
 - `EXTRA_CALLING_PACKAGE`：输入法不是宿主，部分 ROM 缺该 extra 会直接回 `ERROR_CLIENT`，故透传 `currentInputEditorInfo.packageName`。
-- 识别服务枚举用**服务方**声明的 action（VOCA-310）：`RecognitionServices.SERVICE_INTERFACE` = `android.speech.RecognitionService`，与发起识别用的 `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` 是两个不同的 action，拿后者枚举命中恒为 0（`AndroidManifest` 的 `<queries>` 也只放行了前者）。判定链路是「枚举 → 按 `BIND_RECOGNITION_SERVICE` 留下真服务（挡住华为 `FakeRecognitionService` 那类绑得上却永不回结果的桩服务）→ 数量为 0 才提示 `voice_service_unavailable`」；`createSpeechRecognizer` 失败不再往外抛，归为 `service_bind_failed`。结论与计数（`services=` / `usable=` / `dropped=` / `requested=` / `first_usable=`）在拦下会话**之前**就进 `AsrTrace`（`ev=bind`），一条命令可查：
+- 识别服务枚举用**服务方**声明的 action（VOCA-310）：`RecognitionServices.SERVICE_INTERFACE` = `android.speech.RecognitionService`，与发起识别用的 `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` 是两个不同的 action，拿后者枚举命中恒为 0（`AndroidManifest` 的 `<queries>` 也只放行了前者）。判定链路是「枚举 → 按 `BIND_RECOGNITION_SERVICE` 留下真服务（挡住华为 `FakeRecognitionService` 那类绑得上却永不回结果的桩服务）→ 纯函数 `RecognitionServices.blockedReason(available, usable)` 归类」；`createSpeechRecognizer` 失败不再往外抛，归为 `service_bind_failed`。
 
-  ```bash
-  adb logcat -s AsrTrace | grep -E 'ev=(bind|blocked)'
-  ```
+### 前置判定：为什么这一按没进「识别中」（VOCA-310）
+
+判定与打点都收在一处：`IspeechImeService.toggleVoiceInput()` 问 `controller.probeBlockedReason(asr)`，非空就走 `traceVoiceBlocked(reason)` 拦下——打点只有这一个出口，所以「点了语音键却没进识别中、日志里却什么都查不到」这条路写不出来。三个 reason 是日志契约（`tools/verify/check_crosscut.py` 8.2b 钉住字面量，改名即 FAIL）：
+
+| `ev=blocked reason=` | 判定条件 | 候选条文案 |
+| --- | --- | --- |
+| `no_recognition_available` | `SpeechRecognizer.isRecognitionAvailable()` 为 false：系统侧没有可绑定的识别服务 | `voice_unavailable`（设备不支持语音输入） |
+| `no_usable_service` | 服务查到了，但按 `BIND_RECOGNITION_SERVICE` 筛完剩 0 个：机型只预置桩服务 | `voice_service_unavailable` |
+| `service_bind_failed` | 前置判定放行，`createSpeechRecognizer` 却建不起来（绑定失败） | `voice_service_unavailable` |
+
+拦下会话**之前**先打一行 `ev=bind`，字段是 `engine=` / `services=`（枚举到几条）/ `usable=`（筛完剩几条）/ `dropped=`（被过滤几条）/ `requested=`（CUSTOM 指定的组件，SYSTEM 为 `system_default`）/ `first_usable=`。只有 `ev=blocked` 分不出「真没服务」和「查询写错了 action」，那正是本单最初的排查困境。
+
+取证两条命令，**先跑 ② 再读 ①**（② 不装包、不改机器，回答的是「这台机到底有没有真服务」这个前提）：
+
+```bash
+# ① 会话侧：这一按被判成了什么（ev=bind 给计数，ev=blocked 给归类）
+adb -s <serial> logcat -d -s AsrTrace | grep -E 'ev=(bind|blocked)'
+# ② 机型侧：设备上声明了识别服务的组件与各自的保护权限
+adb -s <serial> shell cmd package query-services -a android.speech.RecognitionService
+```
+
+② 里只有 `permission=android.permission.BIND_RECOGNITION_SERVICE` 的那几条是真服务；实测华为 ALN-AL00 唯一命中 `com.huawei.vassistant.voiceui.service.FakeRecognitionService`（`BIND_VOICE_INTERACTION`）——这种机器上 `usable=0` 并提示 `voice_service_unavailable` 是**预期结果**，不是本缺陷复发。换成 `android.speech.action.RECOGNIZE_SPEECH` 查会得到 `No services found`，那正是 VOCA-310 修掉的错法。
 
 ## 三、复刻义务清单
 
@@ -74,7 +93,9 @@
 | 语音链路真的起来了、麦克风真的被采集 | `docs/v1.5-verify-log.md` ①（真机 Huawei：`phone8.png` 状态条「语音识别中...」、`logcat` 绑定 `com.huawei.vassistant/.voiceui.service.FakeRecognitionService`）与 §5（模拟器：候选条「Listening…」+ 系统麦克风指示） |
 | 状态机能优雅收尾、不卡「聆听中」 | 同上 §5：5 秒后候选条变「Voice recognition failed」、麦克风指示消失、输入法未崩溃 |
 | 中英文案齐全 | `tools/verify/check_crosscut.py` 第 8 节（`voice_*` / `asr_*` 中英键名一致性断言） |
-| 前置判定不再被「action 用错」挡掉（VOCA-310） | `tools/verify/check_crosscut.py` 8.2b（枚举 action、`BIND_RECOGNITION_SERVICE` 过滤、`ev=bind` 计数三向断言，写错即 FAIL）+ `app/src/test/java/com/ispeech/input/RecognitionServicesTest.kt`（真服务判据）。**真机侧口径仍待补**：基线机 `23F0224224000950` 离线，「点语音键能进『识别中』」需设备回线后复测 |
+| 前置判定不再被「action 用错」挡掉（VOCA-310） | `tools/verify/check_crosscut.py` 8.2b（枚举 action、`BIND_RECOGNITION_SERVICE` 过滤、`ev=bind` 计数、三个 reason 字面量、`traceVoiceBlocked` 单一打点出口五向断言，写错即 FAIL）+ `app/src/test/java/com/ispeech/input/RecognitionServicesTest.kt`（真服务判据 + 前置判定两态） |
+| 「点了语音键却没进识别中」必定有日志（VOCA-310 打回项 2） | `IspeechImeService.traceVoiceBlocked()` 是 `ev=blocked` 的唯一出口，8.2b 断言删掉即 FAIL；`rg -n "no_recognition_available" app/src/main` 命中常量与调用 |
+| **基线机侧口径未取证**（VOCA-310 口径 1 / 3） | 静态与构建证据齐（见 PR），设备侧三项仍缺：`adb -s 23F0224224000950` 的包身份、`AsrTrace` 原文、截图。**前提同样待确认**：基线机是否真的预置了持 `BIND_RECOGNITION_SERVICE` 的识别服务——同 ROM 家族的 ALN-AL00 只查到华为桩服务，若基线机同构，修完 action 后仍是 `usable=0`，只是日志能说清。设备窗口归 VOCA-228 / VOCA-127 复测；`adb` 本身在 PATH 可用，缺的是那台机器 |
 
 ## 五、已知差异与限制
 

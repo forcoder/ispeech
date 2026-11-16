@@ -2,6 +2,7 @@ package com.ispeech.input
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -58,5 +59,42 @@ class RecognitionServicesTest {
     @Test
     fun `空清单判为无可用服务而不是异常`() {
         assertTrue(RecognitionServices.usable(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `有可绑定的真服务时放行`() {
+        assertNull(RecognitionServices.blockedReason(recognitionAvailable = true, usableServices = 1))
+    }
+
+    @Test
+    fun `服务不可绑定就判无识别服务而不是无可用服务`() {
+        // 两态的 reason 必须分得开：no_recognition_available = 系统侧压根没有可绑的服务，
+        // no_usable_service = 枚举到了服务但全是绑得上却永不回结果的桩服务。
+        // 用户看到的文案、设备回线后的归因都靠这两个值区分，混成一个就等于没日志。
+        assertEquals(
+            "no_recognition_available",
+            RecognitionServices.blockedReason(recognitionAvailable = false, usableServices = 0),
+        )
+        assertEquals(
+            "no_usable_service",
+            RecognitionServices.blockedReason(recognitionAvailable = true, usableServices = 0),
+        )
+    }
+
+    @Test
+    fun `系统说没有服务时优先于候选计数`() {
+        // 桩服务能查询到却绑不了：这一按的根因是「没有可绑的服务」，不是「枚举筛空了」
+        assertEquals(
+            RecognitionServices.REASON_NO_RECOGNITION_AVAILABLE,
+            RecognitionServices.blockedReason(recognitionAvailable = false, usableServices = 3),
+        )
+    }
+
+    @Test
+    fun `三个reason字面量是日志契约不许漂移`() {
+        // docs/voice-input.md 的取证命令按这些字面量 grep，改名会把线上日志读断
+        assertEquals("no_recognition_available", RecognitionServices.REASON_NO_RECOGNITION_AVAILABLE)
+        assertEquals("no_usable_service", RecognitionServices.REASON_NO_USABLE_SERVICE)
+        assertEquals("service_bind_failed", RecognitionServices.REASON_SERVICE_BIND_FAILED)
     }
 }

@@ -20,7 +20,8 @@
      -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请；
      含 8.2b「识别服务枚举」专项（VOCA-310）：枚举必须用服务方声明的
      `android.speech.RecognitionService`（不是调用方的 RECOGNIZE_SPEECH）、必须保留
-     BIND_RECOGNITION_SERVICE 真服务过滤、判定计数必须进 AsrTrace
+     BIND_RECOGNITION_SERVICE 真服务过滤、判定计数必须进 AsrTrace、拦下会话的 reason
+     必须走 RecognitionServices.REASON_* 且只有 traceVoiceBlocked 一个打点出口
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -84,6 +85,7 @@ INPUT_MODE = JAVA / "input" / "InputMode.kt"
 INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
+RECOGNITION_SERVICES_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "RecognitionServicesTest.kt"
 # 识别服务**自己**声明的 action（服务方），与调用方发起识别用的
 # `android.speech.action.RECOGNIZE_SPEECH` 不是一回事 —— 拿后者枚举服务，命中永远是 0 条（VOCA-310）。
 RECOGNITION_SERVICE_ACTION = "android.speech.RecognitionService"
@@ -906,11 +908,18 @@ def check_voice_chain() -> None:
     #      这类错误的代价不对称：不崩、不报错，只是每次静默返回 0 条，语音键于是永远进不到
     #      「识别中」。所以正反两个方向都查——枚举处不许出现调用方 action，
     #      发起识别处也不许被「顺手改」成服务方 action。
+    #      打回项 2 补的是另一半：拦下会话的三条 reason 必须有且只有一个打点出口，
+    #      「点了语音键却没进识别中」不允许存在查不到日志的路径。
     query_region = strip_comments(function_region(controller, r"private fun queryRecognizers\("))
     probe_region = strip_comments(function_region(controller, r"fun probeUsableServices\("))
     intent_region = strip_comments(function_region(controller, r"private fun buildIntent\("))
     usable_region = strip_comments(function_region(controller, r"fun usable\("))
+    blocked_region = strip_comments(function_region(controller, r"fun blockedReason\("))
+    reason_consts = strip_comments(controller)
     svc = strip_comments(service)
+    toggle_region = strip_comments(function_region(svc, r"private fun toggleVoiceInput\("))
+    blocked_trace = strip_comments(function_region(svc, r"private fun traceVoiceBlocked\("))
+    recognition_test = read(RECOGNITION_SERVICES_TEST)
 
     m_action = re.search(r'const val SERVICE_INTERFACE\s*=\s*"([^"]+)"', strip_comments(controller))
     action_value = m_action.group(1) if m_action else ""
@@ -964,9 +973,50 @@ def check_voice_chain() -> None:
         f"{rel(VOICE_CONTROLLER)} probeUsableServices() 缺 ev=bind 计数埋点（VOCA-310 验收口径 3）",
     )
     check(
-        "controller.probeUsableServices(asr) == 0" in svc,
-        "语音键前置判定读探测结果（拦下会话前已打点，blocked 与 bind 同一次查询）",
-        f"{rel(SERVICE)} toggleVoiceInput() 未走 controller.probeUsableServices(asr)：判定与埋点会脱节",
+        "controller.probeBlockedReason(asr)" in toggle_region
+        and "traceVoiceBlocked(RecognitionServices.REASON_NO_RECOGNITION_AVAILABLE)" in toggle_region,
+        "语音键前置判定走纯函数 + 两条出口都打点（拦下会话前已 bind/blocked，判定与埋点不脱节）",
+        f"{rel(SERVICE)} toggleVoiceInput() 未同时走 controller.probeBlockedReason(asr) 与"
+        f" traceVoiceBlocked(REASON_NO_RECOGNITION_AVAILABLE)：「点了语音键却没进识别中」又会出现"
+        f"没有 ev=blocked 的静默出口（VOCA-310 打回项 2）",
+    )
+    check(
+        "AsrTrace.EV_BLOCKED" in blocked_trace and '"reason" to reason' in blocked_trace,
+        "ev=blocked 只有 traceVoiceBlocked 一个出口：reason 必进 AsrTrace",
+        f"{rel(SERVICE)} traceVoiceBlocked() 不再打 AsrTrace ev=blocked + reason："
+        f"拦下会话的三种原因（no_recognition_available / no_usable_service / service_bind_failed）在日志里消失",
+    )
+    check(
+        not re.search(r'"(no_usable_service|no_recognition_available|service_bind_failed)"', toggle_region),
+        "服务侧不写裸 reason 字面量（词汇单一来源 = RecognitionServices.REASON_*）",
+        f"{rel(SERVICE)} toggleVoiceInput() 里出现了裸 reason 字面量：绕过 RecognitionServices.REASON_*"
+        f" 会让改名时漏改一处，取证命令按不到（VOCA-310）",
+    )
+    check(
+        all(
+            m in reason_consts
+            for m in (
+                'REASON_NO_RECOGNITION_AVAILABLE = "no_recognition_available"',
+                'REASON_NO_USABLE_SERVICE = "no_usable_service"',
+                'REASON_SERVICE_BIND_FAILED = "service_bind_failed"',
+            )
+        ),
+        "三个 reason 字面量稳定（docs/voice-input.md 的取证命令按它们 grep）",
+        f"{rel(VOICE_CONTROLLER)} 的 REASON_* 常量取值变了：docs 里的 grep 关键字与历史日志都对不上",
+    )
+    check(
+        "!recognitionAvailable -> REASON_NO_RECOGNITION_AVAILABLE" in blocked_region
+        and "usableServices == 0 -> REASON_NO_USABLE_SERVICE" in blocked_region,
+        "「服务可绑定 / 不可绑定」两态分别归到两个 reason（纯函数，单测覆盖）",
+        f"{rel(VOICE_CONTROLLER)} RecognitionServices.blockedReason() 不再按 available / usable 两态分流："
+        f"桩服务机型与无服务机型又在日志里混成一类",
+    )
+    check(
+        RECOGNITION_SERVICES_TEST.exists()
+        and "REASON_NO_RECOGNITION_AVAILABLE" in recognition_test
+        and "REASON_NO_USABLE_SERVICE" in recognition_test,
+        "单测覆盖前置判定两态（放行 / 拦下），不只守 action 取值",
+        f"{rel(RECOGNITION_SERVICES_TEST)} 缺 blockedReason 两态断言：判定改回去没人拦",
     )
 
     # 8.3 服务接线：创建 / 销毁 / 语音态上屏与取消
