@@ -128,7 +128,7 @@ T9Layouts.t9ToLetterPatterns("2", lookup) // 展开 + 查词库，返回命中�
 ### 4.1 已落地（Agent B）
 
 只给符号引用，不嵌源码摘录、也不写 `文件:行号` —— 摘录和行号必然随主干腐烂：上一版这一节里的
-行号引用除 `KeyDef.kt:78` 一处外全部对不上主干，工具栏摘录抄的「⌨输入法」/ `weight = 1.6f`
+11 处行号引用只有 1 处还对（`KeyAction.SWITCH_IME` 那条），工具栏摘录抄的「⌨输入法」/ `weight = 1.6f`
 也与代码不符（键面是「⌨」+ `ic_ime_switch`、权重是 `1f`）。键序 / 键面 / 权重 / 图标的真值看 §1.5，
 `tools/verify/check_t9.py` 直接解析 `SoftKeyboardView.toolbarKeys()` 校验那张表。
 
