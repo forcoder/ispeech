@@ -3,9 +3,10 @@
 - **状态**：Accepted（判别实验已定论）／**待人类拍板 §6 第 1 项后才进实现** —— 按项目规矩，manifest 改动属需人确认项
 - **决策日期**：2026-11-17
 - **决策人**：架构师（agent `e7ea905a-48f9-4dc9-86d5-32346dc237da`，VOCA-398）
-- **关联 issue**：VOCA-398（本 ADR）→ 父 VOCA-167；需求澄清件 VOCA-168（`done`，验收文档 `c99b1f5:docs/requirements/voca-167-switch-system-ime.md`）；下游 **VOCA-401**（S2 实现，本 ADR 是其唯一输入）、VOCA-402（S3 机检与回归）；同段 manifest 关联方 **VOCA-310 / PR #16**
+- **关联 issue**：VOCA-398（本 ADR）→ 父 VOCA-167；需求澄清件 VOCA-168（`done`，验收文档 `c99b1f5:docs/requirements/voca-167-switch-system-ime.md`）；下游 **VOCA-401**（S2 实现，本 ADR 是其唯一输入）、VOCA-402（S3 机检与回归）；本 ADR 文本校正件 **VOCA-405**；同文件耦合关联方（§4.1 全量名单）：**PR #16 / VOCA-310**（语音侧依赖 `<queries>` 里那条 intent）、**PR #13 / VOCA-166**（唯一并发改 manifest 的 PR）、**PR #20 / VOCA-399**（与本件同为父单 VOCA-167 的兄弟子单，改 `check_crosscut.py` 的 `check_switch_ime_chain()` —— VOCA-402 的落点正撞它）
 - **本文的基线口径**：所有行号与代码结论以 **`origin/main` tip `fa57a07`** 为准。本实验的实际跑数载体是分支 `agent/agent/voca-398` @ `007874d`，它与 `fa57a07` **只差 `dist/ispeech-release-1.5-20261115-1004.apk` 一个二进制**（`git diff --stat fa57a07 HEAD` → `1 file changed`，源码与文档逐字节相同），引用时以 `fa57a07` 为准。
 - **范围**：只做架构决策与契约。不写业务实现、不合并 main、不改验收判据（AC-2 仍为「面板行数 == `|ENABLED|` 且每个 id 都有行」）。
+- **校正记录（VOCA-405，2026-11-17）**：质检专员·架构师对 VOCA-398 裁决 **PASS-WITH-CAVEAT**（VOCA-398 评论 `01a1e606…`）后，合并前改掉本文三处文本缺陷：**R1** §7 性能行 / §8 F6 / §10 取证口径的滚动阈值（原「4 行 472px 已超出可见高 → 会滚动」把 472 与 660 比反了，正确为「上限 660px ÷ 118px/行 ⇒ ≥6 行才滚动」）；**R2** §1.5 与附录 A 的截图文件名与 issue 附件一一对应；**R3** §4 同文件耦合名单改为对**全部开着的 PR** 全量枚举（manifest 侧并发者是 PR #13 而非 #16；门禁脚本侧 9 个并发修改者，VOCA-402 真正会撞的是 PR #20 = VOCA-399 的 `check_switch_ime_chain()`）。**不动 D1–D4 决策、不动 AC 判据、不新增决策。**
 - **复审条件**（任一满足即重审）：
   ① `targetSdk` 升到 35+ 或 AOSP 改了 `getEnabledInputMethodList()` 的可见性口径；
   ② 任何一台真机（尤其 EMUI）在装上本修法后仍漏列；
@@ -140,7 +141,7 @@ $ adb shell input tap 70 1469
     Frames: … frame=[0,1576][1080,2340]                                        # 回到 2 行的高度
 ```
 
-面板截图 `panel-control-again.png`：**「输入法 2 个」+「共 2 个」+ 2 行**。
+面板截图 `E-abab-control-again-2of4.png`：**「输入法 2 个」+「共 2 个」+ 2 行**。
 → 2↔4 只由那 3 行 manifest 决定，**因果闭合**；「重装一次就好了」「刷新缓存」这类解释被排除。
 
 > 附带记录一条与结论无关但要留痕的事实：回控重打的 APK 是 `ca90cb7e…0d61`，与控制组首次构建的 `48ee0d3d…b330` **字节不同**（源码相同）⇒ 本项目的 debug 构建**不是字节可复现的**。所以 §1.2/§1.3 的 SHA 只能署名「哪一次构建装的机」，不能用来比对「同一份源码的两次构建」。出包门禁若要按字节断言，需另立 issue（归属 SRE + 测试，不在本件范围）。
@@ -294,15 +295,78 @@ $ gh pr diff 16 --repo forcoder/ispeech | sed -n '/IspeechImeService/,/^diff --g
 
 VOCA-310 换的是**运行时查询用的 action 常量**（`RecognitionServices.SERVICE_INTERFACE = "android.speech.RecognitionService"`），它的值**恰好等于 `<queries>` 里已有的那条声明**，所以它不需要动 manifest，而是**依赖**这条声明存在。
 
-**所以真实关系不是「两个 PR 改同一段」，而是「一个依赖、一个追加」**，但本轮实测出**两处真实的同文件耦合**，比 issue 的原始前提更值得钉：
+**所以真实关系不是「两个 PR 改同一段」，而是「一个依赖、一个追加」**。
+
+### 4.1 盘查方法：对全部开着的 PR 全量枚举（VOCA-405 R3 校正）
+
+原 §4 只查了 issue 点名的 PR #16 一个。**方法是对的，覆盖面不对** —— 同期开着的 PR 有 20 个，同文件耦合必须按全量名单来钉，否则合并窗口会撞在错误的对象上。本轮实跑的枚举命令（原文与输出）：
+
+```
+$ gh pr list --repo forcoder/ispeech --json number -q '.[].number' | wc -l
+20
+
+# 谁在改 manifest
+$ for p in $(gh pr list --json number -q '.[].number'); do
+    gh pr diff $p --name-only | grep -q app/src/main/AndroidManifest.xml && echo $p; done
+13
+
+# 谁在改门禁脚本
+$ for p in $(gh pr list --json number -q '.[].number'); do
+    gh pr diff $p --name-only | grep -q check_crosscut.py && echo $p; done
+20 18 16 14 13 12 10 6 4
+```
+
+⇒ **manifest 段：1 个并发修改者（PR #13）**；**`tools/verify/check_crosscut.py`：9 个并发修改者**（#4、#6、#10、#12、#13、#14、#16、#18、#20）。不是原 §4 假设的 1 个，也不是质检那轮同样方法只查到 4 个（#13/#16/#18/#20）的结果 —— 名单以上面这条命令的输出为准。
+
+逐 PR 在 `check_crosscut.py` 内占用的区段（`gh pr diff <p> | awk` 本轮实取的 hunk 头；行号坐标 = `fa57a07` 上的 `tools/verify/check_crosscut.py`，全文 1759 行）：
+
+| PR | 分支 / issue | 占用区段（旧行号） | 与 VOCA-402 的关系 |
+|---|---|---|---|
+| **#20** | `docs/voca-399-ac1-alignment`（VOCA-399 = 缺陷 A，**本父单的兄弟子单**） | **`check_switch_ime_chain()` `@@ -348,9 +348,16 @@`**（改 348–356：键面文案由硬编码「⌨输入法」改为从 `toolbarKeys()` 现解析） | **正撞同一个函数** —— 见 §4.3 |
+| #16 | `fix/voca-310-recognition-service-action` | docstring `@@ -17,7`；常量 `@@ -81,6`；新 helper `enclosing_fun()` `@@ -227,6`；`check_voice_chain()` `@@ -895,6 +915,163 @@`（新增 8.2b 段） | 函数不同，但抢 docstring 第 8 条与常量块 |
+| #13 | `fix/voca-166-mic-permission-entry` | docstring `@@ -17,7`；常量 `@@ -49,6`；`check_voice_chain()` `@@ -832,6 / -911,7 / -919,17 +922,121 / -1001,6`（新增 8.4 段） | 函数不同；**且它是唯一在改 manifest 的 PR**（§4.2） |
+| #14 | `fix/voca-233-version-display` | docstring `@@ -15,7`（改写第 7 条）；常量 `@@ -91,6`；`check_phrase_usage_singleton()` `@@ -729,18 +731,38 @@`（新增 7.1） | 函数不同；docstring 第 7 条与常量块重叠 |
+| #12 | `agent/agent/voca-231` | docstring `@@ -17,6`（新增「8b」条目）；常量 `@@ -81,6`；`check_voice_chain()` `@@ -1019,6 +1025,97 @@`；**`main()` `@@ -1743,6`**（dispatch 新增 `-- 8b.` → `check_voice_timeouts()`） | dispatch 插入点在 1745 之后，与 #4/#10/#18 的 1753 之后不重叠 |
+| #4 | `feat/voca-124-phrase-learning` | docstring `@@ -23,6`（新增「**13.** 词组自学习」）；`check_cell_dict_chain()` `@@ -1489,11`；新函数 `@@ -1725,6 +1737,70 @@`；**`main()` `@@ -1751,6`**（dispatch `-- 13.`） | 见 §4.3「13 号已被三方抢占」 |
+| #10 | `agent/agent/voca-121` | docstring `@@ -23,6`（新增「**13.** 联想词上屏去重」）；常量 `@@ -79,6`；新函数 `@@ -1725,6 +1729,101 @@`；**`main()` `@@ -1751,6`**（dispatch `-- 13.`） | 同上 |
+| #18 | `feat/voca-46-ux-46dp-space-period` | docstring `@@ -23,6`（新增「**13.** 双击空格出句号」）；常量 `@@ -47,6`；helper + 新函数 `@@ -1725,6 +1728,91 @@`；**`main()` `@@ -1751,6`**（dispatch `-- 13.`） | 同上 |
+| #6 | `agent/agent/voca-190` | `check_voice_chain()` `@@ -850,17 / -869,7 / -938,6 / -1002,6`（整段 850–1019 被动） | 函数不同 |
+
+### 4.2 manifest 侧：并发修改者是 PR #13，不是 PR #16
+
+```
+$ gh pr diff 13 --repo forcoder/ispeech | awk '/^diff --git/{f=($0 ~ /AndroidManifest/)} f' | grep '^@@'
+@@ -25,8 +25,14 @@
+```
+
+PR #13 的 hunk 落在旧 25 行（`android:theme="@style/Theme.Ispeech">` 之后，给 `MainActivity` 加 `android:launchMode="singleTask"` + 一段注释），而 `<queries>` 段是 **11–15 行**（`fa57a07` 原文，`</queries>` 在 15 行）。两者之间 16–24 共 **9 行未改文本 > git 默认 3 行上下文的 6 行缓冲 ⇒ 文本不冲突**，可自动合并。但名单里必须写上它：**在本 ADR 的 `<queries>` 追加落地前后，manifest 只有一个别的修改者在跑**，合并窗口核这一段时应当核对的是 #13 而不是 #16（#16 根本不碰这个文件，见 §4 开头那条更正）。
+
+### 4.3 门禁脚本侧：VOCA-402 的断言落点规则
+
+**这里没有距离保护可言** —— 9 个 PR 已经在改同一个脚本，其中三处是「谁都要插同一行」的热点：
+
+| 热点 | 旧行号 | 已抢占者 |
+|---|---|---|
+| 模块 docstring 的检查项编号清单 | 15–25 | #14（改写第 7 条）、#12/#13/#16（第 8 条区域）、#4/#10/#18（在第 12 条后追加「13.」） |
+| 路径常量块 | 47–91 | #18（47）、#13（49）、#10（79）、#12/#16（81）、#14（91） |
+| `main()` 里的 dispatch | 1743–1753 | #12（1745 之后）、**#4/#10/#18（都在 1753 之后，且三方各自写了 `-- 13.`）** |
+
+**规则（写给 VOCA-402，也写给合并窗口）**：
+
+1. **AC-1/AC-2 的断言天然落在 `check_switch_ime_chain()`（`fa57a07` 上 339–419 行，420 行起是 `check_t9()`），而 PR #20 = VOCA-399 正在改这个函数的 348–356 行** —— 这两个是同一个父单 VOCA-167 的兄弟子单，缺陷 A 的机检和缺陷 D 的机检会写进同一个函数。所以本 ADR 原来那句「不复用、不重排 8.2b 附近区域」**不足以避开真正的碰撞点**（8.2b 在 `check_voice_chain()` 里，本来就离得很远）。正确的约束是：**VOCA-402 的插入点不得落在 345–359 这段窗口内**（= #20 的 348–356 各加 git 的 3 行上下文）；若确实需要扩充 `check_switch_ime_chain()`，要么插在 359 之后（并保证与 #20 的新增行之间留够未改文本），要么以 #20 先合入后的文本为基准重写 hunk。
+2. **新断言优先另立独立函数，不要塞进别人正在改的函数里。** 但要注意「追加在文件末尾」并不天然安全：`check_candidate_style()` 之后、`def main()` 之前的这段空档（三方 hunk 都是 `@@ -1725,6`，覆盖旧 1725–1730）正是 #4、#10、#18 三方共同的函数插入点，**不是安全位置**。可行的做法是把它当成一次有意的串行化：VOCA-402 的 PR 在合并窗口**最后合**，落点以当时 main 的实际文本现取现改，而不是照本 ADR 记下的行号开 PR。
+3. **编号「13」已被 #4、#10、#18 三方各自占用**（docstring 清单与 `main()` dispatch 两处都是）。所以 VOCA-402 **不得在 PR 描述或代码里预先声明自己叫 13**，也不得假定任何具体数字；编号在合并窗口按当前 main 的最大编号 +1 现赋，docstring 与 dispatch 两处同步改。
+4. 合并次序仍然是「先 #16（VOCA-310），后 VOCA-401」；但同一段脚本的并发修改者名单变了，合并窗口必须**逐条核对上面 9 个 PR 在本件之后是否仍在开着**，每多一个合入，VOCA-402 的落点就要按新的 main 重新定位一次（与本 ADR §4 同文件耦合② 那句「不许沿用本 ADR 的行号当坐标」同理）。
+
+下表是耦合与次序规则的汇总，名单口径以 §4.1～§4.3 为准：
 
 | 项 | 规则 |
 |---|---|
 | 语义耦合 | `RecognitionService` 那条 intent 是 VOCA-310 语音枚举的**运行前提**；谁把它删掉或收窄（例如换成 `<package>` 精确声明），语音侧立刻退化成「无可用服务」 |
-| **同文件耦合 ①（manifest）** | 两条 intent 落在同一个 `<queries>` 元素内，属**同一 3～5 行窗口**，格式重排就会撞 —— 但 PR #16 **当前不碰这个文件**，所以这不是「并行改同一段」，只是「后续都要往这段追加」 |
+| **同文件耦合 ①（manifest）** | 两条 intent 落在同一个 `<queries>` 元素内（11–15 行），属**同一 3～5 行窗口**，格式重排就会撞。全量枚举后这段的**并发修改者只有一个：PR #13（VOCA-166）**，hunk 在旧 25 行、距 `</queries>` 有 9 行未改文本 > 6 ⇒ **文本不冲突**；PR #16 当前不碰这个文件（§4.2）。合并窗口核这段 manifest 时要核对的是 **#13**，不是 #16 |
 | **同文件耦合 ②（代码，实测新发现）** | PR #16 与 D3 的交叉校验**改同一个文件** `IspeechImeService.kt`：PR #16 的 3 个 hunk 在 1456/1470/1478（语音段），D3 的改动在 `enabledInputMethods()` 1390-1407 / `refreshInputMethods()` 1410-1418 —— **最近距离 38 行 > git 3 行上下文，不会文本冲突**，可自动合并。但 D3 落地后行号会整体下移，**任何引用行号的文档/评论都必须按「合入后的 main」重新定位**，不许沿用本 ADR 的行号当坐标 |
-| **同文件耦合 ③（门禁脚本）** | PR #16 改 `tools/verify/check_crosscut.py`（新增 8.2b 出口断言），VOCA-402 的机检也要往同一脚本加断言（§4 门禁②）。**这里没有距离保护** —— 两个 PR 若都插在相邻小节，冲突概率真实存在。规则：VOCA-402 的断言**追加为新的独立检查项编号**（不复用、不重排 8.2b 附近区域），并在合并窗口按「先 310、后 402」应用 |
-| 合并次序 | **PR #16（VOCA-310）先合，VOCA-401（本 ADR 的实现）后合**。理由：① 310 已在 `in_progress`、PR 已开且 `MERGEABLE`，401 还被本件挡着（契约未 PASS 不排工期）；② 310 不动 manifest，先合不会给 401 制造冲突；③ 代码侧 38 行距离使 401 基于合入后的 main 改写 `IspeechImeService.kt` 时无冲突；④ 反过来若 401 先合，310 后续任何补 manifest 的整改就要 rebase 本 ADR 的段 |
+| **同文件耦合 ③（门禁脚本）** | `tools/verify/check_crosscut.py` 被 **9 个开着的 PR** 同时改（#4、#6、#10、#12、#13、#14、#16、#18、#20，见 §4.1）—— PR #16 只是其中一个（新增 8.2b 出口断言），VOCA-402 的机检也要往同一脚本加断言（下表「门禁」行②）。**这里没有距离保护**，且三处是同行热点（docstring 编号清单 15–25、常量块 47–91、`main()` dispatch 1743–1753）。规则见 §4.3：**AC-1/AC-2 的断言天然落在 `check_switch_ime_chain()`（339–419），正撞 PR #20 = VOCA-399 已占用的 348–356**，插入点必须避开该段而不是「不插在 8.2b 附近」；编号不得预先自称 13（#4/#10/#18 三方都已写 13），由合并窗口按当时 main 的最大编号 +1 现赋 |
+| 合并次序 | **PR #16（VOCA-310）先合，VOCA-401（本 ADR 的实现）后合**。理由：① 310 已在 `in_progress`、PR 已开且 `MERGEABLE`，401 还被本件挡着（契约未 PASS 不排工期）；② 310 不动 manifest，先合不会给 401 制造冲突；③ 代码侧 38 行距离使 401 基于合入后的 main 改写 `IspeechImeService.kt` 时无冲突；④ 反过来若 401 先合，310 后续任何补 manifest 的整改就要 rebase 本 ADR 的段；⑤ 窗口内除 #16 外还要各核对一次 **PR #13（唯一并发改 manifest 的，§4.2）与 PR #20（与 VOCA-402 撞同一函数 `check_switch_ime_chain()`，§4.3）** —— 名单口径以 §4.1 的全量枚举为准，开着的 PR 每多一个，这两处核对就要重跑一次 |
 | 后合方的改法 | VOCA-401 的 diff 必须是**纯追加**：在 `</queries>` 前插入 §3 D1 那段 `<intent>`，**不重排、不改缩进、不动 `RecognitionService` 那条、不删既有注释** |
 | 冲突处理 | 若合并窗口里 `<queries>` 出现冲突，以「两条 intent 都在 + 注释按 D1 文本」为唯一正确解；不接受「二选一」或「合并成 `<package>` 列表」 |
 | 门禁 | ① 任何后续往 `<queries>` 增删条目的 PR，描述必须引用本 ADR；② VOCA-402 的机检需断言：manifest 同时含 `android.speech.RecognitionService` 与 `android.view.InputMethod` 两条 intent（静态可检，不需要设备）；③ 该断言在两棵真值树（main 与最终出包树）分别出结论 |
@@ -356,7 +420,7 @@ VOCA-310 换的是**运行时查询用的 action 常量**（`RecognitionServices
 
 | 维度 | 影响 |
 |---|---|
-| 性能 | 无新增 IPC、无新增查询。`enabledInputMethods()` 仍在主线程调用（`refreshInputMethods()` 注释已定「本地数据，主线程查询即可」，`IspeechImeService.kt:1409-1411`），行数从 2 变 4 的量级对渲染无影响（ScrollView 上限 240dp，4 行 472px 已超出可见高 → 会滚动，AC-2 取证口径已要求「滚到底补一张」） |
+| 性能 | 无新增 IPC、无新增查询。`enabledInputMethods()` 仍在主线程调用（`refreshInputMethods()` 注释已定「本地数据，主线程查询即可」，`IspeechImeService.kt:1409-1411`），行数从 2 变 4 的量级对渲染无影响，**且 4 行根本不触发滚动**（VOCA-405 R1 校正 —— 本行原文「4 行 472px 已超出可见高 → 会滚动」把 472 与 660 比反了，并与 §1.3 截图 B 自相矛盾）。正确的算术：`BoundedScrollView` 用 `MeasureSpec.AT_MOST(maxHeight)`（`InputMethodPanel.kt:314-318`），`maxHeight = dp(240)`（`maxPanelHeightDp = 240` 在 57 行、构造在 161 行，`dp()` 在 283 行），440dpi ⇒ 1dp = 2.75px ⇒ **上限 660px**；实测 1 行 = 118px（§1.2～§1.4 的 frame 顶差：2→3 行 1576−1460 = 116、3→4 行 1460−1340 = 120，均值 118）⇒ **660 ÷ 118 = 5.59 ⇒ 滚动门槛 ≥6 行**（5 行 590px 不滚，6 行 708px 才滚）。就算扣掉 ScrollView 自身的 `dp(4)+dp(8)` = 33px 内边距（内容区 627px），5 行 590 仍不滚、6 行 708 仍要滚，**结论对两种口径都成立**。故 AC-2 取证「滚到底补一张」的适用条件是 **`|ENABLED| ≥ 6`**，不是 4 行（同口径见 §8 F6、§10 证据口径） |
 | 包体 / 依赖 | manifest +3 行，无新依赖、无新权限、无新 SDK 调用面 |
 | 隐私与合规 | 不引入 `QUERY_ALL_PACKAGES`；可见面只扩到「声明了 IME action 的包」这一系统级类别。隐私政策无需新增条目（不采集、不上报清单内容；日志只记条数，不记 id —— 见 §9） |
 | 可观测性 | D3 的 `Log.w` 是唯一的可观测性新增，字段只有两个整数（`visible` / `enabled`），不含包名与用户标识 |
@@ -373,7 +437,7 @@ VOCA-310 换的是**运行时查询用的 action 常量**（`RecognitionServices
 | F3 | `RecognitionService` 那条 intent 被删/收窄 | 后续有人「整理」`<queries>` | §4 的门禁 + VOCA-402 静态断言 | 断言落地归 VOCA-402 |
 | F4 | 用户要的其实是「未启用的也列出来 + 引导启用」（C 类） | 需求变化 | 本 ADR 明确不做（§3 D2/D4） | 回洞察BA 重开需求，不在本件 |
 | F5 | 出包分支不回追 main，修好的是 main、装出去的是 release tip | 合并窗口没执行 M5 | §6 第 3 项已列为硬前提 | 项目经理 + SRE 执行，需人类确认 |
-| F6 | 面板 4 行超出 ScrollView 240dp，取证只拍到 2 行 | 取证姿势 | BA 口径已要求「滚到底补一张」+ 标签同源 | 归 VOCA-401/402 执行 |
+| F6 | 面板行多到超出 ScrollView 660px 上限，单张截图只拍到前面几行 | **`|ENABLED| ≥ 6`**（6 行 708px > 660px）。**不是 4 行** —— 4 行 472px 不触发滚动（VOCA-405 R1 校正：原条件写成「4 行」会造出一条永远不可能触发的失败模式，并让 4 行的取证去补一张根本不存在的滚动图） | BA 口径「滚到底补一张」按 ≥6 行适用 + 标签同源（`InputMethodPanel.kt:200` 「共 N 个」与行同源） | 归 VOCA-401/402 执行；断言与取证口径见 §10 |
 | F7 | 设置页崩溃（VOCA-170 NPE）污染复现路径 | 验证时打开设置页 | 修复 `d3b6f84` 在 PR #9，**既不在 main 也不在 release tip**（BA §8.2 复核） | 合并窗口必须核对 PR #9；不在本件 |
 
 **外部依赖三问**（本件唯一的外部依赖是 Android framework 的可见性规则）：挂了怎么办 —— 该规则不会「挂」，但会变（F2），缓解是 D3 让变化可见；限流怎么办 —— 不适用（无网络调用）；价格变了怎么办 —— 不适用（无付费服务）。
@@ -405,7 +469,8 @@ VOCA-310 换的是**运行时查询用的 action 常量**（`RecognitionServices
                / 改 AC 判据 / 改工具栏键序 / 动 RecognitionService 那条 intent
 可测点        : 静态 —— manifest 两条 intent 都在；enabledInputMethods() 内存在交叉校验调用
                设备 —— |ENABLED|=4 → 4 行；disable 一项 → 3 行且该项不出现；逐行点切 → DEFAULT 逐项变化
-证据口径      : 同一张截图内 ① 共 N 个 ② 全部行（超出可滚时补滚到底） ③ 标题栏「输入法 N 个」，
+证据口径      : 同一张截图内 ① 共 N 个 ② 全部行（列表只在 |ENABLED| ≥ 6 时才滚动，届时才补「滚到底」一张；
+               4 行 472px < 660px 上限，不滚动、不需要补图 —— 见 §7 / §8 F6） ③ 标题栏「输入法 N 个」，
                外加 `settings get secure enabled_input_methods` 与 `ime list -s` 命令原文
 回滚          : 删 3 行重出包（§9）
 ```
@@ -451,7 +516,7 @@ adb shell ime enable com.google.android.tts/…VoiceInputMethodService     # 还
 # A/B/A 回控
 git checkout app/src/main/AndroidManifest.xml ; git diff --stat          # 空
 ./gradlew --offline assembleDebug && adb install -r app/build/outputs/apk/debug/app-debug.apk
-# → 截图 panel-control-again.png：共 2 个 / 2 行 / frame=[0,1576][1080,2340]
+# → 截图 E-abab-control-again-2of4.png：共 2 个 / 2 行 / frame=[0,1576][1080,2340]
 
 # 兜底（控制组）
 adb shell input tap 154 2110                                   # 面板「系统选择器」
