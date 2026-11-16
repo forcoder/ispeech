@@ -4,7 +4,7 @@
 > 角色：UI 设计师（视觉与设计令牌）｜状态：`in_review`（待人类评审）
 > 编写：2026-11-13
 > 视觉基线：`origin/main` @ `76d178c`（已含 VOCA-30 键盘重排 `0a53ab5`、VOCA-56 候选常规字重 `4baca3d`）
-> **基线适用性（待裁决，见 §12 R13）**：本文「现状」列与全部几何公式取证自 `76d178c`。main 现已在 `fa57a07`，`76d178c..fa57a07` 之间 VOCA-30 的键盘几何被后续提交改回：`keyMargin` 3→4、`keyRadius` 6→10（main `SoftKeyboardView.kt:146-147`）、`LETTER_ROW_UNITS` 与行内补位在 main 上已不存在、底行顺序与权重变为 `符1.0 / 中·英1.8 / ，1.0 / 空格4.0 / 。1.0 / 123 1.5 / 换行1.5`（Σ=11.8）、候选条翻页箭头与 `DISABLED_ALPHA` 已删除。**基线未重定前，本文按 `76d178c` 口径给值，不做全量重算。**
+> **基线适用性（待裁决，见 §12 R13）**：本文「现状」列与全部几何公式取证自 `76d178c`。main 现已在 `fa57a07`，`76d178c..fa57a07` 之间 VOCA-30 的键盘几何被后续提交改回：`keyMargin` 3→4、`keyRadius` 6→10（main `SoftKeyboardView.kt:146-147`）、`LETTER_ROW_UNITS` 与行内补位在 main 上已不存在、底行顺序与权重变为 `符1.0 / 中·英1.8 / ，1.0 / 空格4.0 / 。1.0 / 123 1.5 / 换行1.5`（Σ=11.8）、候选条翻页箭头与 `DISABLED_ALPHA` 已删除、**工具栏键数 9 → 8**（`⌨` 取代 `输`＋`中/英`，`语音` 改图标 `🎤`；工具栏高度 34 / 最小宽 40 / 页码条 22 两基线相同，只有键数与标签漂了）。逐项三列账（值 / 来源 / 若不符谁负责）见 **§12.1**。**基线未重定前，本文按 `76d178c` 口径给值，不做全量重算。**
 > 交互基线：VOCA-68 `docs/ux/VOCA-65-interaction-spec.md` @ `1d567d5`（`in_review`，未并入 main）
 > 需求基线：`docs/requirements/VOCA-65-acceptance.md`（v1.1，§4 / §4.3 / AC-4.1~4.8 / §7 Q4）
 > 代码基线：`app/src/main/java/com/ispeech/input/SoftKeyboardView.kt`、`QuickPhrasePanel.kt`、`keyboard/KeyboardLayouts.kt`（均为 main @ `76d178c`）
@@ -42,22 +42,24 @@
 | 5 设计令牌表（新增 / 复用、值、适用控件） | §6 |
 | （角色必交付）响应式 / 动效 / 可访问性 / 交付清单 | §7 / §8 / §9 / §11 |
 
-### 1.2 基线取证（main @ `76d178c`）
+### 1.2 基线取证（`76d178c`；main 现为 `fa57a07`）
 
-| 事实 | 位置 |
-|---|---|
-| 键外边距 `keyMargin = 3` dp（相邻键间隙 = 6 dp）、圆角 `keyRadius = 6` dp | `SoftKeyboardView.kt:137-138` |
-| 键高默认 52 dp，夹在 40~72 dp | `SoftKeyboardView.kt:1120-1122` |
-| 键面底色 / 按下 / 功能键 / 换行键 / 键盘渐变（硬编码色值） | `SoftKeyboardView.kt:104-134` |
-| 键面 1 dp 投影：`if (fillWidth) elevation = dp(1)` | `SoftKeyboardView.kt:547`、`:585` |
-| 工具栏 9 键（`短语/AI/输/中·英/符/☺/剪贴/语音/⚙`）：高 34 dp、最小宽 40 dp、外层横滑、内边距 3/4 | `SoftKeyboardView.kt:279-300`、`:1123-1135` |
-| 字母页行内 padding 3 dp；第 2 行补位到 10 个单位（`LETTER_ROW_UNITS = 10f`） | `SoftKeyboardView.kt:257`、`:1149` |
-| 预览气泡：高 40 dp、minWidth 38 dp、白底圆角 6、字号 20、**未设 elevation** | `SoftKeyboardView.kt:926-950` |
-| 长按浮层条目 40×40 dp，白色条底（`Color.WHITE`）+ 白底条目 | `SoftKeyboardView.kt:959-1002` |
-| 搜索框 ✕ 可点仅 30×28 dp，图标 14 dp，空态 `GONE` | `QuickPhrasePanel.kt:700-715`、`ic_close.xml` |
-| 面板搜索行：内边距 12/6/6、胶囊底、圆角 8 dp | `QuickPhrasePanel.kt:719`、`:117` |
-| 面板光标图标资产已存在但**未被引用**：`ic_cursor_left` / `ic_cursor_right`（24 dp） | `res/drawable/ic_cursor_left.xml`、`ic_cursor_right.xml`；`git grep -n ic_cursor_left 76d178c -- "*.kt"` = 0 命中（仅限 .kt 文件；全域 grep 会命中 apk 与 docs） |
-| **键面无禁用态实现**：键面所在文件（`SoftKeyboardView.kt` 与 `keyboard/` 整包）内 `isEnabled` / `state_enabled` / `alpha` **0 命中**。**同仓另有两处、但都不属键面**，分开陈述：① 候选条翻页箭头 `CandidateView.kt:115-116` + `:179 DISABLED_ALPHA = 0.35f`（同包既有 alpha 型约定）；② `AiReplyPanel.kt:236 pickButton.isEnabled = true`（AI 回复面板取词按钮） | 键面范围：`git grep -n -e state_enabled -e isEnabled -e alpha 76d178c -- app/src/main/java/com/ispeech/input/SoftKeyboardView.kt app/src/main/java/com/ispeech/input/keyboard/` → **0 命中**；全域 .kt：`git grep -n -e state_enabled -e isEnabled 76d178c -- "*.kt"` → **1 命中**（`app/src/main/java/com/ispeech/input/AiReplyPanel.kt:236`）；候选条约定：`git grep -n DISABLED_ALPHA 76d178c -- app/src/main/java/com/ispeech/input/CandidateView.kt` → **3 命中**（`:115`、`:116`、`:179`） |
+「来源」列口径（每格必填，防「已回退的几何」冒充现状）：**`76d178c（待 VOCA-30 重新落地）`** = 该值在 `76d178c` 成立、main 上已回退或删除；**`main 已生效`** = 两基线取值相同（行号可能不同，位置列一律按 `76d178c` 给）。逐值三列账见 §12.1。
+
+| 事实 | 位置 | 来源 |
+|---|---|---|
+| 键外边距 `keyMargin = 3` dp（相邻键间隙 = 6 dp）、圆角 `keyRadius = 6` dp | `SoftKeyboardView.kt:137-138` | `76d178c`（待 VOCA-30 重新落地）——main `:146-147` = `4` / `10` |
+| 键高默认 52 dp，夹在 40~72 dp | `SoftKeyboardView.kt:1120-1122` | main 已生效（`DEFAULT_KEY_HEIGHT_DP = 52` @ main `:956`） |
+| 键面底色 / 按下 / 功能键 / 换行键 / 键盘渐变（硬编码色值） | `SoftKeyboardView.kt:104-134` | `76d178c`（待 VOCA-30 重新落地）——main 同段（`:120-133`）已换值（`#CFD4DB` / `#DCE1E8` / `#1F2329` / `#8A9099`）；本文标「复用现状」的 4 个色值在 **main 代码里 0 命中**（`git grep -in -e C9CDD5 -e E7E9ED -e 14171C -e A2A8B2 origin/main -- "*.kt" "*.xml"` → 0；全域另有 1 命中在 `docs/keyboard-ui.md:24`，属文档未同步。见 §12.1 配色行） |
+| 键面 1 dp 投影：`if (fillWidth) elevation = dp(1)` | `SoftKeyboardView.kt:547`、`:585` | main 已生效（main `:495`、`:529`） |
+| 工具栏 **9 键**（`短语/AI/输/中·英/符/☺/剪贴/语音/⚙`）：高 34 dp、最小宽 40 dp、外层横滑、内边距 3/4 | 滚动容器与内边距 = `buildToolbar()` `SoftKeyboardView.kt:279-300`；**9 个键的清单在 `toolbarKeys()` `:315-379`**（`KeyDef.fn` @ `:316/323/329/336/343/350/358/365/372`）；常量 `:1123` / `:1134` / `:1135` | **键数**：`76d178c`（待 VOCA-30 重新落地）——**main `fa57a07` 已生效为 8 键** `⌨/符/☺/短语/剪贴/AI/🎤/⚙`（`toolbarKeys()` main `:316-372`，KDoc main `:305` 自述「工具栏 8 键」）。**高度 34 / 最小宽 40 / 页码条 22**：main 已生效（main `:962` / `:973` / `:974`）。注：`76d178c` 自己的 KDoc `:304` 也写「工具栏 8 键」，与其代码的 9 键不符 |
+| 字母页行内 padding 3 dp；第 2 行补位到 10 个单位（`LETTER_ROW_UNITS = 10f`） | `SoftKeyboardView.kt:257`、`:1149` | `76d178c`（待 VOCA-30 重新落地）——main 上 `LETTER_ROW_UNITS` / `buildRowSpacer` 0 命中 |
+| 预览气泡：高 40 dp、minWidth 38 dp、白底圆角 6、字号 20、**未设 elevation** | `SoftKeyboardView.kt:926-950` | main 已生效（白底 `roundedRect(Color.WHITE, keyRadius)` @ main `:826`、`textSize = 20f` @ main `:832`） |
+| 长按浮层条目 40×40 dp，白色条底（`Color.WHITE`）+ 白底条目 | `SoftKeyboardView.kt:959-1002` | main 已生效（`ALT_KEY_WIDTH_DP` / `ALT_KEY_HEIGHT_DP = 40` @ main `:976-977`） |
+| 搜索框 ✕ 可点仅 30×28 dp，图标 14 dp，空态 `GONE` | `QuickPhrasePanel.kt:700-715`、`ic_close.xml` | main 已生效（`minimumWidth = dp(30)` / `minimumHeight = dp(28)` @ main `:646-647`） |
+| 面板搜索行：内边距 12/6/6、胶囊底、圆角 8 dp | `QuickPhrasePanel.kt:719`、`:117` | main 已生效（`setPadding(dp(12), dp(6), dp(6), dp(6))` @ main `:657`、`radiusKeyDp = 8` @ main `:114`） |
+| 面板光标图标资产已存在但**未被引用**：`ic_cursor_left` / `ic_cursor_right`（24 dp） | `res/drawable/ic_cursor_left.xml`、`ic_cursor_right.xml`；`git grep -n ic_cursor_left 76d178c -- "*.kt"` = 0 命中（仅限 .kt 文件；全域 grep 会命中 apk 与 docs） | `76d178c`（待 VOCA-30 重新落地）——main 上同一条命令 **1 命中**（`keyboard/KeyboardLayouts.kt:226` 把 `ic_cursor_left` 当符号页**键图标**用，仍未用作面板光标；本行「未作面板光标」的结论两基线都成立） |
+| **键面无禁用态实现**：键面所在文件（`SoftKeyboardView.kt` 与 `keyboard/` 整包）内 `isEnabled` / `state_enabled` / `alpha` **0 命中**。**同仓另有两处、但都不属键面**，分开陈述：① 候选条翻页箭头 `CandidateView.kt:115-116` + `:179 DISABLED_ALPHA = 0.35f`（同包既有 alpha 型约定）；② `AiReplyPanel.kt:236 pickButton.isEnabled = true`（AI 回复面板取词按钮） | 键面范围：`git grep -n -e state_enabled -e isEnabled -e alpha 76d178c -- app/src/main/java/com/ispeech/input/SoftKeyboardView.kt app/src/main/java/com/ispeech/input/keyboard/` → **0 命中**；全域 .kt：`git grep -n -e state_enabled -e isEnabled 76d178c -- "*.kt"` → **1 命中**（`app/src/main/java/com/ispeech/input/AiReplyPanel.kt:236`）；候选条约定：`git grep -n DISABLED_ALPHA 76d178c -- app/src/main/java/com/ispeech/input/CandidateView.kt` → **3 命中**（`:115`、`:116`、`:179`） | **键面无禁用态**：main 已生效（键面范围同样 0 命中）；**①**：`76d178c`（`DISABLED_ALPHA` 在 main **0 命中**——`fa57a07` VOCA-185 去掉翻页，属预期删除，见 §12.1）；**②**：main 已生效（`AiReplyPanel.kt:236` 两基线同行号） |
 
 ### 1.3 不做什么（门禁）
 
@@ -392,7 +394,7 @@ UX 只给了浮层的交互（顺序 `[小写, 大写, 角标]`、条目 40×40�
 | 选中（面板打开中） | 40 × 40 圆角 6 dp 块，`#3A66D0` + **图标转白** | `color.control.toolbar.selected` / `color.control.icon.selected` |
 | 键间距 | 3 dp 边距（与布局行同一 `keyMargin`） | `key.gutter` |
 | 行内边距 | 上下 4 / 0，左右 3（与字母行 3 dp padding 对齐） | 复用现状 |
-| 横向排布 | 9 键 × 46 dp = 414 dp > 381.69 dp 可视宽 → **横滑**（现状即如此）；首屏左缘与字母行左缘对齐 | 复用 `HorizontalScrollView` |
+| 横向排布 | **仅在 9 键基线成立**：9 键 × 46 dp = 414 dp > 381.69 dp 可视宽 → **横滑**（`76d178c` 现状即如此）；首屏左缘与字母行左缘对齐。**main（`fa57a07`）8 键下结论相反**：8 × 46 = 368 dp ≤ 381.69 dp → 一屏放下、**不横滑**（键数漂移登记见 §12.1，本文按 `76d178c` 给值） | 复用 `HorizontalScrollView` |
 
 **关于选中态图标（修正项）**：现状选中态底色 `#3A66D0`，但图标 tint 只定义了 `state_pressed`，选中时仍是黑色（对比度 3.99:1，勉强过 UI 组件 3:1 下限）。规格改为**选中时图标白色**（5.26:1），并在 `key_icon_tint.xml` 补 `state_selected`。这是一条新增状态定义，属本批工具栏规格内的必要修正，不是改配色体系。
 
@@ -576,7 +578,7 @@ UX 只给了浮层的交互（顺序 `[小写, 大写, 角标]`、条目 40×40�
 
 | 断点 | 屏宽 | 代表机型 | 键格 cell | 键面 face | 比例 | **AC-4.6 判定（cell ≥38）** | 布局变化 |
 |---|---|---|---|---|---|---|---|
-| XS | 320–359 | 320 dp 小屏 | 31.40–35.00 | 25.40–29.00 | 0.55–0.63 | **不达标**（全档 <38，见 R11） | 面板文本区 ≈**123–162 dp**（`屏宽 − 197`）；工具栏必横滑；底行 face：`，` `。` **23.35–26.70**、`123` **35.02–40.04**、`符` **37.36–42.71**（按 Σw=11.65、间隙 6 dp × 7 逐档算） |
+| XS | 320–359 | 320 dp 小屏 | 31.40–35.00 | 25.40–29.00 | 0.55–0.63 | **不达标**（全档 <38，见 R11） | 面板文本区 ≈**123–162 dp**（`屏宽 − 197`）；工具栏必横滑（**仅 9 键基线**：9 × 46 = 414 dp > 全档可视宽；main 8 键 = 368 dp，在 320–359 dp 仍横滑、在参考机型 381.69 dp 起不横滑，见 §5.3 / §12.1）；底行 face：`，` `。` **23.35–26.70**、`123` **35.02–40.04**、`符` **37.36–42.71**（按 Σw=11.65、间隙 6 dp × 7 逐档算） |
 | S | 360–411 | 360 / 393 dp 主流 | 35.40–40.50 | 29.40–34.50 | 0.64–0.75 | **分档**：`cell = (屏宽 − 6) / 10`，屏宽 <386 dp 不达标、≥386 dp 达标（360 → 35.40 ✗／393 → 38.70 ✓） | 观感与参考机型同构、不做特殊布局——**但这只是观感结论，不代表 AC 达标**（见右列） |
 | **M（参考）** | 387.69 | 1260 px / 3.25x | **38.17** | **32.17** | **0.70** | 第 1 行 38.17 ✓／第 3 行 38.77 ✓／**第 2 行 37.57 ✗**（§5.2） | 本文所有实算以此为准 |
 | L | 412–599 | 412 / 420 dp 大屏 | 40.60–59.30 | 34.60–53.30 | 0.75–1.16 | 达标 | 键面更方；≥480 dp 起进入 §7.2 的内容宽约束 |
@@ -592,7 +594,7 @@ face  = cell − 2 × key.gutter
 ```
 
 - **通式的适用范围（限定）**：`cell = 可用宽 / 10` 只在「Σ 权重 = 10 且行内无补位 spacer」的行成立（字母页第 1 / 3 行）。第 2 行有两个 0.5 单位补位 spacer（**占 N 不占权重**）→ `face = (可用宽 − 6 × 11) / 10`，比通式窄 0.6 dp；底行是 7 键 Σw = 11.65 → `face = (可用宽 − 6 × 7) / 11.65 × w`，**不套用本通式**。逐行取值见 §2.2 与 §5.2。
-- **为什么封 480 dp**：`≥600 dp` 全宽时 face 53.4、比例 1.16，键变成扁宽条，与「方块键」诉求反向。480 dp 时 cell 47.4 / face 41.4 / 比例 **0.90**，是 10 列布局能给出的最接近方块的值，且 9 键工具栏（9 × 46 = 414 dp）可一屏放下、不横滑。
+- **为什么封 480 dp**：`≥600 dp` 全宽时 face 53.4、比例 1.16，键变成扁宽条，与「方块键」诉求反向。480 dp 时 cell 47.4 / face 41.4 / 比例 **0.90**，是 10 列布局能给出的最接近方块的值，且 9 键工具栏（9 × 46 = 414 dp）可一屏放下、不横滑。**414 dp 是 9 键口径**：main 已生效的 8 键为 8 × 46 = 368 dp ⇒ 在 ≥374 dp 内容宽下都不横滑（§5.3 / §12.1），「工具栏必横滑」这类结论只在 9 键基线上成立。
 - 封顶后两侧留白由键盘底色渐变填满，**不画任何分隔**；工具栏与候选条共用 480 dp 内容宽 + 左右 3 dp 内边距，面板搜索行同宽但保留自己的 12/6 内边距，四者左缘对齐。
 - 字号**不随屏宽缩放**（sp 固定），避免 320 dp 上字被压小、平板字被放大。
 
@@ -697,7 +699,10 @@ face  = cell − 2 × key.gutter
 - 焦点环 = **face 内侧 2 dp 描边**（`focus.ring.width`），色 `color.focus.ring`，圆角跟随 `key.radius`（6 dp）；画在内侧意味着**不改变键面外轮廓、不外扩、不影响 hit**。
 - 与换行键 1 dp 描边重叠时，焦点环**在外层优先显示**（换行描边让位，颜色不变）。
 - 文字安全区（4 / 2 dp）≥ 焦点环宽（2 dp），因此焦点态不会压到字形。
-- 键盘本体目前无焦点态实现（全仓无 `state_focused` 键样式），属新增能力，与 R3 一并落地。
+- 键盘本体目前无焦点态实现（**键面范围内**无 `state_focused` 键样式），属新增能力，与 R3 一并落地。取证范围与命中数（命令可在 `76d178c` 原样复跑）：
+  - 键面范围：`git grep -n state_focused 76d178c -- app/src/main/java/com/ispeech/input/SoftKeyboardView.kt app/src/main/java/com/ispeech/input/keyboard/` → **0 命中**；
+  - 同仓全量：`git grep -n state_focused 76d178c` → **4 命中** = 代码 1 处 `QuickPhrasePanel.kt:773`（短语面板搜索框的焦点描边，**不是键面**）＋ 文档 3 处 `docs/v1.5-verify-log.md:32`、`:88`、`:92`；
+  - main（`fa57a07`）：同样 **4 命中**，代码那一处在 `QuickPhrasePanel.kt:701`（同一描边逻辑，行号随文件缩短）⇒ 「键面无焦点态样式」在两基线都成立，本行不受 R13 漂移影响。
 
 ### 9.5 点击目标
 
@@ -820,6 +825,22 @@ face  = cell − 2 × key.gutter
 | R10 | **本文无数值以外的视觉稿（无截图 / 无 Figma）** | 评审只能对数字，不能对观感 | 本批定位是「可换算成 dp/sp 的数值规格」；观感验证交测试在真机建立基线（§11.4），如需视觉稿另开任务 |
 | R11 | **AC-4.6「字母键宽 ≥38 dp」在屏宽 <386 dp 机型上结构性不可达**：`cell = (屏宽 − 6) / 10` → 320 dp = 31.40、360 dp = 35.40、386 dp = 38.00（临界）、393 dp = 38.70 | 小屏机型按字面验收必判不达标 | §7.1 已新增「AC-4.6 判定」列，把「观感可接受」与「AC 不达标」在表里分开；≥38 是否改为「栅格键按 cell 填满键格」交洞察BA 回写（与 R2 同一处回写），本文不自行改判据 |
 | R12 | **字母键跨行面差 1.2 dp 与 AC-4.3 ≤1 dp 的关系未定**：第 2 行 face 31.569、第 3 行 32.769（成因见 §2.2 脚注） | 若 AC-4.3 覆盖行间一致性，则参考机型即不达标 | AC-4.3 原文量的是「**每个键**的可点矩形与视觉外框误差 ≤1 dp」（`VOCA-65-acceptance.md:292` @ `76d178c`），而本批单键 face↔cell 内缩恒为 3 dp / 边（`key.gutter`，§2.1 已声明 hit = cell）。因此「1.2 dp 算不算 AC-4.3 违规」取决于该条是否含行间一致性，交洞察BA + UX 定；若含，需把第 2 行补位改不等宽——属 VOCA-30 栅格，本批不改。本文只登记数值 |
-| R13 | **基线漂移：`76d178c` 已被 main 后续提交改掉，本文的「现状」列不再是 main 现状**。`76d178c..fa57a07`（经 `07214d6`、`af66733`、`f728231`、`fa57a07`）之间：`keyMargin` 3→4、`keyRadius` 6→10（main `SoftKeyboardView.kt:146-147`）、`LETTER_ROW_UNITS` 与行内补位已删除、底行改序改权重（`符1.0 / 中·英1.8 / ，1.0 / 空格4.0 / 。1.0 / 123 1.5 / 换行1.5`，Σ=11.8）、候选条翻页箭头与 `DISABLED_ALPHA` 已删除；**色值面同样漂移**——main 的键面调色板已是 `#CFD4DB` / `#DCE1E8` / `#1F2329` / `#8A9099`，本文 §3.3 / §6.1–6.4 标「复用现状」的 `#C9CDD5` / `#E7E9ED` / `#14171C` / `#A2A8B2` 在 main 上 0 命中 | 若基线改定 `fa57a07`，需重算的不只是几何：§1.2 全部行号、§2.2 / §5.2 / §7.1 的 dp 值、§9.1 的对比度账、§10 差异表的「基线值」列都要重取 | **需 PM / 人类裁决，视觉侧不自决**：① 基线定 `fa57a07` 还是 `76d178c`（选后者意味着 VOCA-30 的键盘几何与配色尚未真正落到 main）；② 定案前本文**不进合并窗口**、不做全量重算（否则按两个基线各返工一遍）。裁决后若换基线，本规格一次性对齐 |
+| R13 | **基线漂移：`76d178c` 已被 main 后续提交改掉，本文的「现状」列不再是 main 现状**。`76d178c..fa57a07`（经 `07214d6`、`af66733`、`f728231`、`fa57a07`）之间：`keyMargin` 3→4、`keyRadius` 6→10（main `SoftKeyboardView.kt:146-147`）、`LETTER_ROW_UNITS` 与行内补位已删除、底行改序改权重（`符1.0 / 中·英1.8 / ，1.0 / 空格4.0 / 。1.0 / 123 1.5 / 换行1.5`，Σ=11.8）、候选条翻页箭头与 `DISABLED_ALPHA` 已删除、**工具栏键数 9 → 8**；**色值面同样漂移**——main 的键面调色板已是 `#CFD4DB` / `#DCE1E8` / `#1F2329` / `#8A9099`，本文 §3.3 / §6.1–6.4 标「复用现状」的 `#C9CDD5` / `#E7E9ED` / `#14171C` / `#A2A8B2` 在 main 上 0 命中 | 若基线改定 `fa57a07`，需重算的不只是几何：§1.2 全部行号、§2.2 / §5.2 / §7.1 的 dp 值、§9.1 的对比度账、§10 差异表的「基线值」列都要重取 | **需 PM / 人类裁决，视觉侧不自决**：① 基线定 `fa57a07` 还是 `76d178c`（选后者意味着 VOCA-30 的键盘几何与配色尚未真正落到 main）；② 定案前本文**不进合并窗口**、不做全量重算（否则按两个基线各返工一遍）。裁决后若换基线，本规格一次性对齐。**逐值三列账（值 / 来源 / 若不符谁负责）见 §12.1** |
+
+### 12.1 R13 逐值三列账（值 / 来源 / 若不符谁负责）
+
+「来源」两栏并列写清：`76d178c` = 本文取值口径（PM 19:23Z 裁决锁定的视觉基线，几何侧待 VOCA-30 重新落地）；`main fa57a07` = 仓库当前实际生效值。**本表只登记，不重算**——按 `fa57a07` 重算要等 PM 那次唯一对齐核验（§12 R13 处置②）。
+
+| 值 | 来源（`76d178c` ｜ main `fa57a07` 已生效） | 若不符谁负责 |
+|---|---|---|
+| `keyMargin` = **3 dp**（相邻键间隙 6 dp） | `76d178c` `SoftKeyboardView.kt:137` ｜ main `:146` = **4 dp**（间隙 8）——`0a53ab5` VOCA-30 改 3、`07214d6` 语音提交改回 4 | **PM**：几何回退已归 VOCA-30 重新落地（前端工程师，PR 期限 11-17 10:00 CST）；视觉侧不自决 |
+| `keyRadius` = **6 dp** | `76d178c` `:138` ｜ main `:147` = **10 dp**（同一次提交） | 同上（PM / VOCA-30） |
+| `LETTER_ROW_UNITS = 10f` ＋ 第 2 行两侧 0.5 单位补位 spacer | `76d178c` `:257`、`:1149`、`buildRowSpacer :417-436` ｜ main **0 命中**（机制整体删除，`docs/keyboard-ui.md:75` 仍在描述它，属文档未同步） | **PM**：随 VOCA-30 重新落地一并恢复；文档同步归 VOCA-30，不压本单 |
+| 底行 7 键权重与顺序 `符1.6 / 123 1.5 / ，1.0 / 空格3.3 / 。1.0 / 中·英1.45 / 换行1.8`（Σ=11.65） | `76d178c` `keyboard/KeyboardLayouts.kt:134-142` ｜ main `:130-138` = `符1.0 / 中·英1.8 / ，1.0 / 空格4.0（默认）/ 。1.0 / 123 1.5 / 换行1.5（默认）`（**Σ=11.8**、顺序不同；默认值见 main `:64` `spaceKey(weight = 4f)`、`:68` `enterKey(weight = 1.5f)`） | **PM**：§5.2 与 §7.1 的底行 face/cell 全部挂在这条上，基线定案前不重算 |
+| **工具栏键数 = 9**（`短语 / AI / 输 / 中·英 / 符 / ☺ / 剪贴 / 语音 / ⚙`） | `76d178c` `toolbarKeys()` `SoftKeyboardView.kt:315-379`，**9 个 `KeyDef.fn`** @ `:316/323/329/336/343/350/358/365/372`（同文件 KDoc `:304` 写「工具栏 8 键」，与其代码不符）｜ main `:316-372` = **8 个 `KeyDef.fn`** @ `:317/324/331/339/346/353/359/365`，标签 `⌨ / 符 / ☺ / 短语 / 剪贴 / AI / 🎤 / ⚙`，KDoc `:305` 自述「工具栏 8 键」 | **PM**：键数属 main 上**真正算数**的后继改动（`af66733` 自述「工具栏回 8 键」，非回退），规格必须认——已按此把 §5.3「9 × 46 = 414 dp → 横滑」、§7.1 XS「工具栏必横滑」、§7.2 的 414 dp 全部限定为「仅 9 键基线成立」 |
+| 工具栏高 **34 dp** / 最小宽 **40 dp** / 页码条 **22 dp** | `76d178c` `:1123`、`:1134`、`:1135` ｜ main `:962`、`:973`、`:974` **数值相同**（只有行号随文件缩短） | 无需裁决：工具栏这一组尺寸没漂，漂的只有**键数与标签**；决策 F 的 40 dp 归属仍挂 R1 |
+| 候选条翻页箭头 + `DISABLED_ALPHA = 0.35f`（alpha 型禁用约定） | `76d178c` `CandidateView.kt:115-116`、`:179` ｜ main **0 命中**（`fa57a07` VOCA-185 去翻页，PM 已判**预期删除**、非缺陷） | 已定案：§4.5 与 §10 #28 里「同仓另有 alpha 型禁用」这一句随基线定案后由 **UI 设计师** 回写（键面不采用 alpha 的结论本身不受影响） |
+| 键面配色：本文标「复用现状」的 `#C9CDD5`（功能键底）/ `#E7E9ED`（键面按下）/ `#14171C`（键面文字）/ `#A2A8B2`（提示字） | `76d178c` `SoftKeyboardView.kt:106`、`:105`、`:114`、`:116` ｜ main 同段换成 `#CFD4DB`（`:122` `specialBg`、`:133` `pageBarBg`）/ `#DCE1E8`（`:121`、`:125`、`:127`）/ `#1F2329`（`:130` `textColor`）/ `#8A9099`（`:132` `hintColor`）。取证（**代码范围**，两基线原样可跑）：`git grep -in -e C9CDD5 -e E7E9ED -e 14171C -e A2A8B2 76d178c -- "*.kt" "*.xml"` → **4 命中**（即上面四行）；同一条换 `origin/main` → **0 命中**。（全域不限文件类型时 main 另有 1 命中 = `docs/keyboard-ui.md:24` 仍写着 `#C9CDD5`，属 VOCA-30 的文档未同步，不算 main 生效值） | **PM + 人类**：换品牌中性色属配色体系变更（UI 边界：无授权不更换），只在基线定案后一次性对齐 §3.3 / §6.1–6.4 / §9.1 |
+| 键面无禁用态、无焦点态样式 | 键面范围 `git grep` **0 命中**，两基线相同（禁用：`state_enabled`/`isEnabled`/`alpha`；焦点：`state_focused`，见 §9.4） | 无需裁决：本批新增的禁用态与焦点环令牌不受漂移影响 |
 
 **已确认、不列为风险**：26 键 1:1 不可达（§2.3 已证，属物理约束而非缺陷）；页码条 22 dp 不在本批（§5.5 已登记建议归属）。
