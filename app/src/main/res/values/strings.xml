@@ -163,6 +163,7 @@
     <string name="voice_service_unavailable">本机未安装可用的语音识别服务；请在「设置 → 语音识别」中指定其它识别服务组件，或安装支持语音识别的应用</string>
     <string name="voice_network_error">网络异常，语音识别需要联网</string>
     <string name="voice_audio_error">录音失败，请检查麦克风是否被其它应用占用</string>
+    <string name="voice_error">语音识别失败，请重试</string>
     <string name="voice_error_code">语音识别失败（错误码 %1$d）</string>
     <string name="voice_panel_listening">正在聆听…</string>
     <string name="voice_panel_hint">松开上屏 · 上滑取消</string>
@@ -222,4 +223,6 @@
     <string name="quick_cloud_added_success">云端简写「%1$s」已添加成功</string>
     <string name="quick_cloud_added_failed">云端简写「%1$s」添加失败：%2$s</string>
     <string name="sync_upload_partial">云端生效：新增 %1$d · 修改 %2$d · 删除 %3$d；%4$d 条未生效（后端不支持修改 / 删除）</string>
+<string name="asr_engine_vosk">离线识别（内置）</string>
+<string name="asr_engine_vosk_desc">内置 Vosk 中文模型，完全离线、不联网；首次使用需下载约 42MB 模型</string>
 </resources>

@@ -352,6 +352,9 @@ private val COUNT_RANK: Comparator<UserDictEntry> = Comparator { a, b ->
 /**
  * 条目 → 统一候选：五笔模式单选字走五笔、多字走词组档；拼音模式一律走拼音档，
  * 与拼音词表的候选同档竞争，靠 +10 万权重排到前面。
+ *
+ * 多字条目用 [LookupKind.WUBIPHRASE]（词库词组）而不是 [LookupKind.PHRASE]（快捷短语）：
+ * 候选条按「快捷短语 → 单字 → 词组 / 句子」分组，学到的词属于词组，不该混进快捷短语组。
  */
 private fun UserDictEntry.toCandidate(): LookupCandidate = LookupCandidate(
     code = code,
@@ -372,16 +375,19 @@ internal fun codePointLength(text: String): Int =
     if (text.isEmpty()) 0 else text.codePointCount(0, text.length)
 
 /**
- * 五笔模式下用户词条属于哪个候选档：码点长度 1 为单字档，其余为词组档。
+ * 五笔模式下用户词条属于哪个候选档：码点长度 1 为单字档，其余为词库词组档。
  *
  * 不变量：`UserDictMode.WUBI` 下 `codePointLength(text) == 1 ⟺ 单字档，> 1 ⟺ 词组档`。
  * 该不变量由 `PhraseCodeDeriverTest#单字与词组档按码点判定` 守护；若将来需要打破它，必须加显式列并按 ADR-0001 §4「迁移方式」
  * 执行，不允许在调用点各自特判。
  *
- * 用户词库与分类词库共用这一判定，避免两处各写一遍 `text.length == 1` 而漂移。
+ * 多字条目用 [LookupKind.WUBIPHRASE]（词库词组）而不是 [LookupKind.PHRASE]（快捷短语）：
+ * 候选条按「快捷短语 → 单字 → 词组 / 句子」分组（见 `CandidateRanking.tier`），学到的词属于词组组。
+ *
+ * 用户词库与分类词库共用这一判定，避免两处各写一遍判定而漂移——各自的词条都同时含单字与多字。
  */
 internal fun entryKindOf(text: String): LookupKind =
-    if (codePointLength(text) == 1) LookupKind.WUBI else LookupKind.PHRASE
+    if (codePointLength(text) == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE
 
 /** 单行文本转义：换行 / 回车 / 制表符 / 反斜杠写成字面量，保证一条记录占一行。 */
 internal fun escapeLineText(text: String): String {

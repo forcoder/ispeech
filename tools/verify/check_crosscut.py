@@ -20,13 +20,9 @@
      -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
-10. 分类词库（细胞词库）：CellDictStore 目录 / 索引 / 正文解析复用用户词库 -> 稳定 id +
-     分类头解析 -> CellDictEngine 按模式过滤 -> QuickLocator / AppContainer 接线 ->
-     词典页 SAF 安装 + 启停 / 删除 + 中英文案
-11. 中文输入法（默认拼音 / 五笔 + 中英切换）：ChineseInputMethod -> SettingsStore ->
-     KeyboardViewModel / 设置页 / 内置面板 -> InputModePolicy
-12. 候选条字重（VOCA-56）：候选词必须常规字重（不加粗），首选仍靠橙色 + 底色区分，
-     且类注释口径与实现一致
+10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
+11. 中文输入法（默认拼音 / 五笔 + 中英切换）：枚举 -> 持久化 -> 设置页 / 内置面板 -> 服务两态切换
+12. 候选条字重（VOCA-56）：候选词常规字重、首选靠颜色 / 底色区分、类注释口径一致
 13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：PhraseCodeDeriver / PhraseLearningTracker 纯函数
      -> WubiEngine 反向索引 -> 服务接线（onCommit / onInterrupt / reset / onUpdateSelection）
      -> 写盘线程与学习开关
@@ -65,12 +61,9 @@ LOOKUP_ENGINE = JAVA / "engine" / "LookupEngine.kt"
 COMPOSITE_ENGINE = JAVA / "engine" / "CompositeEngine.kt"
 QUICK_LOCATOR = JAVA / "engine" / "QuickLocator.kt"
 PYINYIN_ENGINE = JAVA / "engine" / "PinyinEngine.kt"
-CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
 
 QUICK_SCREEN = JAVA / "settings" / "QuickPhrasesScreen.kt"
 SETTINGS_STORE = JAVA / "settings" / "store" / "SettingsStore.kt"
-CHINESE_INPUT_METHOD = JAVA / "settings" / "store" / "ChineseInputMethod.kt"
-INPUT_MODE = JAVA / "input" / "InputMode.kt"
 KEYBOARD_SETTINGS = JAVA / "settings" / "store" / "KeyboardSettings.kt"
 KEYBOARD_VM = JAVA / "settings" / "keyboard" / "KeyboardViewModel.kt"
 KEYBOARD_SCREEN = JAVA / "settings" / "KeyboardScreen.kt"
@@ -83,7 +76,12 @@ INPUT_STATS = JAVA / "data" / "InputStats.kt"
 PHRASE_USAGE = JAVA / "data" / "PhraseUsageStore.kt"
 USER_DICT_STORE = JAVA / "data" / "UserDictStore.kt"
 USER_DICT_ENGINE = JAVA / "engine" / "UserDictEngine.kt"
+
 CELL_DICT_STORE = JAVA / "data" / "CellDictStore.kt"
+CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
+CHINESE_INPUT_METHOD = JAVA / "settings" / "store" / "ChineseInputMethod.kt"
+INPUT_MODE = JAVA / "input" / "InputMode.kt"
+INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
@@ -98,8 +96,6 @@ NAV_GRAPH = JAVA / "settings" / "nav" / "IspeechNavGraph.kt"
 HOME_SCREEN = JAVA / "settings" / "HomeScreen.kt"
 MAIN_ACTIVITY = JAVA / "settings" / "MainActivity.kt"
 BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
-
-INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VERIFY_DIR = ROOT / "tools" / "verify"
 
@@ -847,9 +843,9 @@ def check_voice_chain() -> None:
         f"{rel(KEYDEF)} 的 KeyAction 未声明 VOICE",
     )
     check(
-        "KeyAction.VOICE" in view and "ic_voice" in view,
-        "SoftKeyboardView 工具栏含 KeyAction.VOICE（图标 ic_voice）",
-        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE（ic_voice）",
+        "KeyAction.VOICE" in view and '"🎤"' in view,
+        "SoftKeyboardView 工具栏含 KeyAction.VOICE（「🎤」）",
+        f"{rel(VIEW)} 工具栏未出现 KeyAction.VOICE「🎤」",
     )
     check(
         "KeyAction.VOICE -> toggleVoiceInput()" in service,
@@ -858,16 +854,25 @@ def check_voice_chain() -> None:
     )
 
     # 8.1b 按住说话：两种引擎都要接线（系统引擎曾因早退直接失效）
-    gesture_tokens = (
-        "private fun onVoicePressDown()",
-        "private fun onVoicePressUp()",
-        "startFunAsrListening()",
+    #       引擎已由 FunASR 换成 VOSK（07214d6）：按下按 asr.engine 分派到
+    #       VoskSpeechEngine / VoiceInputController，松手由各自 finish() 收尾。
+    down = function_region(service, r"private fun onVoicePressDown\(")
+    up = function_region(service, r"private fun onVoicePressUp\(")
+    down_tokens = (
+        "if (asr.engine == AsrEngine.VOSK)",
+        "toggleVoskVoice()",
+        "toggleVoiceInput()",
+    )
+    up_tokens = (
+        "if (asr.engine == AsrEngine.VOSK)",
+        "voskVoice?.finish()",
         "voiceController?.finish()",
     )
-    missing = [t for t in gesture_tokens if t not in service]
+    missing = [f"按下缺 {t}" for t in down_tokens if t not in down]
+    missing += [f"松手缺 {t}" for t in up_tokens if t not in up]
     check(
         not missing,
-        "按住说话对两种引擎都接线：按下开始收音、抬起收尾上屏",
+        "按住说话对两种引擎都接线（VOSK / 系统识别）：按下开始收音、抬起收尾上屏",
         f"{rel(SERVICE)} 按住说话接线缺项：{missing}",
     )
     check(
@@ -998,7 +1003,7 @@ def check_voice_chain() -> None:
     en = _named_strings(STRINGS_EN)
     required = {
         "voice_listening", "voice_need_permission", "voice_no_match",
-        "voice_error_code", "voice_cancel", "voice_unavailable",
+        "voice_error", "voice_cancel", "voice_unavailable",
         "asr_title", "asr_description", "asr_engine_system", "asr_engine_custom",
         "asr_partial_desc", "asr_offline_desc", "asr_saved", "asr_save_failed",
     }
@@ -1492,6 +1497,15 @@ def check_cell_dict_chain() -> None:
         "权重 8 万（让位用户词 / 压过系统词），档位与用户词库共用 entryKindOf",
         f"{rel(CELL_DICT_ENGINE)} 权重或档位映射缺失",
     )
+    # 共用判定的落点在 UserDictStore.entryKindOf：按码点判定，多字走 WUBIPHRASE。
+    # 候选条按「快捷短语 → 单字 → 词组 / 句子」分组（CandidateRanking.tier），档位写错
+    # 会让学到的词混进快捷短语组，所以这条必须与 VOCA-185 的分组口径一起守住。
+    check(
+        "if (codePointLength(text) == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE"
+        in read(USER_DICT_STORE),
+        "entryKindOf 按码点把多字条目归 WUBIPHRASE（候选条分组前提）",
+        f"{rel(USER_DICT_STORE)} entryKindOf 档位与候选条分组不一致",
+    )
     check(
         100_000 > 80_000 > 65_535 > 9_999,
         "权重关系自洽：用户词(10万) > 分类词库(8万) > 系统五笔词(65535) > 拼音词(9999)",
@@ -1583,40 +1597,7 @@ def check_cell_dict_chain() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
-# 11. 候选条字重（VOCA-56）：候选词不加粗
-# ═════════════════════════════════════════════════════════════
-
-def check_candidate_style() -> None:
-    view = read(CANDIDATE_VIEW)
-    item_region = function_region(view, r"private fun createItemView\(")
-
-    # 11.1 候选文本用常规字重（Typeface.DEFAULT），不能再回到 DEFAULT_BOLD
-    check(
-        "typeface = Typeface.DEFAULT_BOLD" not in item_region
-        and "typeface = Typeface.DEFAULT" in item_region,
-        "候选词文本常规字重（createItemView 用 Typeface.DEFAULT）",
-        f"{rel(CANDIDATE_VIEW)} createItemView 仍把候选词设为粗体"
-        "（VOCA-56 要求候选词不加粗）",
-    )
-
-    # 11.2 首选 / 非首选只靠颜色 + 底色区分，字重保持一致
-    check(
-        "setTextColor(if (highlighted) PICKED_TEXT else TEXT_PRIMARY)" in item_region,
-        "首选与非首选靠颜色 / 底色区分（字重一致）",
-        f"{rel(CANDIDATE_VIEW)} 候选高亮不再走颜色区分（首选识别会退化）",
-    )
-
-    # 11.3 KDoc 口径：注释里不能仍声明候选「加粗」，否则下一次改样式会被误导
-    #（允许否定句「不加粗」——它记录的是这次的决定本身）
-    kdoc = view.split("class CandidateView", 1)[0]
-    bold_claims = [ln for ln in kdoc.splitlines() if "加粗" in ln and "不加粗" not in ln]
-    check(
-        not bold_claims,
-        "CandidateView 类注释已去掉「加粗」口径",
-        f"{rel(CANDIDATE_VIEW)} 类注释仍声明候选「加粗」，与实现不符：{bold_claims}",
-    )
-
-
+# 11. 中文输入法（默认拼音 / 五笔 + 中英切换）
 # ═════════════════════════════════════════════════════════════
 
 def check_chinese_input_method() -> None:
@@ -1717,6 +1698,47 @@ def check_chinese_input_method() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
+# 12. 候选条字重（VOCA-56）：候选词不加粗
+# ═════════════════════════════════════════════════════════════
+
+def check_candidate_style() -> None:
+    view = read(CANDIDATE_VIEW)
+    item_region = function_region(view, r"private fun createItemView\(")
+
+    # 11.1 候选文本用常规字重（Typeface.DEFAULT），不能再回到 DEFAULT_BOLD
+    check(
+        "typeface = Typeface.DEFAULT_BOLD" not in item_region
+        and "typeface = Typeface.DEFAULT" in item_region,
+        "候选词文本常规字重（createItemView 用 Typeface.DEFAULT）",
+        f"{rel(CANDIDATE_VIEW)} createItemView 仍把候选词设为粗体"
+        "（VOCA-56 要求候选词不加粗）",
+    )
+
+    # 11.2 首选 / 非首选只靠颜色 + 底色区分，字重保持一致。
+    #      首选色跟随主题色（primaryColor 由 ispeech_primary 解析，非固定搜狗橙）——
+    #      这是「主题外观（浅色 / 深色 / 跟随系统）」引入后的有意差异，见 docs/keyboard-ui.md。
+    check(
+        "setTextColor(if (highlighted) primaryColor else TEXT_PRIMARY)" in item_region
+        and "primaryColor: Int = resolvePrimaryColor()" in view
+        and 'COLOR_ISPEECH_PRIMARY = "ispeech_primary"' in view,
+        "首选与非首选靠颜色 / 底色区分（字重一致，首选走主题色）",
+        f"{rel(CANDIDATE_VIEW)} 候选高亮不再走颜色区分（首选识别会退化），"
+        "或首选色未跟随主题解析",
+    )
+
+    # 11.3 KDoc 口径：注释里不能仍声明候选「加粗」，否则下一次改样式会被误导
+    #（允许否定句「不加粗」——它记录的是这次的决定本身）
+    kdoc = view.split("class CandidateView", 1)[0]
+    bold_claims = [ln for ln in kdoc.splitlines() if "加粗" in ln and "不加粗" not in ln]
+    check(
+        not bold_claims,
+        "CandidateView 类注释已去掉「加粗」口径",
+        f"{rel(CANDIDATE_VIEW)} 类注释仍声明候选「加粗」，与实现不符：{bold_claims}",
+    )
+
+
+
+# ═════════════════════════════════════════════════════════════
 # 13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：纯函数 + 接线 + 写盘线程
 # ═════════════════════════════════════════════════════════════
 
@@ -1778,8 +1800,6 @@ def check_phrase_learning() -> None:
         f"{rel(SERVICE)} 词组未写入 wb 库",
     )
 
-
-# ═════════════════════════════════════════════════════════════
 
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")

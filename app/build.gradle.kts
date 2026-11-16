@@ -124,6 +124,9 @@ dependencies {
     // 解压 .tar.bz2 模型包（Android 无 tar 可执行文件，JDK 不支持 bzip2）
     implementation(libs.commons.compress)
 
+    // 端侧语音识别（离线 Vosk；模型不入包，首次使用时下载到 filesDir）
+    implementation(libs.vosk.android)
+
     // 单元测试
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test.ext:junit:1.1.5")
