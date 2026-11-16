@@ -33,6 +33,7 @@
 | 关注点 | 位置 |
 | --- | --- |
 | 识别器封装 | `app/src/main/java/com/ispeech/input/VoiceInputController.kt` |
+| 链路埋点 | `app/src/main/java/com/ispeech/input/AsrTrace.kt`（见 §七） |
 | 服务状态机 | `app/src/main/java/com/ispeech/input/IspeechImeService.kt`（`toggleVoiceInput` / `showVoiceCandidate` / `commitVoice` / `cancelVoice` / `applyAsrChange`） |
 | 设置模型 | `app/src/main/java/com/ispeech/settings/store/AsrSettings.kt`（`AsrEngine` / `AsrLanguage` / `AsrSettings` / `ASR_MODEL_EXTRA`） |
 | 持久化 | `SettingsStore`（`asrSettingsFlow` / `asrSettings` / `setAsrSettings`） |
@@ -89,3 +90,52 @@
 | **影响范围** | 仅决定中文态默认输入法与中/英切换目标，不影响英文态、语音识别、符号面板等其他功能。 |
 
 > 回归用例：`InputModePolicyTest` 覆盖「默认五笔 ⇄ 英文」「默认拼音 ⇄ 英文」以及从英文回到中文时以设置为准。
+
+## 七、ASR 业务埋点（`AsrTrace`）
+
+**为什么有这一节**（VOCA-231）：真机上语音键卡在「语音识别中…」长时间不复位，而 `logcat` 里
+**一条 ASR 业务打点都没有** —— 既有日志全在 `catch` 分支，而「卡住」不抛异常，于是不可诊断。
+埋点把「选了哪个引擎 → 服务 / 模型是否就绪 → 开始收音 → 首个结果 → 结束 / 出错 / 超时 → UI 是否复位」
+逐段落成一行，**只加日志、不改任何行为**。
+
+- **TAG**：`AsrTrace`（全链路单 TAG，一条命令抓完整会话）
+- **实现**：`app/src/main/java/com/ispeech/input/AsrTrace.kt`
+- **会话 id**：`voiceSessionId`，每次按键（含被拦下的按键）新开一个，串起同一次语音输入的所有行
+
+```
+adb logcat -d -s AsrTrace:* | grep -c 'session='          # 有没有打点（0 行即为缺陷本身）
+adb logcat -d -s AsrTrace:* | grep 'session=v3'           # 追一次会话
+adb logcat -d -s AsrTrace:* | grep -E 'ev=(timeout|error|blocked)'   # 只看异常
+```
+
+| 事件 `ev=` | 打点位置 | 说明 |
+| --- | --- | --- |
+| `begin` | `IspeechImeService.startVoiceTrace` | 一次**真正开始**的语音会话：`via`（`voice_key` / `press_down`）、引擎、进入时的 UI 与收音状态 |
+| `blocked` | `IspeechImeService.toggleVoiceInput` / `toggleVoskVoice` / `onVoicePressDown`、两个引擎的 `start`、`VoiceInputController` 前置校验 | 被拦下：无服务 / 无可用识别服务 / 无麦克风权限 / 模型未就绪 / 已在收音（沿用上一个没结束的 id，所以「再按也没反应」会打在卡住那条会话上） |
+| `bind` | `VoiceInputController.logBind` | 设备上识别服务数量与真正受 `BIND_RECOGNITION_SERVICE` 保护的数量（桩服务能绑不回结果，靠这条区分） |
+| `press` | `IspeechImeService.onVoicePressUp` | 按住说话的**抬起**（按下由 `begin via=press_down` 表示）；只有按下没有抬起 = 手势没回来、收尾没触发 |
+| `start` | `VoiceInputController.startListening`、`VoskSpeechEngine.start` / `FunAsrSpeechEngine.start`、`startVoskModelDownload` | 已下发开始收音；带 `lang` / `partial` / `offline` / `model` / `calling` / `watchdog` |
+| `first_result` | 三个引擎的中间结果首条 + `IspeechImeService.showVoiceCandidate` | **本次会话有没有回调过文本**（只打首条，不刷屏） |
+| `end` | `VoiceInputController.finish` / `stopListening` 分支、离线引擎 `finish` | 进入「等收尾结果」阶段，带 `limit_ms` |
+| `result` / `empty` | `VoiceInputController.onResults`、离线引擎收尾、模型下载收尾 | 会话闭环；`empty` = 回调了但没有文本 |
+| `error` | `VoiceInputController.onError`（带 `code` + `name`）、离线引擎各失败阶段 | 失败原因类别 |
+| `timeout` | `VoiceInputController.finishWatchdog` | 兜底超时触发并复位（`limit_ms=6000`） |
+| `retry` | `VoiceInputController.onError`（识别器忙）、CUSTOM 建识别器失败回退 | 原地重试 / 静默回退不再静默 |
+| `cancel` | `VoiceInputController.stop` / `destroy`、`IspeechImeService.cancelVoice` / `resetState` | 会话被丢弃 |
+| `commit` | `IspeechImeService.commitVoiceText` | 最终结果写入输入框（只记长度） |
+| `ui_reset` | `IspeechImeService.traceVoiceUiReset`（`commitVoiceText` / `commitVoice` / 引擎 `onError`） | **UI 是否离开「识别中」——卡住的直接判据** |
+
+隐私：只记长度（`chars=`）与状态位，**绝不**记录识别文本、输入框内容或宿主编辑字段（共享规程 §8 / §9）。
+
+单测：`app/src/test/java/com/ispeech/input/AsrTraceTest.kt`（行格式、缺省占位、空白压平、id 递增）。
+
+**当前埋点覆盖不到的（= VOCA-231 的定位结论）**：
+
+- `timeout` 只有 `VoiceInputController.finishWatchdog` 一处，且它只在**松手收尾**阶段挂表；
+  「已按下开始收音、服务一直不回」这一段**没有任何超时**，因此也不可能有 `timeout` 行。
+- `VoskSpeechEngine` / `FunAsrSpeechEngine` **完全没有超时分支**（收尾依赖工作线程自己走到底），
+  `start` 行固定带 `watchdog=none`；若 `AudioRecord.read()` 阻塞，日志会停在 `stage=recording` 之后再无一行。
+- 也就是说，三条判读口径：
+  **有 `begin` 无 `press`** → 松手事件没回来（收尾压根没触发）；
+  **有 `start` 无 `first_result`** → 识别服务收了会话不回话；
+  **有 `first_result` 无 `result` / `ui_reset`** → 只回中间结果、收尾永不来，UI 停在「识别中」。

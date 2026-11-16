@@ -7,6 +7,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.google.gson.JsonParser
 import com.ispeech.data.VoskModelStore
@@ -55,20 +56,67 @@ class VoskSpeechEngine(private val context: Context) {
     private var onFinal: ((String) -> Unit)? = null
     private var onError: ((String) -> Unit)? = null
 
+    /** 埋点会话 id（服务侧为一次语音输入生成）。 */
+    private var traceSession: String? = null
+
+    /** 会话起点，用于算 `ms=`。 */
+    private var traceStartMs = 0L
+
+    /** 本次会话是否已打过 `first_result`。 */
+    private var traceFirstResultLogged = false
+
+    /** 离线引擎的收尾完全依赖工作线程走到底：没有兜底超时，`watchdog=none` 恒定打出来。 */
+    private fun elapsedMs(): Long = (SystemClock.elapsedRealtime() - traceStartMs).coerceAtLeast(0L)
+
+    private fun traceFirstResult(kind: String, chars: Int) {
+        if (traceFirstResultLogged) return
+        traceFirstResultLogged = true
+        AsrTrace.i(
+            traceSession,
+            AsrTrace.EV_FIRST_RESULT,
+            "engine" to "VOSK",
+            "kind" to kind,
+            "chars" to chars,
+            "ms" to elapsedMs(),
+        )
+    }
+
     /**
      * 开始收音。
      *
      * @param onPartial 中间结果（实时刷新候选条），主线程回调
      * @param onFinal 最终结果（用户结束说话时上抛一次），主线程回调
      * @param onError 失败提示（模型加载失败 / 录音失败），主线程回调
+     * @param sessionId 埋点会话 id（服务侧生成；为空时自行生成）
      */
     fun start(
         onPartial: (String) -> Unit,
         onFinal: (String) -> Unit,
         onError: (String) -> Unit,
+        sessionId: String? = null,
     ) {
-        if (isListening) return
+        traceSession = sessionId ?: AsrTrace.newSessionId()
+        traceStartMs = SystemClock.elapsedRealtime()
+        traceFirstResultLogged = false
+        if (isListening) {
+            AsrTrace.w(
+                traceSession,
+                AsrTrace.EV_BLOCKED,
+                "engine" to "VOSK",
+                "reason" to "already_listening",
+                "ms" to elapsedMs(),
+            )
+            return
+        }
         if (!isReady) {
+            AsrTrace.w(
+                traceSession,
+                AsrTrace.EV_BLOCKED,
+                "engine" to "VOSK",
+                "reason" to "model_not_ready",
+                "model_dir" to VoskModelStore.modelDir(context).absolutePath,
+                "ms" to elapsedMs(),
+            )
             post { onError("语音模型未就绪") }
             return
         }
@@ -76,18 +124,42 @@ class VoskSpeechEngine(private val context: Context) {
         this.onFinal = onFinal
         this.onError = onError
         isListening = true
+        AsrTrace.i(
+            traceSession,
+            AsrTrace.EV_START,
+            "engine" to "VOSK",
+            "model_ready" to true,
+            "watchdog" to "none",
+            "ms" to elapsedMs(),
+        )
         // 模型加载很重（几十 MB），放后台线程；加载完再开始收音
         Thread({ runSession() }, "vosk-voice").also { worker = it }.start()
     }
 
     /** 结束说话并把最终结果上抛（`onFinal`）。 */
     fun finish() {
+        AsrTrace.i(
+            traceSession,
+            AsrTrace.EV_END,
+            "engine" to "VOSK",
+            "listening" to isListening,
+            "first_result" to traceFirstResultLogged,
+            "ms" to elapsedMs(),
+        )
         // 只置停止标志：收尾（读 finalResult 并回调）由工作线程完成，避免跨线程抢 recognizer
         running.set(false)
     }
 
     /** 放弃本次识别（不回调结果）。 */
     fun cancel() {
+        AsrTrace.i(
+            traceSession,
+            AsrTrace.EV_CANCEL,
+            "engine" to "VOSK",
+            "listening" to isListening,
+            "first_result" to traceFirstResultLogged,
+            "ms" to elapsedMs(),
+        )
         clearCallbacks()
         running.set(false)
         releaseAudio()
@@ -116,6 +188,13 @@ class VoskSpeechEngine(private val context: Context) {
         try {
             val loaded = loadModel() ?: run {
                 isListening = false
+                AsrTrace.w(
+                    traceSession,
+                    AsrTrace.EV_ERROR,
+                    "engine" to "VOSK",
+                    "stage" to "load_model",
+                    "ms" to elapsedMs(),
+                )
                 post { onError?.invoke("语音模型加载失败") }
                 return
             }
@@ -124,6 +203,13 @@ class VoskSpeechEngine(private val context: Context) {
             val record = createAudioRecord() ?: run {
                 isListening = false
                 runCatching { rec.close() }
+                AsrTrace.w(
+                    traceSession,
+                    AsrTrace.EV_ERROR,
+                    "engine" to "VOSK",
+                    "stage" to "audio_record",
+                    "ms" to elapsedMs(),
+                )
                 post { onError?.invoke("录音初始化失败，请检查麦克风占用") }
                 return
             }
@@ -131,25 +217,56 @@ class VoskSpeechEngine(private val context: Context) {
             record.startRecording()
             running.set(true)
             val buffer = ShortArray(BUFFER_SHORTS)
+            var reads = 0
+            var emptyReads = 0
             while (running.get()) {
                 val read = record.read(buffer, 0, buffer.size)
-                if (read <= 0) continue
+                if (read <= 0) {
+                    emptyReads++
+                    continue
+                }
+                reads++
                 if (rec.acceptWaveForm(buffer, read)) {
                     val text = textOf(rec.result)
-                    if (text.isNotBlank()) post { onPartial?.invoke(text) }
+                    if (text.isNotBlank()) {
+                        traceFirstResult("partial", text.length)
+                        post { onPartial?.invoke(text) }
+                    }
                 } else {
                     val partial = textOfPartial(rec.partialResult)
-                    if (partial.isNotBlank()) post { onPartial?.invoke(partial) }
+                    if (partial.isNotBlank()) {
+                        traceFirstResult("partial", partial.length)
+                        post { onPartial?.invoke(partial) }
+                    }
                 }
             }
             // 收尾：取最终结果（用户点「结束」时）
             val final = textOf(rec.finalResult)
+            AsrTrace.i(
+                traceSession,
+                if (final.isBlank()) AsrTrace.EV_EMPTY else AsrTrace.EV_RESULT,
+                "engine" to "VOSK",
+                "kind" to "final",
+                "chars" to final.length,
+                "reads" to reads,
+                "empty_reads" to emptyReads,
+                "ms" to elapsedMs(),
+            )
             post {
                 isListening = false
                 if (final.isNotBlank()) onFinal?.invoke(final) else onError?.invoke("没听清，请再说一次")
             }
         } catch (e: Exception) {
             Log.w(TAG, "离线识别失败: ${e.message}")
+            AsrTrace.w(
+                traceSession,
+                AsrTrace.EV_ERROR,
+                "engine" to "VOSK",
+                "stage" to "session",
+                "reason" to e.javaClass.simpleName,
+                "first_result" to traceFirstResultLogged,
+                "ms" to elapsedMs(),
+            )
             post {
                 isListening = false
                 onError?.invoke("离线识别失败：${e.message ?: "未知错误"}")

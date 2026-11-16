@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.graphics.Paint
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.SpannableString
 import android.text.Spanned
@@ -249,6 +250,53 @@ class IspeechImeService : InputMethodService() {
     /** 当前候选是否为语音识别结果（空格 / 点选上屏后复位） */
     private var voiceActive = false
 
+    /** 本次语音会话的埋点 id（一次「按键 → 出字 / 复位」共用，见 [AsrTrace]） */
+    private var voiceSessionId: String? = null
+
+    /** 本次语音会话起点，用于算 UI 侧 `ms=` */
+    private var voiceSessionStartMs = 0L
+
+    /** 本次按键的来源，由入口写入、[startVoiceTrace] 消费（按住说话 / 工具栏语音键 / 空格长按）。 */
+    private var voiceTraceVia = "voice_key"
+
+    /**
+     * 为一次语音输入开埋点会话：**每一次真正开始的按键都是一个新 id**，被拦下的按键沿用
+     * 上一个还没结束的会话 id —— 这样「再按也没反应」会打在卡住的那条会话上，
+     * 一眼能看出是上一次没复位，而不是这次没开始。
+     */
+    private fun startVoiceTrace() {
+        voiceSessionId = AsrTrace.newSessionId()
+        voiceSessionStartMs = SystemClock.elapsedRealtime()
+        AsrTrace.i(
+            voiceSessionId,
+            AsrTrace.EV_BEGIN,
+            "via" to voiceTraceVia,
+            "engine" to asr.engine.name,
+            "mode" to mode.name,
+            "panel" to panel.name,
+            "voice_active" to voiceActive,
+            "system_listening" to (voiceController?.isListening == true),
+            "vosk_listening" to (voskVoice?.isListening == true),
+            "prefer_offline" to asr.preferOffline,
+            "lang" to asr.language.tag,
+        )
+        voiceTraceVia = "voice_key"
+    }
+
+    /** 自本次语音会话起点算起的毫秒数（与引擎侧 `ms=` 同一口径，可直接对账）。 */
+    private fun voiceElapsedMs(): Long = (SystemClock.elapsedRealtime() - voiceSessionStartMs).coerceAtLeast(0L)
+
+    /** 语音 UI 态复位（`voiceActive` 从「识别中」切走）——卡没卡住就看这条有没有出现。 */
+    private fun traceVoiceUiReset(reason: String, ok: Boolean) {
+        AsrTrace.i(
+            voiceSessionId,
+            AsrTrace.EV_UI_RESET,
+            "reason" to reason,
+            "ok" to ok,
+            "ms" to voiceElapsedMs(),
+        )
+    }
+
     override fun onCreate() {
         super.onCreate()
         engineGeneration = AppContainer.engineGeneration()
@@ -477,12 +525,21 @@ class IspeechImeService : InputMethodService() {
      * 是两条完全不同的链路，这里只负责「开始」，结束交给 [onVoicePressUp]。
      */
     private fun onVoicePressDown() {
+        // 会话 id 由 toggle* 开立（两条入口共用一套判定），这里只标来源
+        voiceTraceVia = "press_down"
         if (asr.engine == AsrEngine.VOSK) {
-            if (voskVoice?.isListening == true) return
+            if (voskVoice?.isListening == true) {
+                // 卡住的典型表现：上一会话没复位，这一按被静默吞掉（打在上一条会话 id 上）
+                AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "already_listening", "engine" to "VOSK")
+                return
+            }
             toggleVoskVoice()
             return
         }
-        if (voiceController?.isListening == true) return
+        if (voiceController?.isListening == true) {
+            AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "already_listening", "engine" to "SYSTEM")
+            return
+        }
         toggleVoiceInput()
     }
 
@@ -493,6 +550,8 @@ class IspeechImeService : InputMethodService() {
      * Vosk 走 [VoskSpeechEngine.finish]（工作线程读 finalResult 后回调）。
      */
     private fun onVoicePressUp() {
+        // 只有按下（`begin`）没有抬起（这条）= 手势没回来，收尾根本没被触发
+        AsrTrace.i(voiceSessionId, AsrTrace.EV_PRESS, "up" to true, "engine" to asr.engine.name)
         if (asr.engine == AsrEngine.VOSK) {
             voskVoice?.finish()
             return
@@ -1471,6 +1530,7 @@ class IspeechImeService : InputMethodService() {
         }
         val controller = voiceController
         if (controller == null || !controller.isAvailable) {
+            AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "no_recognition_service", "engine" to asr.engine.name)
             statusText = getString(R.string.voice_unavailable)
             renderCandidateView()
             return
@@ -1479,6 +1539,7 @@ class IspeechImeService : InputMethodService() {
         // isRecognitionAvailable() 为 true 却永远不出结果。这里提前拦截并给出可操作指引，
         // 免得用户反复点麦克风、以为是自己的操作问题。
         if (!controller.hasUsableService()) {
+            AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "no_usable_service", "engine" to asr.engine.name)
             statusText = getString(R.string.voice_service_unavailable)
             codeOverride = null
             candidates = emptyList()
@@ -1486,12 +1547,14 @@ class IspeechImeService : InputMethodService() {
             return
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "no_mic_permission", "engine" to asr.engine.name)
             statusText = getString(R.string.voice_need_permission)
             renderCandidateView()
             requestMicPermission()
             return
         }
         if (controller.isListening) {
+            // 第二次按键 = 主动结束上一会话：cancel 由 controller.stop() 与 cancelVoice() 各自打出
             controller.stop()
             cancelVoice()
             statusText = getString(R.string.voice_cancel)
@@ -1502,6 +1565,7 @@ class IspeechImeService : InputMethodService() {
         commitPending()
         clearAssociation()
         dismissAiState()
+        startVoiceTrace()
         voiceActive = true
         statusText = getString(R.string.voice_listening)
         codeOverride = "语音"
@@ -1512,6 +1576,7 @@ class IspeechImeService : InputMethodService() {
             // 宿主应用包名：输入法自身不是宿主，部分 ROM 的识别服务据此归属录音会话与结果，
             // 缺失时会立刻回 ERROR_CLIENT（表现为「点语音键没反应」）
             callingPackage = currentInputEditorInfo?.packageName,
+            sessionId = voiceSessionId,
             onPartial = { text -> showVoiceCandidate(text) },
             onFinal = { text ->
                 // 最终结果直接上屏（见 [commitVoiceText]），不再等用户按空格
@@ -1520,6 +1585,7 @@ class IspeechImeService : InputMethodService() {
             },
             onError = { message ->
                 voiceActive = false
+                traceVoiceUiReset("engine_error", ok = false)
                 if (codeOverride == "语音") codeOverride = null
                 statusText = message
                 candidates = emptyList()
@@ -1531,6 +1597,14 @@ class IspeechImeService : InputMethodService() {
     /** 把语音识别文本填入候选（点选 / 空格上屏）。 */
     private fun showVoiceCandidate(text: String) {
         if (text.isBlank()) return
+        // 「识别中却一直只有一个候选」就是这条：中间结果有、最终结果没有
+        AsrTrace.i(
+            voiceSessionId,
+            AsrTrace.EV_FIRST_RESULT,
+            "kind" to "candidate",
+            "chars" to text.length,
+            "ms" to voiceElapsedMs(),
+        )
         candidates = listOf(
             LookupCandidate(
                 code = "voice",
@@ -1547,6 +1621,7 @@ class IspeechImeService : InputMethodService() {
     private fun commitVoice() {
         val candidate = candidates.firstOrNull()
         voiceActive = false
+        traceVoiceUiReset("space_commit", ok = candidate != null)
         if (candidate == null) {
             renderCandidateView()
             return
@@ -1562,6 +1637,13 @@ class IspeechImeService : InputMethodService() {
      */
     private fun commitVoiceText(text: String) {
         voiceActive = false
+        traceVoiceUiReset("engine_result", ok = text.isNotBlank())
+        AsrTrace.i(
+            voiceSessionId,
+            AsrTrace.EV_COMMIT,
+            "chars" to text.length,
+            "ms" to voiceElapsedMs(),
+        )
         if (codeOverride == "语音") codeOverride = null
         candidates = emptyList()
         if (text.isBlank()) {
@@ -1582,16 +1664,19 @@ class IspeechImeService : InputMethodService() {
     private fun toggleVoskVoice() {
         val engine = voskVoice ?: return
         if (!engine.isReady) {
+            AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "model_not_ready", "engine" to "VOSK")
             startVoskModelDownload()
             return
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "no_mic_permission", "engine" to "VOSK")
             statusText = getString(R.string.voice_need_permission)
             renderCandidateView()
             requestMicPermission()
             return
         }
         if (engine.isListening) {
+            // 第二次按键 = 结束收音，收尾由引擎自己打 `ev=end engine=VOSK`
             engine.finish()
             return
         }
@@ -1599,12 +1684,14 @@ class IspeechImeService : InputMethodService() {
         commitPending()
         clearAssociation()
         dismissAiState()
+        startVoiceTrace()
         voiceActive = true
         statusText = getString(R.string.voice_listening)
         codeOverride = "语音"
         candidates = emptyList()
         renderCandidateView()
         engine.start(
+            sessionId = voiceSessionId,
             onPartial = { text -> showVoiceCandidate(text) },
             onFinal = { text ->
                 statusText = null
@@ -1612,6 +1699,7 @@ class IspeechImeService : InputMethodService() {
             },
             onError = { message ->
                 voiceActive = false
+                traceVoiceUiReset("engine_error", ok = false)
                 if (codeOverride == "语音") codeOverride = null
                 statusText = message
                 candidates = emptyList()
@@ -1624,6 +1712,7 @@ class IspeechImeService : InputMethodService() {
     private fun startVoskModelDownload() {
         if (voskDownloading) return
         voskDownloading = true
+        AsrTrace.i(voiceSessionId, AsrTrace.EV_START, "engine" to "VOSK", "stage" to "model_download", "ms" to voiceElapsedMs())
         statusText = getString(R.string.voice_model_downloading, 0)
         renderCandidateView()
         serviceScope.launch {
@@ -1632,6 +1721,13 @@ class IspeechImeService : InputMethodService() {
                 renderCandidateView()
             }
             voskDownloading = false
+            AsrTrace.i(
+                voiceSessionId,
+                if (ok) AsrTrace.EV_RESULT else AsrTrace.EV_ERROR,
+                "engine" to "VOSK",
+                "stage" to "model_download",
+                "ms" to voiceElapsedMs(),
+            )
             statusText = getString(if (ok) R.string.voice_model_ready else R.string.voice_model_failed)
             renderCandidateView()
         }
@@ -1639,6 +1735,7 @@ class IspeechImeService : InputMethodService() {
 
     /** 取消语音识别并复位语音状态（不负责渲染）。 */
     private fun cancelVoice() {
+        AsrTrace.i(voiceSessionId, AsrTrace.EV_CANCEL, "stage" to "service", "ms" to voiceElapsedMs())
         if (voiceController?.isListening == true) voiceController?.stop()
         voskVoice?.cancel()
         voiceActive = false
@@ -1981,6 +2078,17 @@ class IspeechImeService : InputMethodService() {
         panel = Panel.NONE
         softKeyboard?.resetShift()
         dismissAiState()
+        if (voiceController?.isListening == true || voskVoice?.isListening == true || voiceActive) {
+            // 强制收尾：收音中被切走（换输入框 / 隐藏键盘）时，识别器在这里被丢弃
+            AsrTrace.w(
+                voiceSessionId,
+                AsrTrace.EV_CANCEL,
+                "stage" to "reset_state",
+                "system_listening" to (voiceController?.isListening == true),
+                "vosk_listening" to (voskVoice?.isListening == true),
+                "ms" to voiceElapsedMs(),
+            )
+        }
         if (voiceController?.isListening == true) voiceController?.stop()
         if (voskVoice?.isListening == true) voskVoice?.cancel()
         voiceActive = false

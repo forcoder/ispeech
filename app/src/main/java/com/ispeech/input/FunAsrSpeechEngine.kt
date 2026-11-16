@@ -7,6 +7,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.ispeech.data.FunAsrModelStore
 import com.k2fsa.sherpa.onnx.FeatureConfig
@@ -75,6 +76,30 @@ class FunAsrSpeechEngine(private val context: Context) {
     private var onError: ((String) -> Unit)? = null
     private var onLevel: ((Float) -> Unit)? = null
 
+    /** 埋点会话 id（服务侧为一次语音输入生成）。 */
+    private var traceSession: String? = null
+
+    /** 会话起点，用于算 `ms=`。 */
+    private var traceStartMs = 0L
+
+    /** 本次会话是否已打过 `first_result`。 */
+    private var traceFirstResultLogged = false
+
+    private fun elapsedMs(): Long = (SystemClock.elapsedRealtime() - traceStartMs).coerceAtLeast(0L)
+
+    private fun traceFirstResult(kind: String, chars: Int) {
+        if (traceFirstResultLogged) return
+        traceFirstResultLogged = true
+        AsrTrace.i(
+            traceSession,
+            AsrTrace.EV_FIRST_RESULT,
+            "engine" to "FUNASR",
+            "kind" to kind,
+            "chars" to chars,
+            "ms" to elapsedMs(),
+        )
+    }
+
     /**
      * 开始收音。
      *
@@ -82,15 +107,37 @@ class FunAsrSpeechEngine(private val context: Context) {
      * @param onFinal 最终结果（用户松手时上抛一次），主线程回调
      * @param onError 失败提示（模型加载失败 / 录音失败），主线程回调
      * @param onLevel 音量（0..1），驱动面板波形，主线程回调
+     * @param sessionId 埋点会话 id（服务侧生成；为空时自行生成）
      */
     fun start(
         onPartial: (String) -> Unit,
         onFinal: (String) -> Unit,
         onError: (String) -> Unit,
         onLevel: ((Float) -> Unit)? = null,
+        sessionId: String? = null,
     ) {
-        if (isListening) return
+        traceSession = sessionId ?: AsrTrace.newSessionId()
+        traceStartMs = SystemClock.elapsedRealtime()
+        traceFirstResultLogged = false
+        if (isListening) {
+            AsrTrace.w(
+                traceSession,
+                AsrTrace.EV_BLOCKED,
+                "engine" to "FUNASR",
+                "reason" to "already_listening",
+                "ms" to elapsedMs(),
+            )
+            return
+        }
         if (!isReady) {
+            AsrTrace.w(
+                traceSession,
+                AsrTrace.EV_BLOCKED,
+                "engine" to "FUNASR",
+                "reason" to "model_not_ready",
+                "model_dir" to FunAsrModelStore.modelDir(context).absolutePath,
+                "ms" to elapsedMs(),
+            )
             post { onError("语音模型未就绪") }
             return
         }
@@ -100,6 +147,14 @@ class FunAsrSpeechEngine(private val context: Context) {
         this.onLevel = onLevel
         chunks.clear()
         isListening = true
+        AsrTrace.i(
+            traceSession,
+            AsrTrace.EV_START,
+            "engine" to "FUNASR",
+            "model_ready" to true,
+            "watchdog" to "none",
+            "ms" to elapsedMs(),
+        )
         // 运行标志必须在起线程「之前」置位，且此后只由 finish / cancel 关闭。
         //
         // 模型加载（几十 MB）+ 录音初始化合计可能 1 秒以上，用户完全可能在这之前就松手：
@@ -113,11 +168,27 @@ class FunAsrSpeechEngine(private val context: Context) {
 
     /** 结束说话：置停止标志，收尾（解码并回调）由工作线程完成。 */
     fun finish() {
+        AsrTrace.i(
+            traceSession,
+            AsrTrace.EV_END,
+            "engine" to "FUNASR",
+            "listening" to isListening,
+            "first_result" to traceFirstResultLogged,
+            "ms" to elapsedMs(),
+        )
         running.set(false)
     }
 
     /** 放弃本次识别（不回调结果）。 */
     fun cancel() {
+        AsrTrace.i(
+            traceSession,
+            AsrTrace.EV_CANCEL,
+            "engine" to "FUNASR",
+            "listening" to isListening,
+            "first_result" to traceFirstResultLogged,
+            "ms" to elapsedMs(),
+        )
         clearCallbacks()
         running.set(false)
         releaseAudio()
@@ -148,6 +219,13 @@ class FunAsrSpeechEngine(private val context: Context) {
         try {
             val loaded = loadRecognizer() ?: run {
                 isListening = false
+                AsrTrace.w(
+                    traceSession,
+                    AsrTrace.EV_ERROR,
+                    "engine" to "FUNASR",
+                    "stage" to "load_recognizer",
+                    "ms" to elapsedMs(),
+                )
                 post { onError?.invoke("语音模型加载失败") }
                 return
             }
@@ -157,6 +235,13 @@ class FunAsrSpeechEngine(private val context: Context) {
                 isListening = false
                 runCatching { session.release() }
                 stream = null
+                AsrTrace.w(
+                    traceSession,
+                    AsrTrace.EV_ERROR,
+                    "engine" to "FUNASR",
+                    "stage" to "audio_record",
+                    "ms" to elapsedMs(),
+                )
                 post { onError?.invoke("录音初始化失败，请检查麦克风占用") }
                 return
             }
@@ -164,12 +249,38 @@ class FunAsrSpeechEngine(private val context: Context) {
             // 注意：这里**不能**再做 running.set(true)。加载期间用户可能已经松手，
             // finish() 早已把标志置 false，此时重写会吞掉停止请求（见 [start] 的注释）。
             record.startRecording()
+            AsrTrace.i(
+                traceSession,
+                AsrTrace.EV_START,
+                "engine" to "FUNASR",
+                "stage" to "recording",
+                "ms" to elapsedMs(),
+            )
 
             val buffer = ShortArray(BUFFER_SHORTS)
             var samplesSinceDecode = 0
+            var reads = 0
+            var emptyReads = 0
             while (running.get()) {
                 val read = record.read(buffer, 0, buffer.size)
-                if (read <= 0) continue
+                if (read <= 0) {
+                    // 读不到数据（麦克风被占用 / 权限被系统回收）时这里是纯自旋：
+                    // 计数打出来才能和「正常收音但没声音」区分开。
+                    emptyReads++
+                    if (emptyReads == SPIN_WARN_READS) {
+                        AsrTrace.w(
+                            traceSession,
+                            AsrTrace.EV_ERROR,
+                            "engine" to "FUNASR",
+                            "stage" to "audio_read",
+                            "reason" to "no_samples",
+                            "empty_reads" to emptyReads,
+                            "ms" to elapsedMs(),
+                        )
+                    }
+                    continue
+                }
+                reads++
                 // sherpa-onnx 需要 float32 归一化 PCM
                 val f32 = FloatArray(read)
                 var sumSquares = 0.0
@@ -196,14 +307,40 @@ class FunAsrSpeechEngine(private val context: Context) {
 
             // 收尾：等最后一次分段解码结束，避免与它抢识别器
             awaitPartial()
+            AsrTrace.i(
+                traceSession,
+                AsrTrace.EV_END,
+                "engine" to "FUNASR",
+                "stage" to "decode",
+                "reads" to reads,
+                "empty_reads" to emptyReads,
+                "ms" to elapsedMs(),
+            )
             loaded.decode(session)
             val text = loaded.getResult(session).text
+            AsrTrace.i(
+                traceSession,
+                if (text.isBlank()) AsrTrace.EV_EMPTY else AsrTrace.EV_RESULT,
+                "engine" to "FUNASR",
+                "kind" to "final",
+                "chars" to text.length,
+                "ms" to elapsedMs(),
+            )
             post {
                 isListening = false
                 if (text.isNotBlank()) onFinal?.invoke(text.trim()) else onError?.invoke("没听清，请再说一次")
             }
         } catch (e: Exception) {
             Log.w(TAG, "FunASR 离线识别失败: ${e.message}")
+            AsrTrace.w(
+                traceSession,
+                AsrTrace.EV_ERROR,
+                "engine" to "FUNASR",
+                "stage" to "session",
+                "reason" to e.javaClass.simpleName,
+                "first_result" to traceFirstResultLogged,
+                "ms" to elapsedMs(),
+            )
             post {
                 isListening = false
                 onError?.invoke("FunASR 离线识别失败：${e.message ?: "未知错误"}")
@@ -237,12 +374,23 @@ class FunAsrSpeechEngine(private val context: Context) {
                     tmp.acceptWaveform(snapshot, SAMPLE_RATE)
                     loaded.decode(tmp)
                     val text = loaded.getResult(tmp).text.trim()
-                    if (text.isNotBlank()) post { onPartial?.invoke(text) }
+                    if (text.isNotBlank()) {
+                        traceFirstResult("partial", text.length)
+                        post { onPartial?.invoke(text) }
+                    }
                 } finally {
                     runCatching { tmp.release() }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "分段解码失败: ${e.message}")
+                AsrTrace.w(
+                    traceSession,
+                    AsrTrace.EV_ERROR,
+                    "engine" to "FUNASR",
+                    "stage" to "partial_decode",
+                    "reason" to e.javaClass.simpleName,
+                    "ms" to elapsedMs(),
+                )
             } finally {
                 partialRunning.set(false)
             }
@@ -355,5 +503,8 @@ class FunAsrSpeechEngine(private val context: Context) {
 
         /** RMS → 波形高度的放大系数（正常说话 RMS 约 0.02~0.15）。 */
         const val LEVEL_GAIN = 8f
+
+        /** 累计到第 20 次空读时打一条告警：只打一次，不刷屏（空读不阻塞，不能按秒算）。 */
+        const val SPIN_WARN_READS = 20
     }
 }
