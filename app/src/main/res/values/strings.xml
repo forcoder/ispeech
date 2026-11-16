@@ -156,7 +156,10 @@
 
     <!-- 语音输入 -->
     <string name="voice_listening">语音识别中…</string>
-    <string name="voice_need_permission">请先授予麦克风权限</string>
+    <string name="voice_need_permission">请先授予麦克风权限；若系统不再弹出授权框，请到「系统设置 → 应用 → 智语 iSpeech → 权限」开启麦克风</string>
+    <string name="voice_action_grant">去授权</string>
+    <string name="voice_action_open_settings">去设置</string>
+    <string name="voice_permission_open_failed">打不开授权页面，请在「系统设置 → 应用 → 智语 iSpeech → 权限」中开启麦克风</string>
     <string name="voice_no_match">没听清，请再说一次</string>
     <string name="voice_cancel">语音已取消</string>
     <string name="voice_unavailable">设备不支持语音输入</string>
