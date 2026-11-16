@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 候选条：静态骨架在此声明，候选项由 com.ispeech.input.CandidateView 按查询结果动态创建。
      一行横排：组合码 + 候选词（横向滑动）。不放假翻页箭头 / 页码器 / 设置齿轮，
-     左右拖动即可浏览候选，横向空间全部留给候选词。 -->
+     左右拖动即可浏览候选，横向空间全部留给候选词。
+     高度钉死 46dp（规格 §2.1 / AC-1）：空态与组合态同一个高度，键盘不会在开始打字时跳一下。
+     用 height 而不是 minHeight —— 候选字号是 sp，minHeight 兜不住 font_scale 放大后的内容高度。 -->
 <com.ispeech.input.CandidateView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/candidate_bar"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
+    android:layout_height="46dp"
     android:background="#F4F5F7"
     android:gravity="center_vertical"
-    android:minHeight="44dp"
     android:orientation="horizontal"
     android:paddingStart="8dp"
     android:paddingTop="4dp"

@@ -99,6 +99,11 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { SettingsStore.setTraditionalOutput(app, enabled) }
     }
 
+    fun setDoubleSpacePeriod(enabled: Boolean) {
+        _settings.value = _settings.value.copy(doubleSpacePeriod = enabled)
+        viewModelScope.launch { SettingsStore.setDoubleSpacePeriod(app, enabled) }
+    }
+
     private val _chineseInputMethod = MutableStateFlow(ChineseInputMethod.PINYIN)
     val chineseInputMethod: StateFlow<ChineseInputMethod> = _chineseInputMethod.asStateFlow()
 

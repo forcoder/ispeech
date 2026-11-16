@@ -209,6 +209,7 @@
     <string name="panel_toggle_fuzzy_pinyin">模糊音</string>
     <string name="panel_toggle_traditional">繁体输出</string>
     <string name="panel_toggle_vibrate">按键震动</string>
+    <string name="panel_toggle_double_space_period">双击空格句号</string>
     <string name="quick_search_empty">没有匹配的快捷短语，试试拼音首字母（如 fp → 发票）</string>
     <string name="quick_search_count">找到 %1$d 条 · 关键词 %2$s</string>
     <string name="quick_search_smart">智能联想：快捷字母 / 名称 / 内容 / 拼音首字母，共 %1$d 条</string>

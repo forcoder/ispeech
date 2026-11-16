@@ -205,6 +205,7 @@
     <string name="panel_toggle_fuzzy_pinyin">Fuzzy pinyin</string>
     <string name="panel_toggle_traditional">Traditional output</string>
     <string name="panel_toggle_vibrate">Key vibration</string>
+    <string name="panel_toggle_double_space_period">Double-tap space period</string>
     <string name="quick_search_empty">No matching quick phrase. Try pinyin initials (fp → 发票).</string>
     <string name="quick_search_count">%1$d matches · keyword %2$s</string>
     <string name="quick_search_smart">Smart search: shortcut letters / label / content / pinyin initials · %1$d total</string>

@@ -52,6 +52,7 @@ object SettingsStore {
     private val KEY_PINYIN_MIXED = booleanPreferencesKey("pinyin_mixed")
     private val KEY_FUZZY_PINYIN = booleanPreferencesKey("fuzzy_pinyin")
     private val KEY_TRADITIONAL_OUTPUT = booleanPreferencesKey("traditional_output")
+    private val KEY_DOUBLE_SPACE_PERIOD = booleanPreferencesKey("double_space_period")
 
     // —— 中文输入法 ——
     /** 历史键名保持不变，老用户已选的「五笔」不会被重置。 */
@@ -129,7 +130,7 @@ object SettingsStore {
     fun keyboardSettingsFlow(context: Context): Flow<KeyboardSettings> =
         context.safeData().map { prefs ->
             KeyboardSettings(
-                keyHeightDp = normalizeKeyHeightDp(prefs[KEY_KEY_HEIGHT_DP] ?: 52),
+                keyHeightDp = normalizeKeyHeightDp(prefs[KEY_KEY_HEIGHT_DP] ?: 46),
                 candidatePageSize = normalizeCandidatePageSize(prefs[KEY_CANDIDATE_PAGE_SIZE] ?: 9),
                 vibrate = prefs[KEY_VIBRATE] ?: true,
                 chinesePunctuation = prefs[KEY_CHINESE_PUNCTUATION] ?: true,
@@ -139,6 +140,7 @@ object SettingsStore {
                 pinyinMixed = prefs[KEY_PINYIN_MIXED] ?: true,
                 fuzzyPinyin = prefs[KEY_FUZZY_PINYIN] ?: false,
                 traditionalOutput = prefs[KEY_TRADITIONAL_OUTPUT] ?: false,
+                doubleSpacePeriod = prefs[KEY_DOUBLE_SPACE_PERIOD] ?: false,
             )
         }
 
@@ -178,6 +180,10 @@ object SettingsStore {
     /** 繁体输出开关（只影响上屏瞬间的转换，不需要重建引擎）。 */
     suspend fun setTraditionalOutput(context: Context, enabled: Boolean) =
         context.editSettings { it[KEY_TRADITIONAL_OUTPUT] = enabled }
+
+    /** 双击空格出句号开关（默认关，规格 §2.2）。 */
+    suspend fun setDoubleSpacePeriod(context: Context, enabled: Boolean) =
+        context.editSettings { it[KEY_DOUBLE_SPACE_PERIOD] = enabled }
 
     // —— 中文输入法 ——
 

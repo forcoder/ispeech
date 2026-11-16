@@ -151,6 +151,12 @@ fun KeyboardScreen(onBack: () -> Unit) {
                         checked = settings.traditionalOutput,
                     ) { viewModel.setTraditionalOutput(it) }
                     HorizontalDivider()
+                    KeyboardSwitchRow(
+                        title = "双击空格添加句号",
+                        subtitle = "连按两次空格把空格换成句号（默认关闭）；无障碍模式下判定时间更长",
+                        checked = settings.doubleSpacePeriod,
+                    ) { viewModel.setDoubleSpacePeriod(it) }
+                    HorizontalDivider()
                     SpaceLongPressRow(
                         currentMs = viewModel.spaceLongPressMs.collectAsState().value,
                         onSelect = { viewModel.setSpaceLongPressMs(it) },
