@@ -1128,7 +1128,8 @@ class IspeechImeService : InputMethodService() {
     }
 
     /**
-     * 成词写库：复用 [UserDictStore.record]，写入 `wb` 库的 3 列格式（count 从 1 起）。
+     * 成词写库：复用 [UserDictStore.record]，写 `code<TAB>text<TAB>count<TAB>mode` 4 列（count 从 1 起；
+     * 历史 3 列行读入时按 `wb` 模式回退）。
      *
      * 学习开关只在「决定写库」这一刻检查——开关语义是「要不要落盘」，不是「要不要识别」，
      * 在事件入口短路会让切换瞬间的状态不自洽（ADR-0001 §1 失败分支）。
