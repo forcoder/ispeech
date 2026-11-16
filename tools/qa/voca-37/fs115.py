@@ -10,6 +10,12 @@ APK = sys.argv[1] if len(sys.argv) > 1 else ""
 DENS = sys.argv[2] if len(sys.argv) > 2 else "440"
 CAND_DP = 46
 
+def cur_ime():
+    return D.shell("settings get secure default_input_method").strip()
+
+def ours(v):
+    return v.startswith("com.ispeech.ime/")
+
 def ident(name):
     p = f"{D.Q}/_ident_{name}.apk"
     r = subprocess.run([D.ADB, "-s", D.S, "shell", "pm path com.ispeech.ime"], capture_output=True, text=True)
@@ -45,29 +51,55 @@ def ink_extent(png, y0, y1, x0=16, x1=1064, thr=45):
     return dict(bg=bg, top_pad=hits[0] - y0, bot_pad=y1 - 1 - hits[-1], ink_h=hits[-1] - hits[0] + 1,
                 band=y1 - y0, ink_top=hits[0], ink_bot=hits[-1])
 
+def host_ready():
+    """键盘已在位且是本包 → 快速通道；否则用 drive.host_ready（重装/换 density 后 showSoftInput
+    会被丢，必须重启宿主并补点击），最后退化到联系人表单宿主。"""
+    top, bot, h = D.ime_frame()
+    if h and ours(cur_ime()):
+        return dict(ok=True, fast_path=True, top=top, h=h)
+    st = D.host_ready()
+    if not st.get("ok"):
+        st = D.setup_contacts(retries=3)
+        if st.get("ok"):
+            st["host"] = "contacts"
+    return st
+
+
 def run(fs):
     subprocess.run([D.ADB, "-s", D.S, "shell", "wm", "density", DENS], capture_output=True)
     subprocess.run([D.ADB, "-s", D.S, "shell", "settings", "put", "system", "font_scale", fs], capture_output=True)
     time.sleep(1.0)
-    st = D.ensure_host(retries=6)
+    st = host_ready()
     if not st.get("ok"):
         subprocess.run([D.ADB, "-s", D.S, "shell", "ime", "set", D.IME], capture_output=True)
         st = D.setup_contacts(retries=4)
     if not st.get("ok"):
         D.log("RESULT", fs=fs, host="FAIL", **{k: v for k, v in st.items()})
         return
+    D.log("HOST", fs=fs, **{k: v for k, v in st.items()})
     D.clear(22)
     time.sleep(0.7)
+    ime_a = cur_ime()
     top0, bot0, h0 = D.ime_frame()
     p0 = D.shot("f%s_%s_e.png" % (DENS, fs))
     D.tap_keys("zhongguo", gap=0.14)
     time.sleep(1.3)
     top1, bot1, h1 = D.ime_frame()
+    ime_b = cur_ime()
     p1 = D.shot("f%s_%s_c.png" % (DENS, fs))
+    # 身份闸门：dex 校验只证明「装的是本包」，不证明「此刻弹出的键盘是本包」。
+    # 共享 AVD 上别的 run 会在测量中途把 default_input_method 切走，读到的 inset
+    # 是 Gboard/搜狗的，却会写成 delta=0 的 PASS —— 所以测量两端的 IME 都必须是自己。
+    if not (ours(ime_a) and ours(ime_b)):
+        D.log("SKIP", fs=fs, dens=DENS, reason="ime_not_ours_at_measure",
+              before=ime_a, after=ime_b, empty=h0, comp=h1, delta=(h1 - h0) if (h0 and h1) else None)
+        D.shell("input keyevent 111")
+        return
     dpi = int(DENS)
     band = int(round(CAND_DP * dpi / 160))
     d = (h1 - h0) if (h0 and h1) else None
-    D.log("RESULT", fs=fs, dens=DENS, empty=h0, comp=h1, delta=d, band_px=band, top1=top1)
+    D.log("RESULT", fs=fs, dens=DENS, empty=h0, comp=h1, delta=d, band_px=band, top1=top1,
+          ime_before=ime_a, ime_after=ime_b)
     for tag, p in (("empty", p0), ("comp", p1)):
         if top1 is None:
             continue
@@ -80,12 +112,18 @@ def run(fs):
     time.sleep(0.5)
 
 if __name__ == "__main__":
-    r = subprocess.run([D.ADB, "-s", D.S, "install", "-r", "-g", APK], capture_output=True, text=True, timeout=900)
+    # -d 允许降级安装：共享 AVD 上常留着别人更高 versionCode 的包，不带 -d 会 INSTALL_FAILED_VERSION_DOWNGRADE
+    r = subprocess.run([D.ADB, "-s", D.S, "install", "-r", "-d", "-g", APK], capture_output=True, text=True, timeout=900)
     D.log("INSTALL", out=r.stdout.strip()[-60:], rc=r.returncode)
     if not ident("start"):
         sys.exit(2)
     subprocess.run([D.ADB, "-s", D.S, "shell", "ime", "enable", D.IME], capture_output=True)
-    subprocess.run([D.ADB, "-s", D.S, "shell", "ime", "set", D.IME], capture_output=True)
+    # 不替操作器抢占 IME：当前不是本包就直接 SKIP 退出，避免把别人的键盘读成本包结论。
+    # 需要先固定 IME：adb shell ime set com.ispeech.ime/com.ispeech.input.IspeechImeService
+    if not ours(cur_ime()):
+        D.log("SKIP", reason="current_ime_not_ispeech", current=cur_ime(),
+              hint="adb shell ime set " + D.IME)
+        sys.exit(3)
     subprocess.run([D.ADB, "-s", D.S, "shell", "settings", "put", "secure", "autofill_service", "null"], capture_output=True)
     for fs in sys.argv[3].split(",") if len(sys.argv) > 3 else ["1.0", "1.15"]:
         run(fs)

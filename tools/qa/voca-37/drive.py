@@ -45,6 +45,36 @@ def clear(n=25):
     time.sleep(0.3)
 
 
+def host_ready(rounds=4, settle=2.0):
+    """配置变更（wm density / font_scale）或重装 IME 后，showSoftInput 请求常被 WindowManager 丢掉：
+    `mServedInputConnection` 已经绑到 open_search_view_edit_text，但 `type=ime` inset 还是 visible=false。
+    所以每轮把两个 Settings 包都 force-stop 重新起，并对输入框连点几次补 show 请求。
+    实测：复用上一个 density 下残留的 SearchActivity 时，ensure_host 6 次重试全 FAIL。"""
+    shell("settings put secure autofill_service null")
+    last = ""
+    for r in range(rounds):
+        shell("am force-stop com.android.settings")
+        shell("am force-stop com.google.android.settings.intelligence")
+        shell("input keyevent KEYCODE_WAKEUP")
+        shell("wm dismiss-keyguard")
+        shell("ime enable %s" % IME)
+        shell("ime set %s" % IME)
+        shell("am start -W -n com.android.settings/.Settings")
+        time.sleep(settle)
+        for taps in range(1, 5):
+            b = node_bounds("open_search_view_edit_text") or node_bounds("搜索设置")
+            if b:
+                shell("input tap %d %d" % ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2))
+            time.sleep(1.2)
+            top, bot, h = ime_frame()
+            if h:
+                return dict(ok=True, round=r + 1, taps=taps, top=top, h=h)
+            last = re.sub(r"\s+", " ", shell("dumpsys input_method | grep mCurMethodId")).strip()[:70]
+        shell("am force-stop com.ispeech.ime")
+        time.sleep(1.0)
+    return dict(ok=False, rounds=rounds, last=last)
+
+
 def ensure_host(retries=4):
     """拉起 Settings 搜索页宿主输入框，等 IME 可见。"""
     shell("settings put secure autofill_service null")
@@ -147,6 +177,8 @@ if __name__ == "__main__":
         log("FRAME", *ime_frame()[:1], h=ime_frame()[2]) if False else None
         top, bot, h = ime_frame()
         log("FRAME", top=top, h=h)
+    elif cmd == "host":
+        log("HOST_READY", **host_ready())
     elif cmd == "frame":
         top, bot, h = ime_frame()
         log("FRAME", top=top, h=h, ime=ime_frame())
