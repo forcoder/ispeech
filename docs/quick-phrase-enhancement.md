@@ -603,7 +603,8 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 数据落点与识别规则：
 
 - 给远端规则设置快捷字母时**不改远端文件**，而是往用户文件追加一条覆盖条目：
-  `trigger = 快捷字母`、`label / content / kind` 复制远端规则、`mode = prefix`、
+  `trigger = 快捷字母`、`label / content / kind` 复制远端规则、
+  `mode` 按 `QuickTrigger.overrideMode(快捷字母)`：≤4 位 `PREFIX`、>4 位 `EXACT`（ADR-0002 C1-6）、
   `weight = 远端 weight + 1000`（`QuickPhrasesViewModel.REMOTE_OVERRIDE_WEIGHT_BONUS`）。
 - 用户文件里**归一化 trigger 相同**的条目，即视为该远端规则的覆盖条目（`QuickOverride.matches`
   只看 trigger，不再看 `label + content`，ADR-0002 C2-2）；正文以本地为准，同一个 trigger
