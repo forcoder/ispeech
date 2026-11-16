@@ -47,6 +47,11 @@
 - 松手收尾的兜底：`finish()` 后 6s 仍未收到 `onResults` / `onError` 时由 `finishWatchdog` 复位并提示「没听清」——按住-说话没有「再点一次」可用于恢复，不复位就会卡在「收音中」。
 - 取消即 `destroy()`：只 `stopListening()` 会让系统继续占麦克风，导致下一次 `ERROR_RECOGNIZER_BUSY`；因此取消 / 销毁都释放识别器。
 - `EXTRA_CALLING_PACKAGE`：输入法不是宿主，部分 ROM 缺该 extra 会直接回 `ERROR_CLIENT`，故透传 `currentInputEditorInfo.packageName`。
+- 识别服务枚举用**服务方**声明的 action（VOCA-310）：`RecognitionServices.SERVICE_INTERFACE` = `android.speech.RecognitionService`，与发起识别用的 `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` 是两个不同的 action，拿后者枚举命中恒为 0（`AndroidManifest` 的 `<queries>` 也只放行了前者）。判定链路是「枚举 → 按 `BIND_RECOGNITION_SERVICE` 留下真服务（挡住华为 `FakeRecognitionService` 那类绑得上却永不回结果的桩服务）→ 数量为 0 才提示 `voice_service_unavailable`」；`createSpeechRecognizer` 失败不再往外抛，归为 `service_bind_failed`。结论与计数（`services=` / `usable=` / `dropped=` / `requested=` / `first_usable=`）在拦下会话**之前**就进 `AsrTrace`（`ev=bind`），一条命令可查：
+
+  ```bash
+  adb logcat -s AsrTrace | grep -E 'ev=(bind|blocked)'
+  ```
 
 ## 三、复刻义务清单
 
@@ -69,6 +74,7 @@
 | 语音链路真的起来了、麦克风真的被采集 | `docs/v1.5-verify-log.md` ①（真机 Huawei：`phone8.png` 状态条「语音识别中...」、`logcat` 绑定 `com.huawei.vassistant/.voiceui.service.FakeRecognitionService`）与 §5（模拟器：候选条「Listening…」+ 系统麦克风指示） |
 | 状态机能优雅收尾、不卡「聆听中」 | 同上 §5：5 秒后候选条变「Voice recognition failed」、麦克风指示消失、输入法未崩溃 |
 | 中英文案齐全 | `tools/verify/check_crosscut.py` 第 8 节（`voice_*` / `asr_*` 中英键名一致性断言） |
+| 前置判定不再被「action 用错」挡掉（VOCA-310） | `tools/verify/check_crosscut.py` 8.2b（枚举 action、`BIND_RECOGNITION_SERVICE` 过滤、`ev=bind` 计数三向断言，写错即 FAIL）+ `app/src/test/java/com/ispeech/input/RecognitionServicesTest.kt`（真服务判据）。**真机侧口径仍待补**：基线机 `23F0224224000950` 离线，「点语音键能进『识别中』」需设备回线后复测 |
 
 ## 五、已知差异与限制
 

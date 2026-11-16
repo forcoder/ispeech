@@ -46,22 +46,58 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
         get() = SpeechRecognizer.isRecognitionAvailable(context)
 
     /**
-     * 系统里是否存在**真正可用**的语音识别服务。
+     * 探测设备上的识别服务：返回**真服务**（受 [RecognitionServices.BIND_PERMISSION] 保护）数量，
+     * 并打一行 `AsrTrace ev=bind`（候选数 / 真服务数 / 被过滤数 / 会用哪个组件）。
      *
-     * [isAvailable] 只判断「有没有服务能被绑定」，但部分 ROM（实测华为 ALN-AL00）只预置了一个桩
-     * 服务（`com.huawei.vassistant…FakeRecognitionService`）：绑得上、却永远不返回结果，
-     * 表现就是「说完不出字」。系统规范要求真正的识别服务以 [BIND_PERMISSION] 保护自己，
-     * 桩服务没有该保护权限，据此可把它们区分出来。
+     * 两个易错点都在这里，改动时请连带看 `tools/verify/check_crosscut.py` 的 8.2b：
+     * 1. **action 必须用服务方声明的那个**（[RecognitionServices.SERVICE_INTERFACE]）。
+     *    [RecognizerIntent.ACTION_RECOGNIZE_SPEECH] 是**调用方**发起识别用的 action，没有服务拿它
+     *    声明 service filter，用它查永远是 0 条，于是语音键在真机上根本进不到「识别中」——
+     *    且 `AndroidManifest` 的 `<queries>`（按前者声明）也匹配不上（VOCA-310 的原始症状）。
+     * 2. **保护权限过滤不能丢**（[RecognitionServices.usable]）。[isAvailable] 只看「绑得上」，
+     *    部分 ROM（实测华为 ALN-AL00）预置的桩服务 `com.huawei.vassistant…FakeRecognitionService`
+     *    绑得上却永不回结果，表现是「说完不出字」；真服务才持有该保护权限，据此区分。
+     *
+     * 埋点必须在拦下会话**之前**打：只留 `ev=blocked reason=no_usable_service` 分不出「真没服务」
+     * 和「查错了 action」，那正是本单最初的排查困境。
      */
-    fun hasUsableService(): Boolean {
-        val services = runCatching {
+    fun probeUsableServices(asr: AsrSettings): Int {
+        val candidates = queryRecognizers()
+        val usable = RecognitionServices.usable(candidates)
+        AsrTrace.i(
+            null,
+            AsrTrace.EV_BIND,
+            "engine" to asr.engine.name,
+            "services" to candidates.size,
+            "usable" to usable.size,
+            "dropped" to candidates.size - usable.size,
+            "requested" to requestedComponent(asr),
+            "first_usable" to usable.firstOrNull()?.component,
+        )
+        return usable.size
+    }
+
+    /** 设备上声明了 [RecognitionServices.SERVICE_INTERFACE] 的识别服务（查询失败返回空表）。 */
+    private fun queryRecognizers(): List<RecognitionServices.Candidate> =
+        runCatching {
             context.packageManager.queryIntentServices(
-                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH),
+                Intent(RecognitionServices.SERVICE_INTERFACE),
                 0,
             )
-        }.getOrNull().orEmpty()
-        return services.any { it.serviceInfo?.permission == BIND_PERMISSION }
-    }
+        }.getOrNull().orEmpty().mapNotNull { info ->
+            val service = info.serviceInfo ?: return@mapNotNull null
+            RecognitionServices.Candidate("${service.packageName}/${service.name}", service.permission)
+        }
+
+    /** 本次请求的组件：CUSTOM 用配置值，SYSTEM 交给框架选默认服务。 */
+    private fun requestedComponent(asr: AsrSettings): String =
+        if (asr.engine == AsrEngine.CUSTOM) {
+            ComponentName.unflattenFromString(asr.serviceComponent)
+                ?.let { "${it.packageName}/${it.className}" }
+                ?: "invalid_component"
+        } else {
+            SYSTEM_DEFAULT
+        }
 
     private var onPartial: ((String) -> Unit)? = null
     private var onFinal: ((String) -> Unit)? = null
@@ -109,14 +145,30 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     private fun startListening(asr: AsrSettings) {
         recognizer?.destroy()
         val rec = createRecognizer(asr)
+        if (rec == null) {
+            // 服务在（探测到了真服务）但识别器建不起来 = 绑定失败。归类清楚，
+            // 不静默、也不让整个输入法崩在这一按上（VOCA-310 验收口径 1）。
+            AsrTrace.w(null, AsrTrace.EV_BLOCKED, "reason" to "service_bind_failed", "engine" to asr.engine.name)
+            isListening = false
+            recognizer = null
+            // 回调在 post 里读：期间用户若已取消（[stop] 清空回调），这里就不该再弹提示
+            post { onError?.invoke(context.getString(R.string.voice_service_unavailable)) }
+            return
+        }
         rec.setRecognitionListener(this)
         recognizer = rec
         isListening = true
         rec.startListening(buildIntent(asr))
     }
 
-    /** 按配置创建识别器：CUSTOM 引擎解析组件成功时用指定服务，否则回退系统默认。 */
-    private fun createRecognizer(asr: AsrSettings): SpeechRecognizer {
+    /**
+     * 按配置创建识别器：CUSTOM 引擎解析组件成功时用指定服务，否则回退系统默认。
+     *
+     * 两条路都失败时返回 `null`（**不抛**）——[SpeechRecognizer.createSpeechRecognizer] 在无默认
+     * 识别服务 / 无权限时会抛 `RuntimeException`，让它冒出去就是输入法崩在「点语音键」上，
+     * 且日志里没有任何痕迹。调用方据此给「服务存在但绑定失败」的明确归类。
+     */
+    private fun createRecognizer(asr: AsrSettings): SpeechRecognizer? {
         if (asr.engine == AsrEngine.CUSTOM) {
             val component = ComponentName.unflattenFromString(asr.serviceComponent)
             if (component != null) {
@@ -125,7 +177,7 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
                     ?.let { return it }
             }
         }
-        return SpeechRecognizer.createSpeechRecognizer(context)
+        return runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
     }
 
     /** 组装识别 intent：语言、部分结果、离线优先均来自配置。 */
@@ -296,10 +348,52 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
     }
 
     private companion object {
-        /** 真正的 RecognitionService 必须以该权限自保护（[SpeechRecognizer] 依赖它区分桩服务）。 */
-        const val BIND_PERMISSION = "android.permission.BIND_RECOGNITION_SERVICE"
+        /** SYSTEM 引擎的埋点取值：默认识别服务由框架选定，我们不指定组件。 */
+        const val SYSTEM_DEFAULT = "system_default"
 
         /** 松手后等待识别结果的上限（毫秒）：超时复位，避免语音键卡在「收音中」。 */
         const val FINISH_TIMEOUT_MS = 6000L
     }
+}
+
+/**
+ * 设备上识别服务的判定规则（与 `PackageManager` 查询解耦，因此可在 JVM 单测里跑）。
+ *
+ * 立项目的（VOCA-310）：枚举识别服务时用错了 action——拿**调用方**发起识别用的
+ * `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` 去查**服务方**声明的 filter，命中集合天然为空，
+ * 真机上语音键于是永远被判「无可用服务」，连「识别中」都进不到。查询本身只能在真机验，
+ * 但「用哪个 action、按哪个权限筛」这两条判定是纯字符串规则，抽出来才能在单测与静态门禁里守住。
+ */
+internal object RecognitionServices {
+
+    /**
+     * 识别服务**自己**在 manifest 里声明的 action
+     * （即 `android.speech.RecognitionService.SERVICE_INTERFACE`，与 `AndroidManifest` 的
+     * `<queries>` 声明同一个值）。
+     *
+     * 它和调用方发起识别用的 `RecognizerIntent.ACTION_RECOGNIZE_SPEECH`
+     * （`android.speech.action.RECOGNIZE_SPEECH`）不是一回事：枚举服务只能用前者，
+     * 发起识别用后者。
+     */
+    const val SERVICE_INTERFACE = "android.speech.RecognitionService"
+
+    /** 真识别服务必须要求调用方持有的保护权限（`android.Manifest.permission.BIND_RECOGNITION_SERVICE`）。 */
+    const val BIND_PERMISSION = "android.permission.BIND_RECOGNITION_SERVICE"
+
+    /**
+     * `queryIntentServices` 结果里与判定有关的两列。
+     *
+     * @param component `包名/类名`
+     * @param permission 该 service 声明的 `android:permission`，未声明为 `null`
+     */
+    data class Candidate(val component: String, val permission: String?)
+
+    /**
+     * 真服务清单：只有以 [BIND_PERMISSION] 自保护的服务才可能正常回结果。
+     *
+     * 丢了这一层，华为 ROM 的桩服务 `com.huawei.vassistant…FakeRecognitionService`
+     * （绑得上、永不返回结果）就会被当成可用服务放进来，退化成「说完不出字」。
+     */
+    fun usable(candidates: List<Candidate>): List<Candidate> =
+        candidates.filter { it.permission == BIND_PERMISSION }
 }

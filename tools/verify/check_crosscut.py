@@ -17,7 +17,10 @@
   6. 短语使用记录 PhraseUsageStore：是否只从 AppContainer 单例获取、面板是否零 IO
   7. 口径一致性：版本号常量 vs build.gradle、注释 vs 枚举、校验脚本 vs 源码
   8. 语音输入（VOICE / ASR）全链路：KeyDef -> 工具栏 -> 服务状态机 -> VoiceInputController
-     -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
+     -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请；
+     含 8.2b「识别服务枚举」专项（VOCA-310）：枚举必须用服务方声明的
+     `android.speech.RecognitionService`（不是调用方的 RECOGNIZE_SPEECH）、必须保留
+     BIND_RECOGNITION_SERVICE 真服务过滤、判定计数必须进 AsrTrace
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -81,6 +84,10 @@ INPUT_MODE = JAVA / "input" / "InputMode.kt"
 INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
+# 识别服务**自己**声明的 action（服务方），与调用方发起识别用的
+# `android.speech.action.RECOGNIZE_SPEECH` 不是一回事 —— 拿后者枚举服务，命中永远是 0 条（VOCA-310）。
+RECOGNITION_SERVICE_ACTION = "android.speech.RecognitionService"
+BIND_RECOGNITION_PERMISSION = "android.permission.BIND_RECOGNITION_SERVICE"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
 ASR_SETTINGS = JAVA / "settings" / "store" / "AsrSettings.kt"
 ASR_SCREEN = JAVA / "settings" / "asr" / "AsrSettingsScreen.kt"
@@ -893,6 +900,73 @@ def check_voice_chain() -> None:
         not missing,
         "VoiceInputController 覆盖系统识别器 / 忙重试 / 释放麦克风 / 宿主包名 / 自定义组件",
         f"{rel(VOICE_CONTROLLER)} 缺少关键实现：{missing}",
+    )
+
+    # 8.2b 识别服务枚举：action 用对 + 真服务过滤留住 + 判定结果有埋点（VOCA-310）
+    #      这类错误的代价不对称：不崩、不报错，只是每次静默返回 0 条，语音键于是永远进不到
+    #      「识别中」。所以正反两个方向都查——枚举处不许出现调用方 action，
+    #      发起识别处也不许被「顺手改」成服务方 action。
+    query_region = strip_comments(function_region(controller, r"private fun queryRecognizers\("))
+    probe_region = strip_comments(function_region(controller, r"fun probeUsableServices\("))
+    intent_region = strip_comments(function_region(controller, r"private fun buildIntent\("))
+    usable_region = strip_comments(function_region(controller, r"fun usable\("))
+    svc = strip_comments(service)
+
+    m_action = re.search(r'const val SERVICE_INTERFACE\s*=\s*"([^"]+)"', strip_comments(controller))
+    action_value = m_action.group(1) if m_action else ""
+    check(
+        action_value == RECOGNITION_SERVICE_ACTION,
+        f"识别服务 action 常量取值正确（SERVICE_INTERFACE={action_value or '<缺失>'}）",
+        f"{rel(VOICE_CONTROLLER)} 的 SERVICE_INTERFACE 取值是 {action_value!r}，应为 "
+        f"{RECOGNITION_SERVICE_ACTION!r}（VOCA-310：写成调用方的 RECOGNIZE_SPEECH 就查不到任何服务）",
+    )
+
+    m_queries = re.search(r"<queries>.*?</queries>", manifest, re.S)
+    declared = set(re.findall(r'<action\s+android:name="([^"]+)"', m_queries.group(0))) if m_queries else set()
+    check(
+        bool(action_value) and action_value in declared,
+        "枚举用的 action 与 Manifest <queries> 声明同一个值（targetSdk 34 包可见性）",
+        f"SERVICE_INTERFACE={action_value!r} 不在 {rel(MANIFEST)} 的 <queries> action 名单 {sorted(declared)} 里："
+        f"包可见性没放行，查询照样拿不到服务",
+    )
+    check(
+        "queryIntentServices" in query_region and "RecognitionServices.SERVICE_INTERFACE" in query_region,
+        "枚举识别服务走服务方 action（RecognitionServices.SERVICE_INTERFACE）",
+        f"{rel(VOICE_CONTROLLER)} 的 queryIntentServices 没用 RecognitionServices.SERVICE_INTERFACE "
+        f"（VOCA-310 回归：命中集合恒为 0，前置判定把有服务的机器也判成「无可用服务」）",
+    )
+    check(
+        bool(query_region) and "ACTION_RECOGNIZE_SPEECH" not in query_region,
+        "枚举处没有再出现调用方 action",
+        f"{rel(VOICE_CONTROLLER)} queryRecognizers() 里仍拿 RecognizerIntent.ACTION_RECOGNIZE_SPEECH 枚举服务"
+        f"（VOCA-310 原缺陷）",
+    )
+    check(
+        "RecognizerIntent.ACTION_RECOGNIZE_SPEECH" in intent_region,
+        "发起识别仍用调用方 action（buildIntent 没被顺手改掉）",
+        f"{rel(VOICE_CONTROLLER)} buildIntent() 不再用 RecognizerIntent.ACTION_RECOGNIZE_SPEECH："
+        f"两个 action 又被混为一谈",
+    )
+    check(
+        "RecognitionServices.usable(candidates)" in probe_region,
+        "前置判定保留真服务过滤（BIND_RECOGNITION_SERVICE），桩服务不会被重新放进来",
+        f"{rel(VOICE_CONTROLLER)} probeUsableServices() 未调用 RecognitionServices.usable()："
+        f"丢掉 BIND_PERMISSION 过滤，华为 FakeRecognitionService 会以「说完不出字」复发",
+    )
+    check(
+        bool(usable_region) and "BIND_PERMISSION" in usable_region,
+        "真服务判据 = 服务声明了 BIND_RECOGNITION_SERVICE",
+        f"{rel(VOICE_CONTROLLER)} RecognitionServices.usable() 不再按 BIND_PERMISSION 过滤",
+    )
+    check(
+        all(t in probe_region for t in ("AsrTrace.EV_BIND", '"services" to', '"usable" to', '"dropped" to')),
+        "探测结果进 AsrTrace：候选数 / 真服务数 / 被过滤数一行可见",
+        f"{rel(VOICE_CONTROLLER)} probeUsableServices() 缺 ev=bind 计数埋点（VOCA-310 验收口径 3）",
+    )
+    check(
+        "controller.probeUsableServices(asr) == 0" in svc,
+        "语音键前置判定读探测结果（拦下会话前已打点，blocked 与 bind 同一次查询）",
+        f"{rel(SERVICE)} toggleVoiceInput() 未走 controller.probeUsableServices(asr)：判定与埋点会脱节",
     )
 
     # 8.3 服务接线：创建 / 销毁 / 语音态上屏与取消

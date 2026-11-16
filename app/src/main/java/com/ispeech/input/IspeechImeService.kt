@@ -1478,7 +1478,15 @@ class IspeechImeService : InputMethodService() {
         // 有的 ROM 只预置了桩识别服务（华为 ALN-AL00 的 FakeRecognitionService）：
         // isRecognitionAvailable() 为 true 却永远不出结果。这里提前拦截并给出可操作指引，
         // 免得用户反复点麦克风、以为是自己的操作问题。
-        if (!controller.hasUsableService()) {
+        // 探测自带 `AsrTrace ev=bind`（候选数 / 真服务数 / 会用哪个组件）：拦下会话时也要能从
+        // 日志看出「是真没服务，还是查询写错了 action」（VOCA-310）。
+        if (controller.probeUsableServices(asr) == 0) {
+            AsrTrace.w(
+                null,
+                AsrTrace.EV_BLOCKED,
+                "reason" to "no_usable_service",
+                "engine" to asr.engine.name,
+            )
             statusText = getString(R.string.voice_service_unavailable)
             codeOverride = null
             candidates = emptyList()
