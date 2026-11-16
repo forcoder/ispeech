@@ -81,6 +81,13 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 manifest 里 `MainActivity` 声明 `singleTask`（否则复用实例时 `onNewIntent` 不发、
 授权框弹不出来，用户被丢在设置页）、会话结束 `finish()` 回原输入框。
 
+架构师评审（ADR-001 决策 3 / 4 / 6）后又锁了四条：两条语音链路**各自**都必须接
+`showMicPermissionPrompt()`（不再用「调用点数 == 3」这种实现计数断言，将来接第三条链路
+不会误伤）；`launchMicIntent` 必须 `catch (Throwable)` 并记含异常类型的 `mic_auth_jump_failed`
+——跳转跑在输入法进程的点击回调里，漏一个 `SecurityException` 就是一次键盘消失；跳转目标走
+`jumpPlan` + `firstOrNull`，一次点击最多成功跳一次；按钮的文案与可用性只有 `CandidateView.update()`
+一条写入通道（公开 setter 一出现即 `FAIL`），且 `onWindowShown` 必须带 S8 那句一次性指引。
+
 ```bash
 python3 tools/verify/check_crosscut.py
 ```

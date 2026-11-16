@@ -88,16 +88,23 @@
 | 场景 | 行为 | 代码位置 |
 | --- | --- | --- |
 | 未授权（系统还会弹框） | 候选条显示合并提示文案 + 右侧「去授权」，**不跳页**；用户点按钮才代申请 | `IspeechImeService.showMicPermissionPrompt` / `openMicAuthorization` |
-| 永久拒绝（不再弹框） | 同一提示补「系统设置 → 应用 → 智语 iSpeech → 权限」路径，按钮转「去设置」，跳本应用应用信息页 | `openAppPermissionSettings` + `SettingsStore.micPermanentlyDeniedFlow` |
+| 永久拒绝（不再弹框） | 同一提示补「系统设置 → 应用 → 智语 iSpeech → 权限」路径，按钮转「去设置」，跳本应用应用信息页；该页起不来才回落设置页代申请桥 | `MicGrantAction.jumpPlan` + `launchMicIntent` + `SettingsStore.micPermanentlyDeniedFlow` |
 | 授权结束（允许 / 拒绝 / 返回） | `MainActivity.finish()` 回到原输入框，不停在设置页；输入法重新显示时按实时权限清提示 | `MainActivity.finishMicSession` / `IspeechImeService.onWindowShown` |
+| 授权成功后回到键盘（S8） | 候选条给一次性指引「麦克风权限已开启，点击麦克风开始说话」，任何按键即清；ADR-001 决策 4 不承诺宿主重显键盘，这一句是用户回来后的下一步 | `onWindowShown` + `voice_permission_granted` |
 | 提示期间用户打字 / 切面板 / 上屏 | 提示与按钮立即消失（提示文案与 `statusText` 同生命周期，无需额外清理钩子） | `CandidateView.update` |
-| 跳转失败（无应用信息页的 ROM） | 提示改为「打不开授权页面…」并保留按钮可再点，同时打 `mic_auth_jump_failed` 日志 | `showMicJumpFailure` |
+| 跳转失败（ROM 拦截 / 无应用信息页） | 提示改为「打不开授权页面…」并保留按钮可再点，同时打一条含异常类型、带栈的 `mic_auth_jump_failed` | `launchMicIntent` 的 `catch (Throwable)` → `showMicJumpFailure` |
+
+跳转的三条不变量：① **只由用户点击发起**，语音键本身永不改前台（AC-1）；② 一次点击**最多成功跳一次**
+——按 `jumpPlan` 逐项尝试、首个成功即止，且 in-flight 期间按钮转灰，连点不会叠出两个授权框（AC-8）；
+③ 跳转包在 `catch (Throwable)` 里——这些调用跑在**输入法进程**的点击回调上，未捕获的 `SecurityException` /
+`IllegalArgumentException`（EMUI 后台弹窗拦截）就是一次 IME 崩溃、键盘整个消失，正是本 issue 要修的症状。
+按钮的文案与可用性只从 `CandidateView.update()` 一个入口渲染，视图侧不另开状态写入通道。
 
 「永久拒绝」标志只是**文案提示**，不作为能否授权的门槛：能不能录音每次都以
 `checkSelfPermission` 实时结果为准，标志写错也不会挡住已经授权好的用户。
 
 未覆盖（另议，不在本 issue 范围）：键盘内设置面板的常驻权限行（E2）、设置页语音识别处的
-「开启麦克风」入口（E3）、授权成功后的一次性 toast（S8）。
+「开启麦克风」入口（E3）。
 
 ## 六、中文输入法（拼音 / 五笔）
 

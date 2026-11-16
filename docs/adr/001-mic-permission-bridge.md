@@ -1,7 +1,7 @@
 # ADR-001：IME → 设置页 麦克风权限桥契约与永久拒绝状态存放
 
-- 状态：已采纳，前端已落地（分支 `agent/agent/voca-166-3ea682beec58`，评审见 VOCA-166）
-- 日期：2026-11-14
+- 状态：已采纳并落地（PR forcoder/ispeech#13，分支 `fix/voca-166-mic-permission-entry`，base `main` fa57a07）
+- 日期：2026-11-14（2026-11-16 增补决策 6 与决策 2/3 的实现期修正）
 - 关联：VOCA-166（语音输入点按即跳页）、`docs/requirements/VOCA-166-acceptance.md` AC-1…AC-10
 
 ## 背景
@@ -30,6 +30,10 @@ VOCA-166 定性：未授予 `RECORD_AUDIO` 时，语音键 `ACTION_DOWN`（用�
   `ispeech_settings` 单文件）天然共享，无跨进程一致性风险。
 - 现有文案：`strings.xml:146 voice_need_permission = 请先授予麦克风权限` 已存在但跳页后被盖掉。
 - 现无 `ACTION_APPLICATION_DETAILS_SETTINGS` 相关跳转（全仓库 0 命中）。
+- **行号口径（2026-11-16 修正）**：上文 `:1868 / :1570-1573 / :1683-1686 / :1777-1780` 是分诊当时的
+  行号，`main` 已三次漂移；FunASR 的两个语音入口（`toggleFunAsrVoice` / `startFunAsrListening`）
+  已从 `IspeechImeService.kt` 移除，未授权分支现为**两处**：`toggleVoiceInput`（系统引擎）与
+  `toggleVoskVoice`（离线引擎）。**本 ADR 与其门禁一律按函数名定位，不按行号**（行号只作历史线索）。
 
 ## 备选方案
 
@@ -73,6 +77,30 @@ VOCA-166 定性：未授予 `RECORD_AUDIO` 时，语音键 `ACTION_DOWN`（用�
   ① `checkSelfPermission==GRANTED` → 走正常语音，且顺带清 flag（迟滞自愈）；② 未授予 → 读 flag 只影响
   文案与跳转目标，绝不影响是否允许请求。
 
+### 决策 2 补充（2026-11-16，实现期核对 API 后修正前提）
+
+决策 2 的写入前提「回调已发生在一次真实请求被答复之后」**不成立**：授权框被返回键取消（用户没有
+答复）同样会走这个回调。实读依赖库 `androidx.activity:activity:1.8.2`，
+`ActivityResultContracts$RequestPermission.parseResult` 反编译结果：
+
+```java
+if (intent == null || resultCode != Activity.RESULT_OK) return false;   // 取消 / 无数据 → false
+// 仅当 resultCode==RESULT_OK 时才读 PERMISSION_GRANT_RESULTS 判定 granted
+```
+
+即「显式拒绝」与「返回键取消」对本契约**都返回 `false`**，而取消时
+`shouldShowRequestPermissionRationale` 仍为 `false`（系统没记下一次拒绝）→ 按原规则会误标永久拒绝。
+
+- **裁定：不改契约，只加判别用例。** flag 仍是提示不是门禁（决策 2 末条），误标的后果是用户被多送到
+  「系统设置 → 应用信息 → 权限」一步 —— 该页对已拒绝的 runtime 权限**提供可改的开关**，所以是
+  「多一步」而不是死胡同，且下次授予即自愈。为消掉这个误标而引入 resultCode 定制契约有反向代价：
+  若某 ROM 的「拒绝」也回 `RESULT_CANCELED`，flag 永远写不上去，永久拒绝用户会反复点「去授权」却弹不出
+  系统框 —— 那才是 AC-6 死胡同。**误报优于漏报。**
+- **要求测试补 TC-E（判别用例，本批必跑）**：进授权框后**按返回键**退出（不作答）→ 回键盘再点
+  「去授权」，期望仍是「去授权」并能再次拉起系统框；实测若落进「去设置」，按预案加
+  `MicPermissionContract`（返回 `granted` + `canceled`，`canceled` 不写 flag），不改动本 ADR 其余决策。
+- ROM 差异同样落在这一格：EMUI 上 rationale 语义与 AOSP 不一致 → 按决策 3 只影响文案精度。
+
 ### 决策 3：回退与降级（失败模式清单）
 
 - `ACTION_APPLICATION_DETAILS_SETTINGS` 解析/启动失败 → `try/catch` 兜底回落到决策 1.1 的
@@ -83,6 +111,13 @@ VOCA-166 定性：未授予 `RECORD_AUDIO` 时，语音键 `ACTION_DOWN`（用�
   误判为永久。后果只影响「去授权」文案与跳转目标（走系统设置 vs 系统框），**不改变权限门禁**，
   因此最多是文案不精确，绝不引入闪退/键盘消失。回归需在报告人真机复跑（对齐 BA 风险 #4）。
 - 并发写：单进程 + 单 DataStore 实例，无跨进程竞态；`setMicPermanentlyDenied` 用现有 `editSettings`。
+- **用户点击发起的跳转必须按 Exception 级包裹（2026-11-16 加，PR #13 待补）**：`openMicAuthorization()`
+  的两次 `startActivity` 目前只 `catch (ActivityNotFoundException)`。跳转目标是跨进程系统组件，
+  ROM（EMUI「后台弹出界面」拦截等）可抛 `SecurityException` / `IllegalArgumentException`，而这些调用发生在
+  **输入法进程**的点击回调里 —— 未捕获即 IME 崩溃、键盘整个消失，正是本 issue 的 P1 症状本身（AC-8
+  「不新增 FATAL EXCEPTION」）。契约要求：两处跳转 `catch (t: Throwable)` → 记一条
+  `mic_auth_jump_failed`（含异常类型，不吞栈）→ 走 `showMicJumpFailure` 的可读文案并保留按钮可重试。
+  只包跳转，不包识别链路（那条已有自己的错误边界）。
 
 ## 代价
 
@@ -110,6 +145,12 @@ VOCA-166 定性：未授予 `RECORD_AUDIO` 时，语音键 `ACTION_DOWN`（用�
 - 「返回后键盘是否自动重显」由宿主/平台决定（`mInputShown` 非 IME 独占），不承诺自动重显；
   UX S8 已带「点一下输入框即可继续」兜底话术，验收按 S8 判定，不把平台行为当本契约义务。
 - 区分回场的**用户可见期望**（UX 规格）与**回场的技术动作**（本 ADR 的 `finish()`）；视觉/文案归 UX/UI。
+- **S8 是本决策的契约依赖，不是可选优化（2026-11-16 明确）**：本 ADR 不承诺 `mInputShown=true`，
+  用户回来时键盘可能不自动重显——「回来该干什么」完全靠 S8 那句一次性提示兜着。把它移出本批，等于
+  把决策 4 的「不承诺平台行为」变成「用户回到输入框却没有任何下一步指引」，正是 BA 风险 #5 的
+  「修完比现状更像故障」。落地口径二选一：① S8 随本批补一条一次性状态文本（`onWindowShown` 已知
+  「权限刚开好 + 提示刚撤」这个时机，约 5 行）；② 由洞察BA/UX 明确签字「本批不承诺 S8」，
+  并在真机回归证明宿主必然重显键盘后才有资格推迟。实现方不得自行降级。
 
 ### 决策 5：采纳 UX §10 两项待确认的推荐
 
@@ -121,21 +162,51 @@ VOCA-166 定性：未授予 `RECORD_AUDIO` 时，语音键 `ACTION_DOWN`（用�
   因此 `micPermanentlyDenied` 降级为**后补精化（R2）**，不再是 AC-5 的阻塞前置：
   决策 2 仍成立（做就做对），但不能成为前端开工或单测的硬依赖。UX 已明示「不阻塞」。
 
-### 决策 4 实现期补充（前端落地时发现，待架构师确认）
+### 决策 6：`MainActivity` 的 launchMode 裁定为 `singleTask`（决策 4 的实现前提，2026-11-16）
 
-真机/模拟器复现出契约里没写的一个前提：**`MainActivity` 必须是 `singleTask`**，否则决策 4 的回场
-链路在常见路径上根本不成立。
+前端在 PR #13 落地时发现决策 4 缺一个前提并已自行改掉，请架构师确认。裁定：**采纳，作为决策 4 的
+组成部分入库。**
 
-- 现象：用户点过齿轮（或任何一次进过设置页）后，`MainActivity` 实例仍存活在应用任务里。输入法
-  以 `FLAG_ACTIVITY_NEW_TASK` 再次拉起时，系统只做 `TO_FRONT`（`ActivityTaskManager` 返回
-  `result code=2`），既不走 `onCreate` 也不走 `onNewIntent`（标准 launchMode 下 `onNewIntent` 只在
-  singleTop/singleTask 派发）。结果：授权框不弹，用户被停在自己上次浏览的设置页 —— AC-4/AC-6 双失败。
-- 落地：`AndroidManifest.xml` 给 `MainActivity` 加 `android:launchMode="singleTask"`；会话识别抽成
-  `beginMicSession(intent)`，`onCreate` 与 `onNewIntent` 都调用；系统框改为在 `onResume` 里由
-  `micRequestPending` 一拍后发出（`launch()` 需 STARTED 之后），`onResume` 同时覆盖「用户在本页
-  手工开完权限再返回」的第二结束条件。
-- 副作用（可接受，需知会）：从桌面图标再次进入应用会复用同一实例并保留导航栈，而不是每次回到
-  设置首页。这是 `singleTask` 的既定语义，不是本 issue 新加的行为开关。
-- 门禁：`tools/verify/check_crosscut.py` 8.4 增加两条断言 —— manifest 里 `MainActivity` 声明
-  `singleTask`、代码里 `beginMicSession` + `onNewIntent` 同时存在，防止后续改动把桥静默改回标准
-  launchMode。
+- **问题**：用户只要进过一次设置页，`MainActivity` 实例就存活在应用任务里。输入法（非 Activity 上下文）
+  以 `FLAG_ACTIVITY_NEW_TASK` 再次拉起时，标准 launchMode 下系统只做 `TO_FRONT`（前端实测
+  `ActivityTaskManager result code=2`），`onCreate` 与 `onNewIntent` 都不派发 → 授权框根本不弹，用户被
+  丢在自己上次浏览的设置页。决策 4 的回场与 AC-4/AC-6 同时失效，且这条路径在真机上是**常态**（齿轮
+  入口与授权入口共用同一个 Activity）。
+- **备选**：
+
+| 方案 | 描述 | 评估 |
+|---|---|---|
+| ① 不改 launchMode，靠 `onResume` 现场判定 | 复用实例起来后自己判断该不该弹框 | 不成立：没有 intent，分不清「IME 授权会话」与「用户自己回来继续浏览设置页」（`REQUEST_MIC_EXTRA` 到不了），要么误弹框打断浏览，要么静默不弹 |
+| ② `singleTop` | 只在实例已位于**栈顶**时派发 `onNewIntent` | 今天可用（全应用只有一个 Activity，它必然在栈顶），但桥的生效条件变成「恰好没人压在它上面」，是**静默失效**型的脆弱前提——正是本次缺陷的形态。不作首选 |
+| ③ 新增 `MicGrantActivity` 桥接页（trampoline，`excludeFromRecents` + 独立 task） | 把授权会话从主设置页剥出来，`MainActivity` launchMode 一字不动 | 契约最干净，但要为这一个 bug 给应用加**第二个 Activity** 与第二套生命周期/回场逻辑；`noHistory` 类配置还会销毁 `ActivityResult` 回调宿主，得额外绕。超出本 issue 必要范围 |
+| ④ `singleTask`（采纳） | 设置页恒为任务根，intent 必达 `onNewIntent`，其上的 Activity 会被清掉 | 见下 |
+
+- **决策**：`AndroidManifest.xml` 给 `MainActivity` 声明 `android:launchMode="singleTask"`；会话识别抽成
+  `beginMicSession(intent)`，`onCreate` 与 `onNewIntent` 都调用；系统框在 `onResume` 由
+  `micRequestPending` 发一拍（`launch()` 需 STARTED 之后），`onResume` 同时承担决策 4 的第 2 结束条件
+  （用户在本页手工开完权限返回）。
+- **为什么影响面可接受（架构师自查事实，非推测）**：`singleTask` 的额外语义只有两条——「intent 到达时清掉
+  压在它上面的 Activity」和「恒为任务根」。本应用 `AndroidManifest.xml` **只声明 1 个 `<activity>`**
+  （已核 `git show pr/13:app/src/main/AndroidManifest.xml`，`<activity>` 计数 = 1），也没有
+  `taskAffinity` / `android:process` / deep link / intent 驱动的 start destination
+  （`IspeechNavGraph.kt:45 startDestination = IspeechRoutes.HOME`，写死、不读 intent），所以「清上面」无可清；
+  IME 侧拉起它的只有两处（`IspeechImeService.kt` 的麦克风桥与配置面板「更多设置」），都带 `NEW_TASK`。
+  桌面图标入口按 launcher 的 `NEW_TASK|RESET_TASK_IF_NEEDED` 语义，标准模式下本来就回到既有任务，
+  因此预期不是新增差异 —— 这条是行为推断，未实测，列入下方回归确认项。
+- **代价**：① 从桌面图标再进应用复用同一实例并保留导航栈（`singleTask` 既定语义；按 launcher 的
+  `RESET_TASK_IF_NEEDED` 推断改动前也是回到既有任务，故预期无差异，但未实测，见下方回归项 (b)）；
+  ② 决策 4 的 `finish()` 现在会连带结束整个应用任务——这正是「回到输入框」需要的，但要写明：
+  **任何未来新增的 Activity 压在设置页之上时，一次麦克风授权会话会把它清掉**；③ 该属性被
+  `tools/verify/check_crosscut.py` 8.4 锁成门禁，后续换桥实现必须同步改门禁，不能只改代码。
+- **回滚 / 复议条件**：出现下列任一情形，本决策必须重新评审，不默认延续——
+  (a) 应用增加第二个 Activity（尤其需要多实例或压在设置页之上）；(b) 需要 deep link / 通知直达设置子页
+  （`singleTask` 的清栈语义会丢用户上下文）；(c) 真机回归证明 EMUI 对 `singleTask` + `NEW_TASK`
+  的派发仍不等于 `onNewIntent`（此时改走方案 ③，而不是再叠 flag）。回滚方式：撤 `android:launchMode`
+  一行 + 撤门禁一条断言，代码侧 `onNewIntent`/`beginMicSession` 可保留（标准模式下不会被派发，无副作用）。
+- **未由架构师独立复现的部分（交测试工程师，两条都要跑）**：我这轮只做了代码与 manifest 面的核对
+  （单 Activity、两处拉起、无 intent 驱动导航）；`TO_FRONT` 不派发 intent 是前端 TC-B 预热情形的实测结论。
+  - (a) 复用实例桥：齿轮进设置页 → HOME → 键盘点语音 → 「去授权」，期望
+    `dumpsys window | grep mCurrentFocus` 落 `GrantPermissionsActivity`；`qa166_test` 与真机 ALN-AL10
+    （EMUI）各一次 —— 后者是唯一能证伪「EMUI 对 `singleTask`+`NEW_TASK` 的派发」的样本。
+  - (b) 桌面入口对照：改动前后各从桌面图标进一次应用，看是否都停在用户上次浏览的设置子页；
+    若行为变了（改前回首页），说明推断不成立，本决策代价①需重写。
