@@ -145,6 +145,21 @@ class IspeechImeService : InputMethodService() {
     /** 当前展示的辅助面板 */
     private enum class Panel { NONE, QUICK_PHRASE, CLIPBOARD, SWITCH_IME, SETTINGS }
 
+    /**
+     * 已启用输入法的取数结果。
+     *
+     * [hiddenCount] 是系统启用条数比可见清单多出来的条数（包可见性裁剪所致），
+     * 只用于「是否可见提示」，不参与取数。
+     */
+    private data class EnabledImeList(
+        val items: List<InputMethodPanel.InputMethodItem>,
+        val hiddenCount: Int
+    ) {
+        companion object {
+            val EMPTY = EnabledImeList(emptyList(), 0)
+        }
+    }
+
     private var engine: CompositeEngine? = null
 
     /** 键盘设置（高度、候选数、标点、联想、学习…），随 DataStore 实时更新 */
@@ -1387,9 +1402,9 @@ class IspeechImeService : InputMethodService() {
     }
 
     /** 系统里已启用的输入法（当前项排最前，其余按名称排序） */
-    private fun enabledInputMethods(): List<InputMethodPanel.InputMethodItem> {
+    private fun enabledInputMethods(): EnabledImeList {
         val manager = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            ?: return emptyList()
+            ?: return EnabledImeList.EMPTY
         val current = runCatching {
             Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
         }.getOrNull()
@@ -1403,17 +1418,25 @@ class IspeechImeService : InputMethodService() {
         items.sortWith(
             compareByDescending<InputMethodPanel.InputMethodItem> { it.current }.thenBy { it.label }
         )
-        return items
+        val enabled = ImeListVisibility.enabledCount(
+            runCatching {
+                Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_INPUT_METHODS)
+            }.getOrNull()
+        )
+        // 空清单走「读不到输入法列表」文案，不叠加提示；少列只在有内容可展示时才需要可见化
+        val hidden = if (items.isEmpty()) 0 else ImeListVisibility.hiddenCount(enabled, items.size)
+        if (hidden > 0) Log.w(TAG, "ime list pruned: visible=${items.size} enabled=$enabled")
+        return EnabledImeList(items, hidden)
     }
 
     /** 刷新切换面板：输入法列表是本地数据，主线程查询即可，不走 IO */
     private fun refreshInputMethods() {
-        val items = runCatching { enabledInputMethods() }.getOrElse { emptyList() }
-        inputMethodPanel?.submit(items)
+        val inventory = runCatching { enabledInputMethods() }.getOrElse { EnabledImeList.EMPTY }
+        inputMethodPanel?.submit(inventory.items, inventory.hiddenCount)
         statusText = when {
-            items.isEmpty() -> "读不到输入法列表"
-            items.size == 1 -> "没有其他输入法"
-            else -> "输入法 ${items.size} 个"
+            inventory.items.isEmpty() -> "读不到输入法列表"
+            inventory.items.size == 1 -> "没有其他输入法"
+            else -> "输入法 ${inventory.items.size} 个"
         }
         renderCandidateView()
     }

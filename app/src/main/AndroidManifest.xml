@@ -12,6 +12,11 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <!-- InputMethod —— 让「已启用的其他输入法」出现在 enabledInputMethodList，
+             否则切换输入法面板会漏列（ADR-0003 / VOCA-167 缺陷 D，勿删）。 -->
+        <intent>
+            <action android:name="android.view.InputMethod" />
+        </intent>
     </queries>
 
     <application

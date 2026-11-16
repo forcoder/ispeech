@@ -21,7 +21,7 @@ import com.ispeech.R
  * 输入法切换面板：列出系统里已启用的输入法，点一下就切过去。
  *
  * 结构：
- * 1. 标题行：[‹ 返回] 「切换输入法」 [共 N 个]
+ * 1. 标题行：[‹ 返回] 「切换输入法」 [共 N 个]（清单被框架裁掉时再补「系统另有 M 项未显示」，点它走系统选择器）
  * 2. 列表：ScrollView（最高 240dp），每行 [输入法名 | 「当前」标签]，点行即切换
  * 3. 操作行：[系统选择器]（走系统自带 picker，作为兜底）
  * 4. 空状态：「没有其他输入法」+ 到系统设置启用的提示
@@ -58,8 +58,12 @@ class InputMethodPanel @JvmOverloads constructor(
 
     private lateinit var listContainer: LinearLayout
     private lateinit var countLabel: TextView
+    private lateinit var hiddenLabel: TextView
 
     private var items: List<InputMethodItem> = emptyList()
+
+    /** 系统启用了、但框架没返回给本应用的条数（包可见性裁剪），0 表示清单完整。 */
+    private var hiddenCount: Int = 0
 
     init {
         orientation = VERTICAL
@@ -71,8 +75,9 @@ class InputMethodPanel @JvmOverloads constructor(
     data class InputMethodItem(val id: String, val label: String, val current: Boolean)
 
     /** 数据到达：重建列表（可能从非主线程调用，内部切主线程渲染）。 */
-    fun submit(list: List<InputMethodItem>) {
+    fun submit(list: List<InputMethodItem>, hiddenCount: Int = 0) {
         items = list
+        this.hiddenCount = hiddenCount
         runOnMain { render() }
     }
 
@@ -133,6 +138,16 @@ class InputMethodPanel @JvmOverloads constructor(
             maxLines = 1
             setTextColor(textSecondary)
         }
+        // 漏列时不能静默：少列在 UI 上和「系统里就只有这几个」不可区分，这里显式标出差值并给出口
+        hiddenLabel = TextView(context).apply {
+            textSize = 11f
+            maxLines = 1
+            setTextColor(primaryColor)
+            isClickable = true
+            isFocusable = true
+            visibility = GONE
+            setOnClickListener { onSystemPicker?.invoke() }
+        }
         return LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -152,6 +167,13 @@ class InputMethodPanel @JvmOverloads constructor(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
+            )
+            addView(
+                hiddenLabel,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { marginStart = dp(6) }
             )
         }
     }
@@ -198,6 +220,12 @@ class InputMethodPanel @JvmOverloads constructor(
 
     private fun render() {
         countLabel.text = if (items.isEmpty()) "" else "共 ${items.size} 个"
+        hiddenLabel.visibility = if (hiddenCount > 0) View.VISIBLE else View.GONE
+        if (hiddenCount > 0) {
+            val hint = "系统另有 $hiddenCount 项未显示"
+            hiddenLabel.text = hint
+            hiddenLabel.contentDescription = "$hint，打开系统输入法选择器"
+        }
         listContainer.removeAllViews()
         if (items.isEmpty()) {
             listContainer.addView(
