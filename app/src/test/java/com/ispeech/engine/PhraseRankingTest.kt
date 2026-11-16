@@ -2,6 +2,7 @@ package com.ispeech.engine
 
 import com.ispeech.data.UserDictMode
 import com.ispeech.data.UserDictStore
+import com.ispeech.data.codePointLength
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -66,6 +67,31 @@ class PhraseRankingTest {
         assertEquals("喂猫", after.first())
         assertEquals("原有候选必须全部保留，只多一条", before.size + 1, after.size)
         assertTrue("原有候选被挤掉了：$after", after.containsAll(before))
+    }
+
+    /**
+     * 「候选第 1 条」在分组候选条（VOCA-185）下有两种读法：全局第 1 / 「词组 · 句子」组内第 1。
+     * 哪个算达标由 VOCA-122 裁决，本用例不替它定策略，只钉住裁决无关的两件事——
+     * 学到的词在词组组内排第 1、同码系统词组一条不少。
+     *
+     * `klqt` 这个样本码在系统词库里只有两条词组（中国银行 62857 / 喂猪 54507）、没有单字候选，
+     * 所以此处两种读法重合；断言里把该前提显式守住，将来换成有单字的码位时它会先失败，
+     * 而不是悄悄把两种口径混成一个结论。
+     */
+    @Test
+    fun `学到的词在词组组内排第 1，同码系统词组一条不少`() {
+        val system = wubiEngine().lookup("klqt", 10)
+        assertTrue(
+            "样本码 klqt 必须不含单字候选，否则「组内第 1」与「全局第 1」不再重合：$system",
+            system.all { codePointLength(it.insertText) > 1 },
+        )
+
+        store.record("klqt", "喂猫", UserDictMode.WUBI)
+        val after = wubiEngine().lookup("klqt", 10)
+        val phrases = after.filter { codePointLength(it.insertText) > 1 }
+
+        assertEquals("词组组内第 1 应是学到的词", "喂猫", phrases.first().insertText)
+        assertTrue("同码系统词组被挤掉了：$after", after.containsAll(system))
     }
 
     @Test

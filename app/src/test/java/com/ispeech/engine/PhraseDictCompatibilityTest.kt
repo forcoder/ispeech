@@ -42,7 +42,8 @@ class PhraseDictCompatibilityTest {
         val phrase = parseUserDictLine("klqt\t喂猫\t1\twb")!!
         val single = parseUserDictLine("klge\t喂\t1\twb")!!
 
-        assertEquals(LookupKind.PHRASE, entryKindOf(phrase.text))
+        // WUBIPHRASE = 词库词组档（候选条第三组）；PHRASE 是快捷短语档，学到的词不属于它
+        assertEquals(LookupKind.WUBIPHRASE, entryKindOf(phrase.text))
         assertEquals(LookupKind.WUBI, entryKindOf(single.text))
     }
 

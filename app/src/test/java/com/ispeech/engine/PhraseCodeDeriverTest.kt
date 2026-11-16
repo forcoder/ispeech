@@ -121,12 +121,14 @@ class PhraseCodeDeriverTest {
 
     @Test
     fun `单字与词组档按码点判定`() {
+        // 候选条按「快捷短语 → 单字 → 词组 / 句子」分组（VOCA-185）：学到的词组必须落在
+        // WUBIPHRASE（词库词组档），PHRASE 是用户自己设的简写快捷短语，两者不能混用。
         assertEquals(LookupKind.WUBI, entryKindOf("喂"))
         assertEquals("非 BMP 单字必须是单字档（既有实现会误判成词组档）", LookupKind.WUBI, entryKindOf("𧝣"))
-        assertEquals(LookupKind.PHRASE, entryKindOf("喂猫"))
-        assertEquals(LookupKind.PHRASE, entryKindOf("𧝣𦾟"))
+        assertEquals(LookupKind.WUBIPHRASE, entryKindOf("喂猫"))
+        assertEquals(LookupKind.WUBIPHRASE, entryKindOf("𧝣𦾟"))
         assertEquals(LookupKind.WUBI, entryKindOf("a"))
-        assertEquals(LookupKind.PHRASE, entryKindOf("abc"))
+        assertEquals(LookupKind.WUBIPHRASE, entryKindOf("abc"))
     }
 
     private companion object {
