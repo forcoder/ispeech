@@ -9,7 +9,7 @@
 
 污染只发生在**本地**：Multica 运行时每次 run 会把工作区里未忽略的文件自动提交成
 `chore(agent): baseline — uncommitted work from the local directory` / `multica: local directory snapshot`
-这类基线提交。`tools/deploy/deploy.sh:156` 产出的部署包命名是
+这类基线提交。`tools/deploy/deploy.sh:158` 产出的部署包命名是
 `dist/ispeech-<type>-<version>-<YYYYMMDD>-<HHMM>.apk`，这个形式 `.gitignore` 没覆盖，
 于是 132.7 MiB 的包被基线提交写进分支历史 → 超过 GitHub 单文件硬上限 → 该分支整体推不上去。
 
@@ -25,11 +25,12 @@
 | E3 | `main` 干净 | `git rev-list --objects origin/main \| …` | **0 个** >100 MiB blob；可达最大 blob 是 `dist/ispeech-debug.apk` 22,795,894 B |
 | E4 | 污染只在本地分支 | 同一审计脚本跑 `refs/heads` | **49 / 82** 本地分支被同一个 blob 污染（其中 10 个远端有对应分支、39 个只在本地） |
 | E5 | 污染来源是平台基线提交 | `git log --all --format='%h %s' -- dist/ispeech-release-1.5-20261115-1004.apk` | 命中提交标题清一色是 `chore(agent): …uncommitted work…` / `multica: local directory snapshot` |
-| E6 | 98.4 MiB 曾经推上去过 | `git branch -a --contains 199b972` | `origin/release/voca-186-v1.6` 在远端，说明**硬上限在 98.4 与 139.2 MiB 之间**（GitHub 文档口径 100 MiB）；50 MiB 以上只告警不拦截 |
+| E6 | 98.4 MiB 曾经推上去过 | `git branch -a --contains 199b972` | **两条**远端分支携带该包：`origin/release/voca-186-v1.6`、`origin/chore/voca-121-dist-readme-gate`，说明**硬上限在 98.4 与 139.2 MiB 之间**（GitHub 文档口径 100 MiB）；50 MiB 以上只告警不拦截 |
 | E7 | 基线提交尊重 `.gitignore` | `git diff --stat main HEAD` | 只多出那个 APK；`.multica/`、`AGENTS.md`、`CLAUDE.md` 等被忽略的文件没进树 → **改 `.gitignore` 就能止住** |
 | E8 | 只删文件不解决问题 | `7d4b51e chore(pm): 摘除平台自动带入的 139 MB 构建包，恢复本分支可推送` | 该分支 tip 至今仍在 E4 的污染清单里（blob 留在自己的历史中） |
 | E9 | 本仓库没有 CI | `ls .github/workflows` | 不存在 → 「CI 能正常拉取」这条验收项当前没有对象，见第六节缺口 |
 | E10 | 体积底数 | `du -sh $(git rev-parse --git-common-dir)` | 共享 `.git` 174 MB；`main` tracked 的 8 个 APK 合计 137,896,366 B ≈ 131.5 MiB |
+| E11 | 第一版白名单自身是回退（质检发现） | `git check-ignore -q dist/ispeech-debug-1.5-20261117-1530.apk` → 非 0 | 第一版的 `!dist/ispeech-debug*.apk` / `!dist/ispeech-release-v*.apk` 通配把 `deploy.sh` **默认**（`--release` 才转 release，`:17 BUILD_TYPE="debug"`）产物重新放开；`main` 旧规则 `dist/ispeech-debug-*.apk` 本来是忽略的。整改见 P0-A′ |
 
 审计脚本（治理前后各跑一次，输出为空即合格）：
 
@@ -64,25 +65,56 @@ done
 ### P0-A：堵住入口（本单已完成，无需人类确认，可正常评审合并）
 
 `.gitignore` 里 dist/ 段改成白名单：`dist/*` 全忽略，只放开
-`README.md` / `SHA256SUMS` / `ispeech-release-v*.apk` / `ispeech-debug*.apk` / `_archive/ispeech-release-v*.apk`。
+`README.md` / `SHA256SUMS` / 精确到交付包形状的 `ispeech-<type>-vN.M.apk`（`_archive` 同口径）。
 效果：带时间戳的部署包、`internal` 内测包、日志、截图、任何新形态产物默认进不了工作区索引；
 按 `dist/README.md` 声明的交付包照旧可提交；确要提交例外用 `git add -f`。
 已 tracked 的文件不受 `.gitignore` 影响，历史与现有包不动。
+
+### P0-A′：白名单收严到交付包形状（质检打回项 1 整改，随 P0-A 同一提交面合并）
+
+第一版用 `!dist/ispeech-debug*.apk`、`!dist/ispeech-release-v*.apk` 放开交付包，通配同时放开了
+`deploy.sh` 的默认产物 `dist/ispeech-debug-1.5-<YYYYMMDD>-<HHMM>.apk`（E11），相对 `main` 是回退。
+现在放开项只匹配「`v` + 数字.数字」的交付包命名，时间戳形态一律落回 `dist/*` 忽略：
+
+```
+!dist/ispeech-debug.apk
+!dist/ispeech-release-v[0-9].[0-9].apk        （另有 [0-9][0-9] minor 一档，覆盖 v1.10）
+!dist/ispeech-debug-v[0-9].[0-9].apk
+!dist/_archive/ispeech-debug.apk / ispeech-debug-v[0-9].[0-9].apk
+!dist/_archive/ispeech-release-v[0-9].[0-9].apk / -build[0-9].apk
+```
+
+不改用质检建议的 `v[0-9].apk` / `v[0-9][0-9].apk`：gitignore 里 `.` 是字面量，这两条匹配的是
+`ispeech-release-v1.apk` 这种名字，匹配不到 `dist/README.md` 声明的 `ispeech-release-v1.5.apk`，
+`v1.0 / v1.3 / v1.5` 三个在库交付包会被 `dist/*` 吃掉（实测见第六节第 1 条 b）。
+
+质检风险 2 点名的 3 个 `origin/release/voca-186-v1.6` 上 tracked 的产物，处置口径：
+
+| 文件 | 现在是否在白名单内 | 统一合并窗口要做什么 |
+| --- | --- | --- |
+| `dist/_archive/ispeech-debug.apk` | 是（P0-A′ 放开） | 同名替换可直接提交，无需 `-f` |
+| `dist/_archive/ispeech-debug-v1.0.apk` | 是（P0-A′ 放开） | 同上 |
+| `dist/ispeech-internal-v1.6.apk`（98.4 MiB 内测包） | **否，故意不放开** | 它就是 E6 的下一次翻车候选。tracked 优先于 ignore，合进 main 不会丢文件；**更新或换名时必须 `git add -f`**，请在合并清单里点名这一条 |
 
 ### P0-B：捞出困在污染分支上的真实改动（需人类确认后执行）
 
 被平台基线提交卡住的未推送工作（截至 E4/E5 实测）：
 
-| 分支 | 远端已有 | 未推送提交 | 其中有实际内容的 |
-| --- | --- | --- | --- |
-| `agent/agent/voca-231` | 是 | 8 | 7（`fix(voice)`/`fix(packaging)`/`docs(voice)`） |
-| `agent/agent/voca-207` | 是 | 5 | 4（`fix(sync)`/`docs(adr)`/`docs(quick)`/`chore(verify)`） |
-| `agent/agent/voca-37` | 是 | 7 | 5（`docs(pm)` 含风险册记录；`7d4b51e` 摘包提交**不要**带） |
-| `agent/ui/voca-69` | 是 | 5 | 4（`fix(ui)`/`docs(ui)` 质检整改） |
-| `agent/ux/voca-45` | 是 | 5 | 3（`docs(ux)` 质检整改；`898dbea` 摘包提交**不要**带） |
-| `agent/ba/voca-122` | 是 | 3 | 2（`docs(requirements)`） |
-| `agent/agent/voca-121` / `-33` / `-56` / `agent/mika/voca-30` | 是 | 1–2 | 0（只有平台基线提交，无实际工作） |
-| 其余 39 个被污染的本地分支 | 否 | — | 远端无对应分支，按 P0-A 合并后重建即可 |
+| 分支 | 远端已有 | 未推送提交 | 其中有实际内容的 | 是否与远端分叉 |
+| --- | --- | --- | --- | --- |
+| `agent/agent/voca-231` | 是 | 8 | 7（`fix(voice)`/`fix(packaging)`/`docs(voice)`） | **是，远端多 7 个提交 → 只能走下面模板，直推本地分支会被拒** |
+| `agent/agent/voca-207` | 是 | 5 | 4（`fix(sync)`/`docs(adr)`/`docs(quick)`/`chore(verify)`） | **是，远端多 4 个提交 → 只能走下面模板，不可直推** |
+| `agent/agent/voca-37` | 是 | 7 | 5（`docs(pm)` 含风险册记录；`7d4b51e` 摘包提交**不要**带） | 否 |
+| `agent/ui/voca-69` | 是 | 5 | 4（`fix(ui)`/`docs(ui)` 质检整改） | 否 |
+| `agent/ux/voca-45` | 是 | 5 | 3（`docs(ux)` 质检整改；`898dbea` 摘包提交**不要**带） | 否 |
+| `agent/ba/voca-122` | 是 | 3 | 2（`docs(requirements)`） | 否 |
+| `agent/agent/voca-121` / `-33` / `-56` / `agent/mika/voca-30` | 是 | 1–2 | 0（只有平台基线提交，无实际工作） | 否 |
+| 其余 39 个被污染的本地分支 | 否 | — | 远端无对应分支，按 P0-A 合并后重建即可 | — |
+
+分叉判定用 `git rev-list --count origin/$B..$B`（本地领先）与 `git rev-list --count $B..origin/$B`
+（远端领先），两个都不为 0 即已分叉。**FF 性由模板结构保证，而不是由本地分支保证**：
+必须从 `origin/$B` 开 rescue 分支再 cherry-pick 真实提交，这样远端 tip 才是新历史的祖先；
+把已分叉的**本地**分支直接推回原名不是 fast-forward，会被拒（也不能靠 force push 绕过）。
 
 单分支重建模板（**fast-forward，不需要 force push**，因为远端 tip 是新历史的祖先）：
 
@@ -118,6 +150,7 @@ du -sh "$(git rev-parse --git-common-dir)"
 ### P1：预防（建议新开 issue）
 
 1. `pre-push` 钩子或脚本：拒绝任何 >95 MiB 的新 blob（当前仓库没有 `core.hooksPath` 基础设施，需要单独建）。
+   白名单是**按名字**的防线，换个命名或换类产物就绕过去了；体积门禁才是兜底，建议与 P0-A 同期开单。
 2. `tools/deploy/deploy.sh` 出包时打印一行「该包不入库」提示，并把交付包与部署包的命名空间彻底分开。
 3. 若平台侧可配置，让运行时基线提交跳过 `dist/`（当前 `.gitignore` 已能挡住，属于加一层保险）。
 
@@ -125,7 +158,7 @@ du -sh "$(git rev-parse --git-common-dir)"
 
 | 变更 | 触发回滚的条件 | 回滚动作 | 预计时长 | 数据可逆 |
 | --- | --- | --- | --- | --- |
-| `.gitignore` 白名单（P0-A） | 有人发现该提交的交付包被静默忽略 / `dist/README.md` 流程跑不通 | `git revert <sha>` 即可；无历史改动 | < 5 min | 是 |
+| `.gitignore` 白名单（P0-A / P0-A′） | 有人发现该提交的交付包被静默忽略 / `dist/README.md` 流程跑不通 | `git revert <sha>` 即可；无历史改动 | < 5 min | 是 |
 | 单分支重建（P0-B） | cherry-pick 漏提交或引入冲突，救回分支内容不对 | 远端 `<B>` 的 tip 从未被移动过，删掉 rescue 分支重来即可；先记下旧 tip `git rev-parse <B>` 备查 | < 10 min | 是（远端未被写过） |
 | 本地 GC（P0-C） | 事后发现有未推送工作被 prune 掉了 | **不可逆**，只能从 `git fsck --lost-found` 捞悬空提交，不保证成功 | — | 否 |
 
@@ -135,10 +168,30 @@ du -sh "$(git rev-parse --git-common-dir)"
 
 ## 六、验证口径（治理完成的判定）
 
-1. **入口已堵**：在留有部署包残留的工作区里跑 `git status --porcelain`，输出为空；
-   `git check-ignore -q dist/ispeech-release-1.5-20261115-1004.apk` 返回 0。
+1. **入口已堵**（a、b 两条都要过，只测一种命名不算过）：
+
+   a) 4 种时间戳/危险形态必须全部被忽略（`deploy.sh` 默认 debug、显式 `--release`、带 `v` 的误写、
+   以及 `internal` 内测包）：
+
+   ```bash
+   for f in dist/ispeech-debug-1.5-20261117-1530.apk dist/ispeech-release-1.5-20261117-1530.apk \
+            dist/ispeech-release-v1.5-20261117-1530.apk dist/ispeech-internal-v1.6.apk; do
+     git check-ignore -q "$f" || echo "LEAK $f"; done   # 期望：无输出
+   ```
+
+   b) 在库交付包必须仍照旧可提交。**必须加 `--no-index`**：`git check-ignore` 默认查索引，
+   tracked 文件永远返回「未忽略」，不加这个标志的测试是假通过（E11 就是这么漏掉的）：
+
+   ```bash
+   for f in $(git ls-tree -r --name-only HEAD -- dist/); do
+     git check-ignore -q --no-index "$f" && echo "WRONGLY IGNORED $f"; done   # 期望：无输出
+   ```
+
+   c) 全链路自检：在留有部署包残留的工作区里跑 `git status --porcelain` 输出为空（只剩本次改动），
+   `git add -A --dry-run` 不收入任何 `dist/` 产物；对危险名 `git add <file>` 必须被拒并提示 `-f`。
 2. **新分支可推**（本单已实测）：从 `origin/main` 出发、只带本改动的分支
-   `chore/voca-445-dist-artifact-guard` 推送成功、PR 可建 → 证明阻断点已消失。
+   `chore/voca-445-dist-artifact-guard` 推送成功、PR #27 可建 → 证明阻断点已消失。
+   该分支提交数为 3（`f6547c2` / `0fab0e6` / `b587d18`），打回项 1 整改后为 4。
 3. **历史无巨型对象**：第二节审计脚本对 `refs/heads` 与 `refs/remotes/origin` 均输出为空。
 4. **困住的工作已救回**：上表 6 个有实际内容的分支，其 rescue 结果在远端可见，
    且 `git log origin/<B> --oneline | head` 包含对应的 `fix(...)` / `docs(...)` 提交。
