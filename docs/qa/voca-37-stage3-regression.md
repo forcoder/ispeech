@@ -9,12 +9,21 @@
   - `git branch -r --contains c524351` → 只有 `origin/feat/voca-46-ux-46dp-space-period` 与 `refs/pull/18/head`；
   - 远端两条 release 分支 `release/voca-186-v1.6`（`eba7a61`）、`release/voca-r1`（`76d178c`）**都不包含** `c524351`/`d3b6f84`/`d283706`/`4d6363c`（四条 `merge-base --is-ancestor` 全部 rc=1）。
   → 结论：「已合并」在当前可见仓库里无法核实，本文按「未合并」写；若合并发生在另一个远端（Codeup 侧），请给出该远端与分支名，§13 需要在那上面复跑。
-- 两个 PR 别混：**PR #18 = A 包的变更集**（产品代码 16 个文件，本文「变更面内 / 拦路项」所说的「本 PR」都指它）；**PR #25 = 本 issue 的交付 PR**（branch `test/voca-37-stage3-regression`，只含 `docs/` 报告 + `tools/qa/` 工装与证据，不含产品代码）。
-- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（54 份当场 stdout 原文）+ `shots/`（7 张截图）。三个口径分开写：单个提交的口径（`git show --stat` / `git diff --stat` 当场可核）：返修提交 `57f5f5b` 13 files +597/−35；第二轮返修提交 `4009fb4` 11 files +609/−39。**PR #25 的累计口径不在本文写死数字**——它每推一次就漂一点，写进报告就会立刻变成假数（上一版把「PR 累计 61 files +2029」和「单提交 13 files +597」混在同一行就是这个坑）。现算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`；本轮最后一次推送的实测值写在 VOCA-47 的交付评论里（带当时的 head SHA），以那条为准。
-- 规格权威：`agent/ux/voca-45-spec` @ `28c1cac`（main 上的 602 行翻页版与 `agent/ux/voca-45` @ `fc564aa` 均已过期，本报告不引用）
-- 执行环境：本地 AVD `ispeech_test`（1080×2340 / 440dpi / arm64 / 2G），Android 14 模拟器；对照基准为同机搜狗 `com.sohu.inputmethod.sogou/.SogouIME`
-- 执行人：测试工程师（QA）· 2026-11-17 03:40–05:20 首测，06:55–07:45 按质检 6 条返修，12:25–12:45 第二轮 4 条，14:03–14:09 第三轮 5 条，**15:05–16:20 第五轮（裁决 6 条打回项：重测 AC-1/截字/spec-AC-10、补 spec-AC-9 1500ms 实测档、开关值披露、作废自查），16:50–17:25 集成候选 B 包回归**（本地时区）
-- 结论：**条件性 no-go**。**PR #18 变更面拦路 3 条**，任一成立即拦：① 真机口径缺失——「占屏比 ≤1pp」在按真机参数（520dpi / font_scale 1.15）复现时 A 包 **+7.09pp**、B 包 **+5.39pp**，模拟器无权定稿；② AC-2 硬件/注入键路径 4 组全阴性（开关当场读到 `true`、间隔 0ms 仍不出句号）→ **P1 D1**，B 包复跑仍阴性（§13.3）；③ **新增 `spec-AC-10a` FAIL**——520dpi / fs1.15 下完整可见候选只有 3 条（硬门限 ≥4），A、B 两包同形（§3、§13.2），按裁决 §5 记 PR #18 变更面缺陷、交 PM 定级。另有 `v1.6-AC9`（=VOCA-170，**P0**，PR #9 未合入 main）一条：**在 B 包上已验证修复**（§13.3），但它今天仍在 main 上，v1.6 合并窗口门禁按裁决 §2-2② 计 D2。门禁：P0/P1 未清零不判 go。
+- 两个 PR 别混：**PR #18 = A 包的变更集**（本文「变更面内 / 拦路项」所说的「本 PR」都指它）；**PR #25 = 本 issue 的交付 PR**（branch `test/voca-37-stage3-regression`，只含 `docs/` 报告 + `tools/qa/` 工装与证据，不含产品代码）。
+- **PR #18 的变更量两种口径并列（裁决 §9.4 打回项 6(a)：禁混用，引用时点名口径）**：
+  - **累计口径**（相对 main）：`git diff --shortstat fa57a07...c524351` → **16 files changed, 519 insertions(+), 30 deletions(-)**；
+  - **单提交口径**：`git show --shortstat e528c08` → 15 files, +391/−30；`git show --shortstat c524351` → 6 files, +136/−8；两笔相加 527 增 ≠ 519 增，**差额来自两个提交改到同一批文件**，不是数据错。`gh pr view 18 --json state,baseRefName,headRefOid,commits` 现算 → `state=OPEN`、`base=main`、`head=c524351`、`commits=2`。原文见 `ev_r6_calibers.txt` ①。
+- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/`（20 个脚本：17 个 `.py` + 3 个 `.sh`）+ `README.md`；证据 = `tools/qa/voca-37/evidence/`（**78 份**：73 份当场 stdout 原文 `.txt` + 4 份 B 包单测 XML + `gradle_test.log`）+ `shots/`（**31 张**截图/候选带裁图）。**每份证据是采信还是作废，逐文件列在 §11.1，不在别处另立口径。** 三个口径分开写：单个提交的口径（`git show --stat` / `git diff --stat` 当场可核）：返修提交 `57f5f5b` 13 files +597/−35；第二轮返修提交 `4009fb4` 11 files +609/−39。**PR #25 的累计口径不在本文写死数字**——它每推一次就漂一点，写进报告就会立刻变成假数（上一版把「PR 累计 61 files +2029」和「单提交 13 files +597」混在同一行就是这个坑）。现算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`；本轮最后一次推送的实测值写在 VOCA-47 的交付评论里（带当时的 head SHA），以那条为准。
+- 裁决出处（本文所有「裁决 §x」）：**`docs/requirements/VOCA-47-acceptance-ruling.md`**（洞察BA  authored，第五/六轮的 §9 打回项与 §9.2/§9.3/§9.4 是本轮返修的唯一依据）。该文件原先挂在 `att/` 下、报告引用的路径在任何 ref 上都不存在 → 本轮 `git mv` 到 `docs/requirements/`，内容一字未改（`git log --follow --diff-filter=R` 可核）。
+- 规格权威：**唯一锚点 `agent/ux/voca-45-spec` @ `8324b03`**（927 行，PR #17 head；裁决 §9.1 定「只准锚一个版本」）。本文所有规格行号按它写：AC-1 `:413`｜AC-2 `:427`｜AC-3 `:440`｜AC-4 `:453`｜AC-5 `:467`｜AC-6 `:480`｜AC-7 `:490`｜AC-8 `:505`｜AC-9 `:509`｜AC-10 `:519`（Given `:525`、采样区 `:529`、AC-10a `:540`、AC-10b `:541`）｜AC-11 `:547`｜§5 无障碍表 `:583`（缺口行 `:589/:590/:593/:595/:597`、合规行 `:594`）。旧版 `28c1cac`（806 行，11-16）与其上「602 行翻页版」、`agent/ux/voca-45` @ `fc564aa` 均已过期，本文不再引用；第五轮报告锚 `28c1cac` 的行号（AC-1 `:396` 等）到 `8324b03` 全部左移，以本行为准。
+- 执行环境：本地 AVD `ispeech_test`（1080×2340 / 440dpi / arm64 / 2G），Android 14 模拟器；对照基准为同机搜狗 `com.sohu.inputmethod.sogou/.SogouIME`。真机 `FMR0224913042917` 自 11-13 起未连接（离线档位登记见 VOCA-451 评论）。
+- 执行人：测试工程师（QA）· 2026-11-17 03:40–05:20 首测，06:55–07:45 按质检 6 条返修，12:25–12:45 第二轮 4 条，14:03–14:09 第三轮 5 条，15:05–16:20 第五轮（裁决 6 条打回项：重测 AC-1/截字/spec-AC-10、补 spec-AC-9 1500ms 实测档、开关值披露、作废自查），16:50–17:25 集成候选 B 包回归，**21:40–22:25 第六轮（裁决 §9 的打回项 1/2/3/5/6 + label 裁决 4 + 风险 1/3(a)：pp 同窗重测、闸门与判据解耦后出数、AC-10 离线复算、gradle 原文入库、§8.5/无障碍行号现算）**（本地时区）
+- 结论：**FAIL —— 条件性 no-go（三类判据不满足 / 未定稿，按裁决 §9.3 的口径分层写）**。
+  - **判定标签（照裁决 §9.3 原样给，不分档混写）**：`FAIL（判据不满足：spec-AC-2 硬件/注入键路径、spec-AC-10a @520dpi·fs1.15）＋ 真机 pp 未定稿（附加缺口，非主因）`。
+  - ① **判据不满足（产品面，主因）**：`spec-AC-10a` 在 520dpi / fs1.15 两档 8 帧全部 `full_count=3 < 4`（A、B 同形，双口径同判 `boundary=False`）→ 记 PR #18 变更面缺陷 **D3**，交 PM 定级；`spec-AC-2` 硬件/注入键路径 4 组全阴性（开关当场读到 `true`、间隔 0ms 仍不出句号）→ **P1 D1**，B 包复跑仍阴性（§13.3）。
+  - ② **未定稿（取证面，附加缺口，不是主因）**：绝对占屏 pp 需真机定稿——模拟器按真机参数（520dpi / fs1.15）复现时 A 包 **+7.09pp**、B 包 **+5.39pp**。**这两条要分开看：真机插上、pp 定稿之后，①那两条判据照样不成立，仍然不得 go**（裁决 §9.3 末句）。
+  - ③ **范围外既有债（不计入 PR #18 拦路面）**：`v1.6-AC9`（=VOCA-170，**P0**，PR #9 未合入 main）在 B 包上已验证修复（§13.3），但它今天仍在 main 上 → v1.6 合并窗口门禁按裁决 §2-2② 计 D2；`spec-AC-11`（带内近垂直短拖误上屏）规格 `:547` 自己标「本轮不测、既有债、不计入 PR #18 拦路面」→ 本文 AC-11 行记 **N/A**（§3.1）。
+  - 门禁：P0/P1 未清零不判 go；本轮 P1（D1）未清、D3 未定级、AC-10a 判据不成立 → **no-go**。
 
 ---
 
@@ -24,15 +33,16 @@
 |---|---|---|
 | 模拟器可判面（spec AC-3/4/5/6/7、G1–G7、面板路径） | **全绿**（1 项 P2 观察、2 项规格/实现差异记录） | 见 §3–§6；AC-4~AC-7 的键名↔方向按代码订正（步长/钳制结论不变），`ev_ac47b.txt` |
 | spec AC-1 恒高（空态 vs **有候选**态） | **PASS**（A 包 4 组 Δ=0；B 包 4 组 Δ=0） | 旧三组 Δ 因「chip-only 伪装态」**作废后重测**，闸门见 §2.5、数据见 §3；`ev_r5_440.txt` / `ev_r5_520_fs115.txt` / `ev_r5u_440.txt` / `ev_r5u_520.txt` |
-| **spec AC-10a 完整可见候选 ≥4（硬门限）** | **440dpi PASS / 520dpi·fs1.15 FAIL（3 条）** | A、B 两包同形 → 记 PR #18 变更面缺陷，交 PM 定级（裁决 §5）；`ev_r5_520_fs115.txt`、`ev_r5u_520.txt` |
-| spec AC-10b 混合词长 | **只入账，不判**；520/fs1.15 连闸门都过不了（`GATE reason=cand_low rc=13`） | 达不到 4 条属规格 §2.1 与实现的真实冲突 → 回 UX/UI + PM，不由测试自处 |
+| **spec AC-10a 完整可见候选 ≥4（硬门限，规格 `:540`）** | **440dpi PASS / 520dpi·fs1.15 FAIL（两码都只 3 条）** | 六个 520/fs1.15 读数（A、B 两包 × `shijian`/`dashu`，设备 + 离线各一份）**全部 `full_count=3 verdict=FAIL`**，双口径同判 `boundary=False` → 记 PR #18 变更面缺陷 D3，交 PM 定级；`ev_r6_ac10_decoupled.txt`、`ev_r6_ac10_offline.txt`、`ev_r6_calibers.txt` |
+| spec AC-10b 混合词长（规格 `:541`，只记录不判） | **已出逐项读数**：`shijian@520` `reason=viewport_clip clipped_idx=[3]`；`dashu@520` `reason=long_word_budget clipped_idx=[]` | 第六轮闸门解耦后这一档不再「不给数」（第五轮那行 `GATE reason=cand_low rc=13` 的语义已由裁决 §9.2 判为把结论当前置条件，见 §2.5）。`dashu` 同帧 Given ③ 当场量到 **pool=13 ≥8** → 「词库里没有」这条解释被当场排除，不足 4 只归横向空间/词长预算 → 回 UX/UI + PM 裁（缩 chip 宽度 vs 放宽 §2.1 词长口径），不由测试自处 |
+| spec AC-11 带内近垂直短拖误上屏（规格 `:547`） | **N/A（本轮不测）** | 规格自己写明「既有债（`fa57a07` = `c524351` 同一行为）、不计入 PR #18 拦路面、建议新开 issue 交 Stage 2」；本文 §3.1 该行只标 N/A，其数据（dy 40–90px 上屏）留在 §8-4 作观察项，**不折进 AC-7 判定**（`ev_r6_calibers.txt` ③：两棵树 `grep -c slop` 都是 0） |
 | AC-2 双击空格句号（按路径拆开） | **软键 PASS / 硬件·注入键 FAIL** | 开关态当场从 DataStore 读出 `true`；硬件键 4 组全阴性 → P1 D1；B 包复跑仍阴性（§13.3） |
 | spec AC-9 退格长按（`>3` 字 @1.5s） | **PASS（1500ms 实测档）** | A 包 1500ms→删 13、B 包→删 9，均 >3；旧「1.5s≈10 字」是两点内插值，已标注非实测（§3） |
 | `FAST=45ms` 快档 | **维持「本轮未观测」** | 与 AC 判定分开写，指向 §9-7（注入式长按上限落在 90ms 慢档，口径要换） |
 | PR #18 变更面内撞出的产品缺陷 | **2 条：D1（P1，硬件键路径）+ D3（spec-AC-10a FAIL，交 PM 定级）** | 拦路，见 §3.3（D1/D3）与 §3.1（AC-10a 行） |
 | `v1.6-AC9` = VOCA-170（D2 设置页崩溃） | **P0（继承 PM 11-15 裁定）**；A 包第三次复现坐实，**B 包已验证修复** | PR #9 `d3b6f84` 仍未合入 main；两个口径分开：PR #18 变更面拦路**不计 D2**，v1.6 合并窗口门禁**计 D2**。见 §3.3 |
-| 真机可判面（绝对占屏 pp、520dpi 键高观感、真机手指触摸） | **未取证** | 见 §5、§9；按 issue 约束不得写「通过」 |
-| 发布建议 | **条件性 no-go** | 门禁：P0（`v1.6-AC9`，PR #9 未合）+ P1（D1）未清零 + spec-AC-10a FAIL 待定级 + 真机 pp 未定稿 |
+| 真机可判面（绝对占屏 pp、520dpi 键高观感、真机手指触摸） | **未定稿**（=附加缺口，不是主因） | 见 §5、§9；pp 的模拟器侧已在同一时间窗两侧重测（`ev_r6_pp_window.txt`），但**模拟器无权定稿真机 pp**；真机 `FMR0224913042917` 自 11-13 未连接，离线档位已登记 VOCA-451 |
+| 发布建议 | **FAIL → no-go（即使真机到位也不得 go）** | 判据不满足 2 条：D1（P1）未清零 + AC-10a FAIL 未定级；另加 P0（`v1.6-AC9`，PR #9 未合）计入口径② 合并窗口门禁。真机 pp 定稿只解决「附加缺口」，不解决前两条 |
 
 ## 2. GATE 0（前置门禁）
 
@@ -46,7 +56,9 @@ $ adb -s emulator-5554 shell pm list packages | grep -i sogou
 package:com.sohu.inputmethod.sogou
 ```
 
-搜狗可用 → GATE 0 通过，允许做占屏对照。规格 11-16 的 978px 只作为历史参照，本轮所有对照值均为当场重测（见 §5）。
+搜狗可用 → GATE 0 通过，允许做占屏对照。
+
+**第五轮这一节写过一句「本轮所有对照值均为当场重测」，是假的，本轮删除并更正**（裁决 §9.4 打回项 1 的打回点）：那份 §5 表里搜狗的 978/1002 出自首测窗口 03:40–05:20（`git log --diff-filter=A` 追到入库提交 `43e1718`），iSpeech 那两列出同一天的 15:05–17:25 —— **两列不同窗**，而共享 AVD 当天被别的 run 换包 3 次，所以「当场重测」这四个字当时不成立。第六轮用 `ppwin.py` 把两侧拉进**同一个连续窗口**重测（22:02:17 → 22:04:39 +0800，先搜狗三档、再 iSpeech 三档），原文与逐行 `ts=`/`RAW` 见 §5 与 `ev_r6_pp_window.txt`。
 
 ## 2.5 作废清单与重测闸门（裁决 §1.2 / §6-打回项 1）
 
@@ -58,47 +70,60 @@ package:com.sohu.inputmethod.sogou
 | 旧 §3 的 **AC-1 三组 Δ**（988→988 ×3、988→988、1168→1168） | §3 AC-1 行 | 「空态 → 组合态」的组合态可能是 chip-only 态，恒高契约的另外半边（有候选时仍不涨高）没被证明 |
 | 旧 §3 AC-9 行「1.5s≈10 字」 | `ev_ac9.txt` 只有 200/1000/2000 三档 | 两点内插值，非实测（裁决 §6-打回项 6）→ 本轮补 1500ms 实测档 |
 
-**自证（不是叙述，是当场重扫）**：`tools/qa/voca-37/voidcheck.py` 用旧报告的同一窗口（x 16..1064、行=带高 ±1px）重扫交付帧，`old_ink_rows` 与旧记载**逐位相同**（1400..1441 / 1397..1445 / 1185..1284）→ 复算口径对得上；再用新口径（只在 chip 右沿 +1 之后量字身）扫同一批帧，`cand_counts = 440/fs1.0: 0、440/fs1.15: 0、520/fs1.15: 1`，`ink_entirely_inside_chip = 440/fs1.0, 440/fs1.15` → 三帧全部低于「可见候选 ≥4」闸门，**作废成立**（`ev_r5_voidcheck.txt`，rc=0）。裁决 §6-3 要求的「`x>240` 命中列必须 > 0」在旧帧上是 0 —— 也就是旧数据确实还在量 chip。
+**自证（不是叙述，是当场重扫）**：`tools/qa/voca-37/voidcheck.py` 用旧报告的同一窗口（x 16..1064、行=带高 ±1px）重扫交付帧，`old_ink_rows` 与旧记载**逐位相同**（1400..1441 / 1397..1445 / 1185..1284）→ 复算口径对得上；再用新口径（只在 chip 右沿 +1 之后量字身）扫同一批帧，`cand_counts = 440/fs1.0: 0、440/fs1.15: 0、520/fs1.15: 1`，`ink_entirely_inside_chip = 440/fs1.0, 440/fs1.15` → 三帧全部低于**当时那版**「可见候选 ≥4」闸门，**作废成立**（`ev_r5_voidcheck.txt`，rc=0）。裁决 §6-3 要求的「`x>240` 命中列必须 > 0」在旧帧上是 0 —— 也就是旧数据确实还在量 chip。（第六轮把 `≥4` 从闸门改回判据，这条作废结论**不受影响**：作废的根据是「旧数据量的是 chip」，不是「候选不足 4」。）
 
-**重测闸门（先于读数，任一不成立就拒绝出数）**，`fs115.py` 第五轮版：
+**重测闸门（先于读数，任一不成立就拒绝出数）** —— 第六轮按裁决 §9.2 把**闸门与判据解耦**后的版本，`fs115.py`（修前 `MIN_CAND=4`、修后 `MIN_CAND=1`）：
 
-1. `drive.key_map()` 从当场截图反推键位（不写死像素），失败 → `GATE reason=key_map_fail rc=16`；
-2. 敲码后**回读宿主文本 == 所敲串**，不符 → `rc=10`；
-3. `chip 文本 == 所敲串` 且 chip 盒存在且在候选区左边 → 否则 `rc=12`；
-4. **可见候选数 ≥ 4**（`cand_count`，chip 右沿 +1 之后的字身连通块数）→ 否则 `GATE reason=cand_low rc=13`；
-5. 候选池 ≥ 8（`=` 键滚动 + 互相关去重数出）→ 否则 `rc=14`；滚动后未回原点 `rc=15`；IME 不是本包 `rc=17`；宿主没起来 `rc=18`；
-6. 闸门全过才打一行 `GATES`（把裁决 §5 的五个 Given 逐条点名），再打 `RESULT` / `INK` / `CAND` / `AC10`；拒绝出数时 **stdout 不出现 `RESULT`/`INK`/`delta`**。
+闸门只守规格 `8324b03:525` 那三条 **Given**，一条不加、一条不减：
 
-**520dpi 的 `dashu` 那一组就是被闸门 4 拦下的**：`GATE reason=cand_low rc=13 cand_count=3 need=4 x0=227`（`ev_r5_520_fs115.txt`、`ev_r5u_520.txt`）——这不是「测出 FAIL」，是「这一档不给数」，两包一致。
+1. `drive.key_map()` 从当场截图反推键位（不写死像素），失败 → `GATE reason=key_map_fail rc=16`；宿主起不来 → `rc=18`（这两条是 Given 之外的**工装前提**，不是规格 Given，单列写明）；
+2. **Given ①** 敲码后**回读宿主文本 == 所敲串**（chip 是像素，宿主回读是它唯一的可读通道），不符 → `reason=readback_mismatch rc=10`；chip 盒不在位 / 不在候选区左 → `rc=11` / `rc=12`；
+3. **Given ②** 候选行在位 = `cand_count ≥ 1`（chip 右沿 +1 之后的字身连通块），有 chip 无候选 = **chip-only 伪装态** → `reason=chip_only rc=13`；
+4. **Given ③** 候选池 ≥ 8（`=` 键滚动 + 互相关去重数出）→ 否则 `rc=14`；滚动后未回原点 `rc=15`；IME 不是本包 `rc=17`（`ime_frame()` 前后各读一次 `default_input_method`）；
+5. 闸门全过才打一行 `GATES`（把三条 Given 逐条点名，带 `spec_anchor=8324b03:525`），再打 `RESULT` / `INK` / `CAND` / `AC10` / `AC10b`；拒绝出数时 **stdout 不出现 `RESULT`/`INK`/`delta`**。
+
+**「可见候选 ≥4」从闸门里删掉了**（第五轮那一版把它写在闸门第 4 条，裁决 §9.2 判为「拿结论当前置条件」）：`≥4` 是 AC-10a 的**判据**，留在判据行里。这么改不是放松标准，恰恰相反 —— 塞在闸门里时这一档只会「不给数」，**永远出不了 FAIL**，而池 ≥8 已经在闸门里，词库够用、屏上凑不满 4 条本来就是 FAIL 本身。同时 `rc=11` 与 `rc=13` 的语义必须分开：11 = 连 chip 的填充盒都没画出来（帧不对/带没在位），13 = 有 chip、候选 0 条；`band.py:113/188` 上 `cand_count==0` 的帧 `analyze` 照样返回 `ok=True`，所以第 13 这一档不许删，否则 chip-only 会一路走到 `pool_low`(14)，失效原因从「量错对象」被说成「词库不够」，第三人照 §10 复跑必读错。
+
+**520dpi 的 `dashu` 那一组：解耦后出数了，读数是 FAIL**。第五轮它停在 `GATE reason=cand_low rc=13 cand_count=3 need=4 x0=227`（`ev_r5_520_fs115.txt`、`ev_r5u_520.txt`），两包一致、整档不给数；第六轮同一台机同一包重跑（`fs115.py <apk> 520 1.15 shijian,dashu a6`）打满六行，其中裁决 §9.2 点名要的那两行是：
+
+```
+AC10  code=dashu dens=520 fs=1.15 given3_pool=13 … full_count=3 verdict=FAIL need=4 gauge=spec_sampling_x_end=1060 full_count_screen=3 verdict_screen=FAIL boundary=False cand_count=3 …
+AC10b code=dashu dens=520 fs=1.15 cand_count=3 full_count=3 need=4 recorded=True reason=long_word_budget clipped_idx=[] …
+```
+
+原文与两次尝试（第一次 `dashu` 吃 `reason=readback_mismatch rc=10`，`got=<NONE>`，共享 AVD 掉焦点；第二次重跑才出数）都在 `ev_r6_ac10_decoupled.txt`，**两次都入库、不粉饰**。同帧 Given ③ 在同密度当场量到 `pool=13` → 「词库里没有 4 条」这个解释被当场排除。
 
 **工装共因缺陷（裁决 §6-6，本轮修在工装层，不动判据）**：`drive.tap_keys` 原来既没回读校验、又写死 440dpi 像素，会污染一切「先打字再量」的用例。现在 `tap_keys` 敲完必须回读宿主文本比对，不一致直接 GATE；`fs115.py`/`ac9.py`/`ac2.py` 的键位一律 `key_map()` 当场反推。**第五轮新增一条同类修复**：VOCA-184（`d283706`）把字母键行内留白从 4dp 收到 1dp 后，行间隙只剩 ~5px，`key_map` 原来的 `merge_gap=8` 会把 qwerty 行和 asdf 行粘成一个带 → 段数不再是 10/9/7 → 整套键位反推失效（B 包首跑 `GATE reason=key_map_fail rc=16`）。已加「合并后高度不得超过 52dp 单行上限」的约束（`drive.py:219-229`），A/B 两包都能标定成功。**这条是合并窗口会踩的坑，不是产品缺陷**，但必须写进 §13。
 
 ## 3. 恒高与判据逐条结果（按规格 §4 编号重排）
 
-编号与行号一律锚规格权威 `docs/keyboard-ux-spec.md` @ `28c1cac`：AC-1 `:396`｜AC-2 `:410`｜AC-3 `:423`｜AC-4 `:432`｜AC-5 `:446`｜AC-6 `:459`｜AC-7 `:469`｜AC-8 `:482`｜AC-9 `:486`｜AC-10 由裁决 §5 升格（规格正文 `:215` 那句的副作用约束）。G1–G7 是质检门禁项、不是规格 AC，另表（§3.2）。
+编号与行号一律锚规格唯一权威 `docs/keyboard-ux-spec.md` @ **`8324b03`**（PR #17 head；裁决 §9.1）：AC-1 `:413`｜AC-2 `:427`｜AC-3 `:440`｜AC-4 `:453`｜AC-5 `:467`｜AC-6 `:480`｜AC-7 `:490`｜AC-8 `:505`｜AC-9 `:509`｜AC-10 `:519`（Given `:525`、采样区 `:529`、AC-10a `:540`、AC-10b `:541`）｜**AC-11 `:547`**。G1–G7 是质检门禁项、不是规格 AC，另表（§3.2）。**第五轮及以前这一行锚的是 `28c1cac`（AC-1 写 `:396`、AC-2 `:410`…），那套行号在 `8324b03` 上全部左移，不得再引**；AC-10 在 `28c1cac` 上根本不存在（它由裁决 §5 于 11-17 升格、在同日 `8324b03` 落进规格正文），所以第五轮「AC-10 由裁决 §5 升格、规格正文 `:215` 那句的副作用约束」那种写法也一并作废——判据出处现在是规格 `:519`–`:541` 本身。
 
 测量口径（全部按规格 §8.1 / §8.4）：`dumpsys window displays` 的 `InsetsSource type=ime` frame 取键盘高度；滚动位移用候选带列剖面互相关（step=2px，±600，取最小平均绝对误差，residual>5 视为不可判）；文本真值取宿主输入框 = Settings 搜索框 `open_search_view_edit_text`（由 `drive.host_ready()` 每轮 force-stop 两个 Settings 包后重起，空态读到的是它的占位文案「搜索设置」而不是输入内容）。测前一律 `settings put secure autofill_service null`（否则 GMS 自动填充会多报一个 `type=ime` source，把 inset 从 988 抬到 1260）。
+
+**「A 包实测」的读数以 stdout 为准，帧另说（裁决 §9.4 风险 1，采纳项）**：§3～§4 每一个 A 包数字的可复核来源是对应的 `ev_*.txt` 原文行，**不是截图**——第五轮那批 A 包 440dpi 候选带帧被 B 包同名复跑覆盖（事故记录与影响面在 §13.5），当时入库的只有 `shots/r5_440_fs1.0_haizi_*.png` 两张 A 包帧，所以「帧未入库、读数以 stdout 为准」这一句在 §3/§4 引用旧帧时必须成立。第六轮起**两包都留帧**：A 包 `shots/r5_a6_520_fs1.15_{shijian,dashu}_{empty,comp}.png`（4 张）＋ B 包 `shots/r5u_*.png`（12 张）＋ 同窗 pp `shots/r6_{sogou,ispeech}_*.png`（6 张），并且 `fs115.py` 加了第 5 位 `label`（§10-2）防再撞名。
 
 **键名↔方向的口径（本轮返修项 2 的根因）**：不靠人记，由代码定义——`IspeechImeService.kt:612-614`（行号锚 **c524351**；main `fa57a07` 上同一段在 `:601-603`。偏移已核：PR #18 在该文件 +90/−20，前 200 行内插了 11 行（`:11`/`:20` 两个 import + `:107` 3 行 + `:195` 6 行），601+11=612 对得上——引行号不写构建版本就会核空）里 `KEYCODE_MINUS` → `scrollCandidates(-1)`、`KEYCODE_EQUALS` → `scrollCandidates(+1)`；`CandidateView.kt:90-92,199` 里 `scrollCandidates(steps)` → `smoothScrollBy(steps * dp(72), 0)`，注释写明「steps 为正向右（看后面的候选）」。互相关返回值 `shift` 的符号约定是「正 = 候选内容左移 = 视口向右」，所以 `=` 应为 +198、`-` 应为 −198，实测与代码同向。`ac47.py` 把 keycode、代码出处、期望档位（`KEYMAP` 行）和每一档的实际符号一起打进 stdout，杜绝再次出现「数值对、键名反」。
    **口径不靠叙述，靠闸门**（本轮实测补上，见 `ev_ac47_probe.txt` / `ev_ac47_falsify.txt`）：`ac47.py` 在 sweep 前先做可滚性探针——停在左端按一次 fwd 方向的键，位移必须是 +198；把参数对调成 `--fwd 69 --rev 70` 再跑，同一台机同一数据态下探针读到 `shift=0 err=0.0`，脚本直接 `GATE reason=probe_zero rc=4 blocked=…` 退出，**不再产出那种「看着像到端钳制、其实是恒 0」的 sweep**。闸门拒绝出数时**每种前提失效给一个 `reason=` 和一个退出码**（4=probe_zero / 5=host_buffer / 6=bg_low / 7=frame_none / 8=host_not_ready）——上一版三种前提全退 4，而「宿主缓冲有残留」那种还**不打 `PRE_PROBE` 行**，第三人照 §10 复跑就会把「工装没跑起来」读成「证伪成立」；本轮已把两种失效各复跑一份（`ev_ac47_gate_probe_zero.txt` / `ev_ac47_gate_host_buffer.txt`），§10-4b 也补了跑前复位（13:06 我第一次跑对调档时闸门还没上，拿到的就是一份全 0 的假钳制输出，已删）。同时补底色闸门：`ime_frame()` 报 988 不代表键盘画在 inset 上（别的 run 收掉键盘后 inset 会残留），候选带底色对本包 `#F4F5F7` 的命中率低于 50% 即拒绝出数。
 
-### 3.1 规格 §4 判据逐条（编号 = 规格编号，行号 = `28c1cac` 规格行号）
+### 3.1 规格 §4 判据逐条（编号 = 规格编号，行号 = `8324b03` 规格行号）
 
 | 规格判据（行号） | 期望 | 实测 | 判定 |
 |---|---|---|---|
-| **AC-1** 候选条空态高度不变（`:396`） | 空态 → **有候选态** Δ=0 | **A 包（c524351）**：440/fs1.0 `shijian` 988→988、`dashu` 988→988；440/fs1.15 988→988 ×2；520/fs1.15 `shijian` 1168→1168（`dashu` 被闸门拦下不给数）。**B 包（集成候选）**：440/fs1.0 952→952 ×2、440/fs1.15 952→952 ×2、520/fs1.15 1128→1128。每组都先过 §2.5 五道闸门（`GATES` 行：`readback_equals_code=True`、`chip_text_equals_code=True`、`scrollview_visible=True`、`cand_visible≥4`、`pool_at_least≥8`） | **PASS**（`ev_r5_440.txt`、`ev_r5_520_fs115.txt`、`ev_r5u_440.txt`、`ev_r5u_520.txt`）。旧三组 Δ 已作废重测，见 §2.5 |
-| **AC-2** 双击空格出句号（`:410`）**软键路径** | 窗口内第二次空格出「。」 | `ac2.py … soft`：连点两次（wall≈0）→`。`；两次 adb 调用（68.2ms）→`。`；间隔 577.1ms →`␣␣`（窗口外，语义正确）；三连点 →`。␣`。同轮 `SWITCH state=True src=datastore raw_hex=12020801` | **PASS**（`ev_ac2_soft.txt`）。三项披露见 §3.1a |
+| **AC-1** 候选条空态高度不变（`:413`） | 空态 → **有候选态** Δ=0 | **A 包（c524351）**：440/fs1.0 `shijian` 988→988、`dashu` 988→988；440/fs1.15 988→988 ×2；520/fs1.15 `shijian` 1168→1168、**`dashu` 1168→1168（第六轮闸门解耦后这一档出数了，不再是「被闸门拦下不给数」）**。**B 包（集成候选）**：440/fs1.0 952→952 ×2、440/fs1.15 952→952 ×2、520/fs1.15 1128→1128。每组都先过 §2.5 三条 Given 闸门（`GATES` 行在第六轮的字段名：`given1_chip_equals_code` / `given1_readback` / `given2_candidate_row_present` + `cand_count` / `given3_pool_at_least` + `need_pool`；第五轮那版叫 `readback_equals_code`/`chip_text_equals_code`/`scrollview_visible`/`cand_visible≥4`/`pool_at_least`，其中 `cand_visible≥4` 第六轮已移出闸门） | **PASS**（`ev_r5_440.txt`、`ev_r5_520_fs115.txt`、`ev_r5u_440.txt`、`ev_r5u_520.txt`；520/`dashu` 那组的 Δ 见 `ev_r6_ac10_decoupled.txt` 的 `RESULT … empty=1168 comp=1168 delta=0`）。旧三组 Δ 已作废重测，见 §2.5 |
+| **AC-2** 双击空格出句号（`:427`）**软键路径** | 窗口内第二次空格出「。」 | `ac2.py … soft`：连点两次（wall≈0）→`。`；两次 adb 调用（68.2ms）→`。`；间隔 577.1ms →`␣␣`（窗口外，语义正确）；三连点 →`。␣`。同轮 `SWITCH state=True src=datastore raw_hex=12020801` | **PASS**（`ev_ac2_soft.txt`）。三项披露见 §3.1a |
 | **AC-2** **硬件·注入键路径** | 同上 | A 包：`input keyevent 62 62`（单进程，间隔≈0）→`␣␣`；两次 adb（39.1ms）→`␣␣`；569.6ms →`␣␣`；三连发 →`␣␣␣`。**B 包复跑（17:20）**：单进程两连发（`wall_between_ms=0`）→`␣␣`；两次 adb（53.4ms）→`␣␣`；549.6ms →`␣␣`；三连发 →`␣␣␣`，同轮 `SWITCH state=True raw_hex=12020801`、`IDENT match=True` 双端 | **FAIL（P1 · D1）** — 两包一致，间隔已排除工装因素；根因见 §3.3 D1（`ev_ac2_hw.txt`、`ev_r5u_ac2_hw.txt`） |
 | **AC-2** 反例（开关关，两路径各一组） | 只出空格 | 软键 `␣␣`、硬件键 `␣␣`，同轮 `SWITCH state=False raw_hex=12020800`（键存在且值为 false，不是「没写过」）；B 包复跑同样 `state=False` → `␣␣` | **PASS**（`ev_ac2_soft.txt` / `ev_ac2_hw.txt` / `ev_r5u_ac2_hw.txt`） |
-| **AC-3** 双击空格不与「上屏首选」打架（`:423`） | 组合非空时首格上屏首选、不出「。」 | 打 `shi`→首格=`是`；再按一次=`是疑是地上霜`（继续上屏联想/候选，未插句号） | **PASS**。三项披露见 §3.1a |
-| **AC-4** 连续横滚生效（`:432`，用硬件键步长定标） | `=`（KEYCODE_EQUALS / 70）→ `scrollCandidates(+1)` = +198±6px（+72dp @440） | `ac47.py`：连按 24 次每档 +198（err ≤3.05，cum 4752）；第 25 次 +140（err 5.05 → 按自家口径不可判，正是快到位时 `smoothScrollBy` 被截短）；第 26 次起恒 0 | **PASS**（`ev_ac47b.txt`） |
-| **AC-5** 左右边界不循环（`:446`） | `-`（KEYCODE_MINUS / 69）→ −198px，到端钳制 | 单档 −198 err 2.56；反向连按 23 档 −198 + 末档 −140（err 4.18）后归零，左端钳制在第 25 次，cum −4694 | **PASS**（`ev_ac47b.txt`） |
-| **AC-6** 起手区约束：带外手势不得驱动横滚（`:459`） | 带外位移=0 | 用旧「G4」行数据（裁决 §3 指定归属）：键区横滑 shift=0（err 0.0）；工具栏横滑 shift=0（err 0.0）；起点在候选带**下沿外 23px**（y=1500）竖滑 dy=60 → shift=0、不上屏 | **PASS（范围限定）**（`ev_ac47b.txt`、`ev_vswipe_c.txt`）。旧 §3「AC-6 边界不绕回」那一行按规格编号属于 **AC-5**，其 cum 记账口径说明保留在 §3.1b |
-| **AC-7** 竖向/斜向不误滚、不误上屏（`:469`） | 滚动态下纯竖滑不驱动横滚；斜滑方向与直接操作一致 | `ev_vswipe_a.txt` 的 `commit_dy200`（dy=200 → 不上屏、不横滚）+ `ev_vswipe_b.txt` 的 `dy110_dx160`（斜滑 −264px、err 4.37 可判）——**幅度口径替代**：规格写的是「小幅度竖滑/斜滑」，本轮可判样本落在 dy=200（大幅度不上屏）与 dy=110/dx=160（斜滑方向），没有 dy<90 的可判横滚样本 | **PASS（幅度口径替代，n=1 的斜滑只够定方向）** |
-| **AC-8** 按键音效（`:482`） | 本期不采纳、无验收项 | 不测 | **N/A**（规格原文即「本期不采纳」） |
-| **AC-9** 长按连删保留（`:486`，`:488-491` 判据「按住 1.5s → 删除字符数 > 3」） | 两句分开判 | ① **1.5s → >3 字：PASS（实测）**。A 包 `ac9.py`：200ms→1、1000ms→7、**1500ms→13**、2000ms→21（`rate_ms` 200.0/142.9/115.4/95.2）；B 包：200→1、1000→8、**1500→9**、2000→17。旧 `ev_ac9.txt` 只有 200/1000/2000 三档，当时写的「1.5s≈10 字」是**按现有两点内推、非实测读数**，本轮已补 1500ms 实测档取代它。② **阶梯单调/加速关系**：两包都成立（越按越快、删除数随时间超线性）。判据用的宿主文本是**已上屏中文**（逐码 space 上屏首选），因为组合缓冲里的退格走删 composing 的另一条路径，不是 AC-9 说的「删除字符」 | **PASS（实测）**（`ev_r5_ac9.txt`、`ev_r5u_ac9.txt`）。工装披露：`PROBE_RETRY first_deleted=0` —— 注入式同点 `input swipe` 长按偶发丢手势，脚本先做一次 200ms 探针（必须恰好删 1 字）才允许后续档位出数，长度一律连读稳定值（`hold()`） |
-| **AC-10a** 完整可见候选 ≥4（裁决 §5 升格，硬门限） | 实际渲染前 4 条完整可见 | 440dpi/fs1.0：`shijian` full=4（cand=5）、`dashu` full=4；440/fs1.15：`shijian` full=4、`dashu` full=4（cand=4）。**520dpi/fs1.15：`shijian` full=3 < 4 → FAIL**（第 4 条 x=961..1059 被屏幕右边界切掉，`badge_clipped=True`）；`dashu` 该档 `GATE reason=cand_low rc=13` 不给数。**B 包同形**：440 全 4、520 `shijian` full=3 FAIL、`dashu` GATE | **440 PASS / 520·fs1.15 FAIL** → 记 PR #18 变更面缺陷 **D3**，交 PM 定级（§3.3） |
-| **AC-10b** 混合词长（含 4 字长词） | 只入账不判 | 440/fs1.0 `dashu` 的 idx1 是 3 字词（glyph_w_dp=68.4、pitch 278），440/fs1.15 `dashu` idx1 glyph_w_dp=75.6/pitch 298 仍完整可见 → 440 档长词不破坏 ≥4；520/fs1.15 长词档连闸门都过不了（可见候选 3 < 4） | **记录**：达不到 4 条 → 规格 §2.1 与实现的真实冲突，**回 UX/UI + PM 裁**（缩 chip 宽度 vs 放宽词长口径），不由测试自处 |
+| **AC-3** 双击空格不与「上屏首选」打架（`:440`） | 组合非空时首格上屏首选、不出「。」 | 打 `shi`→首格=`是`；再按一次=`是疑是地上霜`（继续上屏联想/候选，未插句号） | **PASS**。三项披露见 §3.1a |
+| **AC-4** 连续横滚生效（`:453`，用硬件键步长定标） | `=`（KEYCODE_EQUALS / 70）→ `scrollCandidates(+1)` = +198±6px（+72dp @440） | `ac47.py`：连按 24 次每档 +198（err ≤3.05，cum 4752）；第 25 次 +140（err 5.05 → 按自家口径不可判，正是快到位时 `smoothScrollBy` 被截短）；第 26 次起恒 0 | **PASS**（`ev_ac47b.txt`） |
+| **AC-5** 左右边界不循环（`:467`） | `-`（KEYCODE_MINUS / 69）→ −198px，到端钳制 | 单档 −198 err 2.56；反向连按 23 档 −198 + 末档 −140（err 4.18）后归零，左端钳制在第 25 次，cum −4694 | **PASS**（`ev_ac47b.txt`） |
+| **AC-6** 起手区约束：带外手势不得驱动横滚（`:480`） | 带外位移=0 | 用旧「G4」行数据（裁决 §3 指定归属）：键区横滑 shift=0（err 0.0）；工具栏横滑 shift=0（err 0.0）；起点在候选带**下沿外 23px**（y=1500）竖滑 dy=60 → shift=0、不上屏 | **PASS（范围限定）**（`ev_ac47b.txt`、`ev_vswipe_c.txt`）。旧 §3「AC-6 边界不绕回」那一行按规格编号属于 **AC-5**，其 cum 记账口径说明保留在 §3.1b |
+| **AC-7** 竖向/斜向不误滚、不误上屏（`:490`） | 滚动态下纯竖滑不驱动横滚；斜滑方向与直接操作一致 | `ev_vswipe_a.txt` 的 `commit_dy200`（dy=200 → 不上屏、不横滚）+ `ev_vswipe_b.txt` 的 `dy110_dx160`（斜滑 −264px、err 4.37 可判）——**幅度口径替代**：规格写的是「小幅度竖滑/斜滑」，本轮可判样本落在 dy=200（大幅度不上屏）与 dy=110/dx=160（斜滑方向），没有 dy<90 的可判横滚样本 | **PASS（幅度口径替代，n=1 的斜滑只够定方向）** |
+| **AC-8** 按键音效（`:505`） | 本期不采纳、无验收项 | 不测 | **N/A**（规格原文即「本期不采纳」） |
+| **AC-9** 长按连删保留（`:509`，`:514-516` 判据「按住 1.5s → 删除字符数 > 3」） | 两句分开判 | ① **1.5s → >3 字：PASS（实测）**。A 包 `ac9.py`：200ms→1、1000ms→7、**1500ms→13**、2000ms→21（`rate_ms` 200.0/142.9/115.4/95.2）；B 包：200→1、1000→8、**1500→9**、2000→17。旧 `ev_ac9.txt` 只有 200/1000/2000 三档，当时写的「1.5s≈10 字」是**按现有两点内推、非实测读数**，本轮已补 1500ms 实测档取代它。② **阶梯单调/加速关系**：两包都成立（越按越快、删除数随时间超线性）。判据用的宿主文本是**已上屏中文**（逐码 space 上屏首选），因为组合缓冲里的退格走删 composing 的另一条路径，不是 AC-9 说的「删除字符」 | **PASS（实测）**（`ev_r5_ac9.txt`、`ev_r5u_ac9.txt`）。工装披露：`PROBE_RETRY first_deleted=0` —— 注入式同点 `input swipe` 长按偶发丢手势，脚本先做一次 200ms 探针（必须恰好删 1 字）才允许后续档位出数，长度一律连读稳定值（`hold()`） |
+| **AC-10a** 完整可见候选 ≥4（规格 `:540`，硬门限） | 实际渲染的前 4 条完整可见 | **440dpi 四组全 PASS**：fs1.0 `shijian` full=4（cand=5）、`dashu` full=4（cand=5）；fs1.15 `shijian` full=4（cand=5）、`dashu` full=4（cand=4）。**520dpi/fs1.15 两包两码四组全 FAIL**：`shijian` `full_count=3 cand_count=4`（第 4 条 idx3 x=961..1059 越采样右界，`badge_clipped=True`、`glyph_w_dp=11.4` —— 只剩 9px 字身）、`dashu` `full_count=3 cand_count=3`（三条都在位、就是凑不满 4）。读数**两路互证**：设备当场（`fs115.py … 520 1.15 … a6`）与交付帧离线重算（`ac10_offline.py`，A 包 `a6_520_*` 两帧逐字段相同）；B 包六帧同判。**双口径并列**：规格采样区口径 `x_end=1060@520 / 1064@440` 与屏宽口径 `x_end=1080` 在 **8/8 帧同判**（`boundary=False`）→ 本轮没有需要交洞察BA 复核的边界档 | **440 PASS / 520·fs1.15 FAIL**（两码都 FAIL，不再是「一码 FAIL、一码不给数」）→ 记 PR #18 变更面缺陷 **D3**，交 PM 定级（§3.3）。`ev_r6_ac10_decoupled.txt`、`ev_r6_ac10_offline.txt`、`ev_r6_calibers.txt`；第五轮那四份 `ev_r5_*/ev_r5u_*` 仍入库、其 `AC10` 行口径按 §11.1 逐文件标注 |
+| **AC-10b** 混合词长（含 4 字长词，规格 `:541`） | 只入账不判（逐项 x0/x1/墨迹/pitch 全记） | **每一帧都出 verdict，一帧不落**，`AC10b` 行永远跟着打并给归因：440/fs1.0 `dashu` idx1 是 3 字词（`glyph_w_dp=68.4`、pitch 278）、440/fs1.15 idx1 `75.6`/pitch 298 仍完整可见 → `reason=meets_threshold`（440 档长词不破坏 ≥4）；**520/fs1.15 `shijian`** `clipped_idx=[3]` → `reason=viewport_clip`（第 4 条被视口右界切掉）；**520/fs1.15 `dashu`** `clipped_idx=[]`、三条都在位 → `reason=long_word_budget`（词长预算装不下 4 条）。A、B 两包 8 帧的 `reason` 全部落在 `meets_threshold` / `viewport_clip` / `long_word_budget` 三值内 | **记录**（`reason` 是「为什么不足 4 条」的归因，**不是免判通道**）：520 档达不到 4 条 → 规格 §2.1 与实现的真实冲突，**回 UX/UI + PM 裁**（缩 chip 宽度 vs 放宽 §2.1 词长口径；规格 `:592` 那条「三角无解时以可读性优先」同样适用），不由测试自处 |
+| **AC-11** 带内近垂直短拖不得上屏（规格 `:547`，2026-11-17 立条） | 带内 dy 40–80px 的近垂直拖动什么都不做 | **本轮不测**（规格原文即「本轮不测」）。既有债的依据当场核过：`git show fa57a07:...CandidateView.kt \| grep -ci slop` = **0**、`git show c524351:...` 同样 = **0** → 竖向 slop 判定在 main 与 PR #18 上都不存在，同一处代码、同一行为（`ev_r6_calibers.txt` ③）。已实测到的数据（dy=40/60/80/90 上屏、阈值 90–100px ≈33–36dp）**留在 §8-4 作观察项，不折进 AC-7 判定行**——规格 `:503` 明确「AC-7 的判据对象只有落点出带那一档，带内短拖另立 AC-11，不得据此判 AC-7 FAIL」 | **N/A（本轮不测，既有债，不计入 PR #18 拦路面）**；修复口径（自加竖向 slop 判定）与用例交 Stage 2，规格 `:407` 已建议新开 issue |
 
 #### 3.1a AC-2 / AC-3 的三项披露（裁决 §4 / 打回项 4）
 
@@ -166,12 +191,13 @@ package:com.sohu.inputmethod.sogou
 
 **D3 · 待 PM 定级（本轮新增，PR #18 变更面内）· `spec-AC-10a` 在 520dpi / font_scale 1.15 不成立**
 
-- 环境：A 包与 B 包各测一轮，闸门全过（`GATES … cand_visible=4 pool_at_least=17`）、`IDENT match=True` 双端、宿主回读 == 所敲串。
-- 实测：520dpi / fs1.15 敲 `shijian` → 可见候选 4 条，但**完整可见只有 3 条**：idx0 x=241..510（字身 282..465）、idx1/2 pitch 225 完整、**idx3 x=961..1059 被屏幕右边界切掉**（`x_end=1060`、`badge_clipped=True`）→ `AC10 verdict=FAIL full_count=3 need=4`。同档敲 `dashu`（含 3 字长词）→ 可见候选只剩 3 条，闸门 `GATE reason=cand_low rc=13` 直接拒绝出数。
-- 期望（裁决 §5 AC-10a 硬门限）：实际渲染的前 4 条 ≥4 完整可见。**实际：3 条。**
+- 环境：A 包第六轮当场重跑（`ev_r6_ac10_decoupled.txt`，520dpi / font_scale 1.15，两个码各一轮）、B 包第五轮同档数据保留（`ev_r5u_520.txt`）。第六轮 A 包侧 `IDENT match=True`、规格 §525 三个 Given 全过（`given1_chip_equals_code=True`、`given2_candidate_row_present=True`、`given3_pool_at_least` = 17 / 13，门槛 `need_pool=8`）。
+- 实测 · `shijian`：可见候选 4 条（`cand_count=4`），**完整可见只有 3 条**（`full_count=3`）——idx3 落在 `x=961..1059`，被采样右界 `x_end=1060` 切掉（`badge_clipped=True`）→ `AC10 verdict=FAIL need=4`；双口径同判（`verdict_screen=FAIL`，`x_end=1080` 口径也是 3 条）、`boundary=False`；`AC10b reason=viewport_clip clipped_idx=[3]`。
+- 实测 · `dashu`（含 3 字长词）：可见候选 **3 条**（`cand_count=3`）、完整 3 条（`full_count=3`）→ 同样 `verdict=FAIL`；`AC10b reason=long_word_budget clipped_idx=[]`；同档同轮取到 `pool=13`（≥8，满足 Given ③）。**第六轮起这一档不再被拒出数**：第五轮写的是 `GATE reason=cand_low rc=13`（当时「可见候选 ≥4」被误当闸门），按裁决 §9.2 把 `MIN_CAND` 降回 1 后，两条判据行都在，历史读数语义见 §11.1。
+- 期望（`8324b03:540` AC-10a 硬门限）：实际渲染的前 4 条 ≥4 完整可见。**实际两码都是 3 条**，且与「谁被切掉」无关（一个是视口裁切、一个是长词占预算）。
 - 用户可见影响：真机密度 + 系统字体放大 1.15 时，候选条一屏看不全 4 个词，而本期恰好「去掉翻页键、改横向滑动」——翻页补偿已经没了，只能靠滑动，滑动又没有可视线索。
-- 两包同形（B 包 520/fs1.15 `shijian` full=3、`dashu` GATE）→ **不是 VOCA-170/184/207 带来的，也不是被它们掩盖的**。
-- 归属：按裁决 §5 末句「若测出 FAIL，记 PR #18 变更面缺陷、交 PM 定级」——本报告不定级、不替 PM 决定能否接受；AC-10b（混合词长）那部分按裁决回 **UX/UI + PM** 裁「缩 chip 宽度 vs 放宽 §2.1 词长口径」，不由测试自处。
+- 两包同形（B 包 520/fs1.15 `shijian` full=3、`dashu` 同样不足 4 条）→ **不是 VOCA-170/184/207 带来的，也不是被它们掩盖的**。
+- 归属：判据是规格 `8324b03:540`（AC-10a）；「若测出 FAIL，记 PR #18 变更面缺陷、交 PM 定级」是裁决 §5 末句的处理口径——本报告不定级、不替 PM 决定能否接受；AC-10b（`8324b03:541`，混合词长）那部分按裁决回 **UX/UI + PM** 裁「缩 chip 宽度 vs 放宽 §2.1 词长口径」，不由测试自处。
 - 复跑：`python3 tools/qa/voca-37/fs115.py <apk> 520 1.15 shijian,dashu`（§10-2）。
 
 ## 4. 命名必证项：恒高 46dp × font_scale 1.15 会不会截字（第五轮重测）
@@ -179,6 +205,8 @@ package:com.sohu.inputmethod.sogou
 规格点名的本轮最可能新缺陷：候选条用固定 `layout_height=46dp`（`candidate_view.xml:10`，注释说明「用 height 而不是 minHeight——候选字号是 sp，minHeight 兜不住 font_scale 放大后的内容高度」），内行 `minHeight=38dp`；1.15 下内容 38.2dp 被压进 38dp 可能截字。
 
 **旧 §4 的三行墨迹/留白数据已作废**（chip-only 伪装态，见 §2.5），下表是带闸门重测后的新口径：字身墨迹只在 **chip 右沿 + 1** 之后量，角标圆片按外形剔除，`tangent_items` = 与带内沿相切（= 被截）的候选条数。
+
+**本节数据仍是第五轮那批**（第六轮的打回项 1/2/3/5/6 都不落在截字面上，被测包也没换，`IDENT match=True` 同一条），口径按 §3 开头那条「读数以 stdout 为准」执行：下表 `ev_r5_440.txt` / `ev_r5_520_fs115.txt` 的 `INK`/`CAND` 行是原文，对应的 A 包 440dpi 候选带帧当时被 B 包覆盖、未入库（§13.5）。
 
 | 参数 / 包 | 键盘高（空态→有候选态） | 候选带 | 字身墨迹（chip 右侧） | 上下留白 | 截字判定 | 原文证据 |
 |---|---|---|---|---|---|---|
@@ -193,18 +221,23 @@ package:com.sohu.inputmethod.sogou
 
 ## 5. 占屏比：440dpi 达标，按真机参数复现时不达标（本轮 no-go 主因）
 
-| 口径 | iSpeech | 搜狗 | 差值 | 预算 ≤1pp |
+| 口径（每行都标取数窗口＋文件名） | iSpeech | 搜狗 | 差值 | 预算 ≤1pp |
 |---|---|---|---|---|
-| A 包 440dpi / fs1.0（模拟器原生） | 988px = **42.22%** | 978px = 41.79% | **+0.43pp** | ✓ |
-| A 包 520dpi / fs1.15（模拟器模拟真机参数，非真机定稿） | 1168px = **49.91%** | 1002px = 42.82% | **+7.09pp** | ✗ |
-| **B 包（集成候选）440dpi / fs1.0** | **952px = 40.68%** | 978px = 41.79% | **−1.11pp** | ✓（本包比搜狗矮） |
-| **B 包 520dpi / fs1.15** | **1128px = 48.21%** | 1002px = 42.82% | **+5.39pp** | ✗ |
+| **A 包 440dpi / fs1.0**（模拟器原生）· 第六轮同窗重测 22:03:47→22:04:04 vs 22:02:17→22:02:37 · `ev_r6_pp_window.txt` | 988px = **42.22%** | 978px = 41.79% | **+0.43pp** | ✓ |
+| **A 包 440dpi / fs1.15** · 同一窗口 22:04:21 vs 22:03:09 · `ev_r6_pp_window.txt` | 988px = **42.22%** | 978px = 41.79% | **+0.43pp** | ✓ |
+| **A 包 520dpi / fs1.15**（模拟器模拟真机参数，**非真机定稿**）· 同一窗口 22:04:38 vs 22:03:29 · `ev_r6_pp_window.txt` | 1168px = **49.91%** | 1002px = 42.82% | **+7.09pp** | ✗ |
+| **B 包（集成候选）440dpi / fs1.0** · 第五轮 · `ev_r5u_440.txt`（文件内**无逐帧 `ts=`**，取数时刻只能追到入库提交 `6bcd6db` 17:39:19；对照物 978px 出自首测窗口 `ev_sogou440.txt`） | **952px = 40.68%** | 978px = 41.79% | **−1.11pp** | ✓（本包比搜狗矮） |
+| **B 包 520dpi / fs1.15** · 第五轮 · `ev_r5u_520.txt`（同上，无逐帧时间戳；对照物 1002px = `ev_sogou520.txt`，首测窗口） | **1128px = 48.21%** | 1002px = 42.82% | **+5.39pp** | ✗ |
+
+第六轮 A 包三档是在**一个连续窗口内先测搜狗、再测 iSpeech**（`WINDOW phase=open/close` 两段，22:02:17 → 22:04:39，中间不重启、不改其它设置），两侧都在敲完 `shijian` 的**组合态**下读 `type=ime` inset，iSpeech 侧每帧带 `IDENT … match=True`（逐条目比 `classes*.dex` + `resources.arsc` 的 sha256，被测确为 `c524351`）。同窗口读数与首测窗口入库值（`ev_sogou440.txt`=978 / `ev_sogou520.txt`=1002）**逐位一致** → 跨 run 复用不会翻转拦路项方向，这也是裁决 §9.4 敏感性算术要的结论。
+
+**上一版这里写的「搜狗基准沿用同机当场重测值、本轮未重测搜狗」已订正**：首测窗口（11-17 03:40–05:20，iSpeech 侧 15:05–17:25）与第六轮同窗重测现在都在表里，口径按裁决 §9.4 打回项 1 逐行署名，不再有一句「所有对照值均为当场重测」的笼统断言。
 
 机制：本包键高/候选条全部按 dp 布局，密度 440→520 时键盘像素高度同比放大（A 包 988→1168，×1.18 = 520/440）；搜狗用 px 资源（978→1002，×1.02）。所以 440dpi 下 +0.43pp 的余量在真机密度下会被放大成约 +7pp。**这不是 VOCA-46 引入的回归（52→46dp 反而收窄了差值），但它直接决定「占屏 ≤1pp」这条验收在真机上成不成立，模拟器无权定稿。**
 
-**B 包带来的新事实（合并窗口要看的）**：VOCA-184 把字母键行内留白从 4dp 收到 1dp 之后，键盘总高从 988/1168 降到 **952/1128**（−36px / −40px），440dpi 由「比搜狗高 0.43pp」变成「比搜狗矮 1.11pp」，520dpi 的差值从 +7.09pp 收窄到 **+5.39pp**。也就是说 pp 这条拦路项的**具体数值取决于合并窗口最终收了哪些 PR**——本报告按 A、B 两个口径同时给数，真机定稿时必须写明当时的 main SHA，否则数字不可比。搜狗基准 978/1002 沿用同机当场重测值（`ev_sogou115.txt` / `ev_sogou520.txt`，本轮未重测搜狗，包体没变）。
+**B 包带来的新事实（合并窗口要看的）**：VOCA-184 把字母键行内留白从 4dp 收到 1dp 之后，键盘总高从 988/1168 降到 **952/1128**（−36px / −40px），440dpi 由「比搜狗高 0.43pp」变成「比搜狗矮 1.11pp」，520dpi 的差值从 +7.09pp 收窄到 **+5.39pp**。也就是说 pp 这条拦路项的**具体数值取决于合并窗口最终收了哪些 PR**——本报告按 A、B 两个口径同时给数，真机定稿时必须写明当时的 main SHA，否则数字不可比。
 
-→ 真机必做：520dpi / font_scale 1.15 下重测 iSpeech 与搜狗的 ime inset，给出定稿 pp 差。
+→ **真机值到位前，上表所有 pp 一律「未定稿」**（裁决 §9.3：这是**附加缺口**，不是本轮 FAIL 的主因；主因是 §3.1 的 spec-AC-2 硬件/注入键路径与 spec-AC-10a @520dpi·fs1.15）。真机必做：520dpi / font_scale 1.15 下重测 iSpeech 与搜狗的 ime inset，给出定稿 pp 差。
 
 ## 6. §9.8 五条未验证路径
 
@@ -234,26 +267,39 @@ check_static.py      SUMMARY: passed=6   failed=0 warned=0
 check_crosscut.py    SUMMARY: passed=156 failed=0 warned=0
 check_input_logic.py SUMMARY: passed=40  failed=0 warned=0     ← 此前「EmojiData FAIL」的说法作废
 check_t9.py          SUMMARY: passed=87  failed=0 warned=1
-./gradlew :app:testDebugUnitTest --tests "com.ispeech.input.*"  → BUILD SUCCESSFUL
-  InputModePolicyTest  tests=5 failures=0
-  SpaceKeyPolicyTest   tests=9 failures=0   （含 双击窗口/链条优先级/英文态/无障碍 600ms/中文标点关闭/光标前非空格不破坏性删除）
 ```
 
-全量 `./gradlew :app:testDebugUnitTest` 有 1 条已知基线噪声 `AgentDispatcherTest > initializationError`（与本轮无关），故按 issue 口径用 `--tests "com.ispeech.input.*"` 过滤，不以此掩盖真实失败。
-
-**B 包（集成候选 `cffc0cd`）当场执行**（16:55 构建、16:57 出结果）：
+**JVM 单测（第六轮按裁决 §9.4 打回项 5 补的原文入库，`ev_r6_gradle_a.txt`，两次都带 `--rerun`）**：
 
 ```
-./gradlew :app:testDebugUnitTest --tests "com.ispeech.input.*" --tests "com.ispeech.settings.keyboard.*"  → EXIT=0
+$ ./gradlew --offline :app:testDebugUnitTest --rerun --tests com.ispeech.input.SpaceKeyPolicyTest --tests com.ispeech.input.InputModePolicyTest
+BUILD SUCCESSFUL   （22:20:31 → 22:20:33 +0800）
+InputModePolicyTest   tests=5 failures=0 errors=0 skipped=0
+SpaceKeyPolicyTest    tests=9 failures=0 errors=0 skipped=0   ← 14 条 / 0 失败，AC-2 双击空格判据的契约锁（VOCA-46 新增 195 行）
+
+$ ./gradlew --offline :app:testDebugUnitTest --rerun
+56 tests completed, 1 failed   BUILD FAILED（rc≠0）   （22:20:38 → 22:20:39 +0800）
+AgentDispatcherTest tests=1 failures=1  <failure message="java.lang.RuntimeException: Delegate runner … AndroidJUnit4ClassRunner … could not be found."
+```
+
+全量那 **1 条失败是 main 既有缺陷，不是本变更面回归**：`AgentDispatcherTest` 用 `@RunWith(AndroidJUnit4::class)` 放在**本地 JVM 单测**源集，单测 classpath 没有 androidx.test runner → `throwInitializationError`，整类以 `initializationError` 收口（`tests=1` 是合成的那条，它的 4 个 `@Test` 一条都没跑）。`git diff --stat fa57a07 c524351 -- app/src/test` 显示 PR #18 对 test 源集**只新增** `SpaceKeyPolicyTest.kt`，没碰它 → 建议单开 issue 交后端/架构。§1 的门禁口径按「**56 条 / 1 失败（既有）**」写，不写成 0 失败。
+
+**B 包（集成候选 `cffc0cd`）当场执行**（16:55:59 出结果，原文 `ev_r6_gradle_b.txt` + 4 份 `ev_r6_gradle_b_*.xml` 逐 testcase 可查）：
+
+```
+$ ./gradlew --offline :app:testDebugUnitTest --tests com.ispeech.input.SpaceKeyPolicyTest \
+      --tests com.ispeech.input.InputModePolicyTest --tests com.ispeech.input.KeyHitTesterTest \
+      --tests com.ispeech.settings.keyboard.KeyboardViewModelInitOrderTest
+BUILD SUCCESSFUL（rc=0）
   input.InputModePolicyTest              tests=5 failures=0 errors=0 skipped=0
   input.SpaceKeyPolicyTest               tests=9 failures=0 errors=0 skipped=0
   input.KeyHitTesterTest                 tests=6 failures=0 errors=0 skipped=0   ← VOCA-184 新增（零死区命中）
   settings.keyboard.KeyboardViewModelInitOrderTest  tests=2 failures=0 errors=0 skipped=0  ← VOCA-170 新增（源码结构锁死 init 顺序）
 ```
 
-合并没破坏任何一条守卫：**22 tests / 0 failures / 0 skipped**。原始出处 `voca47-union/app/build/test-results/testDebugUnitTest/TEST-*.xml`。B 包的静态门禁脚本（`check_*.py`）未重跑——三条 PR 里只有 VOCA-207 动了 `tools/verify/check_quick_trigger.py` / `check_phrase_csv_import.py`，属快捷字母域，不在本 issue 的键盘交互面上；要跑全量静态门禁应在真实合并窗口的产物上做（§13.4）。
+合并没破坏任何一条守卫：**22 tests / 0 failures / 0 skipped**。B 包所在的 `qa/merge-window-candidate-r5` 分支**有意不推 origin**（项目规则一/二/五：合并只能走统一合并窗口、需人类确认），裁决 §9.4 打回项 5 明确「不许为了让证据入库去 push B 包分支」→ 读数以 XML 原文入库，不靠分支可见性。B 包的静态门禁脚本（`check_*.py`）未重跑——三条 PR 里只有 VOCA-207 动了 `tools/verify/check_quick_trigger.py` / `check_phrase_csv_import.py`，属快捷字母域，不在本 issue 的键盘交互面上；要跑全量静态门禁应在真实合并窗口的产物上做（§13.4）。
 
-**被测产物来源（第三人复现时的比对基准）**：A 包 = `c524351` 在专用检出 `…/voca-47-37061cb47d5d/voca47-build`（`git rev-parse HEAD` = `c524351e2e509ed294f49dd3d2f7a1bf29e07a4d`）里 `assembleDebug` 产出 `app/build/outputs/apk/debug/app-debug.apk`，构建时间 11-17 15:25；B 包 = `cffc0cd` 在 `…/voca-47-37061cb47d5d/voca47-union` 里 `assembleDebug`，构建时间 11-17 16:55，整包 `sha256 = c302c89440a1e70db92017c11a45af1ebae2c77ad1b6f0156eb406c6866b72f1`（145,847,323 字节）。装到设备后 `ident()` 不按整包哈希比（签名/时间戳会漂），而是逐条目比 17 个 `classes*.dex` + `resources.arsc` 的 SHA256。
+**被测产物来源（第三人复现时的比对基准）**：A 包 = `c524351` 在专用检出 `…/voca-47-37061cb47d5d/voca47-build`（`git rev-parse HEAD` = `c524351e2e509ed294f49dd3d2f7a1bf29e07a4d`）里 `assembleDebug` 产出 `app/build/outputs/apk/debug/app-debug.apk`，构建时间 11-17 15:25；第六轮的打回项 1/2/3 在**另一个 detached worktree**（本 workspace 根的兄弟目录 `../voca47-c524351-build`，同一 `c524351`）重跑单测与装机，避免污染交付分支工作区，`ev_r6_pp_window.txt` 的 `IDENT … apk=` 与 `ev_r6_gradle_a.txt` 头部指的都是这个目录。B 包 = `cffc0cd` 在 `…/voca-47-37061cb47d5d/voca47-union` 里 `assembleDebug`，构建时间 11-17 16:55，整包 `sha256 = c302c89440a1e70db92017c11a45af1ebae2c77ad1b6f0156eb406c6866b72f1`（145,847,323 字节）。装到设备后 `ident()` 不按整包哈希比（签名/时间戳会漂），而是逐条目比 17 个 `classes*.dex` + `resources.arsc` 的 SHA256。
 
 ## 8. 规格/实现差异与观察项（按 PM 裁定不判 FAIL）
 
@@ -266,14 +312,14 @@ check_t9.py          SUMMARY: passed=87  failed=0 warned=1
    - **上一轮 `ev_g46.txt` 里「候选条竖滑/斜滑 shift=−870」作废**，按本报告 §3 自己定的口径（residual>5 不可判）本来就不该出结论：那是拿**上屏前后**两帧做互相关，候选池被 `CandidateView.kt:81` 的 `scrollTo(0,0)` 整体重置，比的是不同内容。本轮已入库的 **9 个**「上屏」case（`ev_vswipe_a` 4 个：dy=40/60/80 + 该 run 末尾的纯 tap 对照；`ev_vswipe_c` 4 个：dy=90 + 3 次纯 tap 对照；`ev_vswipe_b` 1 个：滚动态 dy=60。核对：`grep -c committed= True ev_vswipe_{a,b,c}.txt` → `4/1/4`）复现出同形状的假读数：非滚动态那 **8 次一律 −832（err 12.04）**，滚动态那 **1 次 −842（err 8.84）**，全部按口径记 `unverifiable(err>5.0)`，机制坐实。（上一版写的「−796 / err 11.78」在 `ev_vswipe_*` 三份文件里都不存在，是当场没入库的输出，本轮删掉。）
    - **「起点越出候选带仍能命中候选」撤回**：起点在带上沿外 215px（y=1137，落在宿主内容区）向下滑 215px，实测是**这一下手势把键盘收掉了、宿主焦点也没了**（`band_top=None`、`after='<NONE>'`、`ime_gone=True`），不能读成上屏。工装同步补口径：`committed` 只在 IME 仍在位且宿主文本可读时才置真，并另打 `ime_gone` 字段。
    - 工装风险提示：位移越小越容易被系统判成别的手势——dy=20 在带内起手时整条用例翻成「键盘被收掉」（见上面阈值条），说明这条用例对共享 AVD 的环境争用与手势识别阈值都敏感；判据一律以「同参数多次复跑读数一致」为准，单次读数不落表。
-   - **`dy=40..90` 短竖滑会上屏（单列观察，交 UX 裁）**：按裁决 §3 的口径，这一族读数**不属于规格 AC-7 的判据对象**（AC-7 管的是「竖向/斜向不误滚、不误上屏」里的可判横滚与大幅度手势，本轮 AC-7 用 `ev_vswipe_a.txt` 的 `commit_dy200` + `ev_vswipe_b.txt` 的 `dy110_dx160` 两条，见 §3.1），所以**不重测、不改判**；但「带内 40–90px 的小竖滑被当成点击、直接上屏首选」是真实的用户可见行为（想横滑选词时误上屏），**单列交 UX 裁定是否算缺陷**。数据：`ev_vswipe_a.txt`（dy=40/60/80 上屏）、`ev_vswipe_c.txt`（dy=90 上屏 / dy=100 不上屏，阈值 90–100px ≈ 33–36dp）。
+   - **`dy=40..90` 短竖滑会上屏 → 数据归属规格 AC-11（`8324b03:547`），不是 AC-7**：规格 `:503` 明确「本条（AC-7）的判据对象只有落点出带那一档……带内 dy 40–80px 的近垂直短拖会把候选上屏，**那是另一件事，见 AC-11**——不得写进本条判定行，也不得据此判 AC-7 FAIL」；AC-11 自己标的是「2026-11-17 新增，**本轮不测**」。所以这批读数是 AC-11 的**既有数据源**（规格 `:549` 起就是拿 `ev_vswipe_a.txt` 这条链路立条的），在 §3.1 里作为 **AC-11 = N/A** 行的支撑，不计入 PR #18 拦路面。数据：`ev_vswipe_a.txt`（dy=40/60/80 上屏）、`ev_vswipe_c.txt`（dy=90 上屏 / dy=100 不上屏，阈值 90–100px ≈ 33–36dp）。第六轮复核实现侧仍无 slop 判定：`git show fa57a07:app/src/main/java/com/ispeech/input/CandidateView.kt | grep -ci slop` = `0`、同命令打在 `c524351` 也是 `0`（`ev_r6_calibers.txt` ③）→ **AC-11 的修复在 main 与 PR #18 上都不存在**，属下一期条目，本轮不擅自判 FAIL、也不顺手修。
 
 ## 9. 未取证清单（真机 / 后续必须补）
 
 | # | 项 | 为什么模拟器判不了 | 归属 |
 |---|---|---|---|
-| 1 | 520dpi / fs1.15 的定稿占屏 pp | 模拟器只是「模拟真机参数」，字体渲染与厂商 ROM 不同 | SRE + 人类评审（装真机跑） |
-| 2 | §9.8 ③ T9 态 `-`/`=` 滚动、④ 上屏后偏移归零 | 模拟器软键坐标靠权重推算，面板态抢焦点；换真机或固化 uiautomator 定位后可测 | 测试（下轮补，非真机专属） |
+| 1 | 520dpi / fs1.15 的定稿占屏 pp | 模拟器只是「模拟真机参数」，字体渲染与厂商 ROM 不同。**设备侧事实**：真机 `FMR0224913042917` 自 11-13 起未再连上任何调试主机（`adb devices` 无该序列号），本轮（11-17 22:02–22:04）能用的只有 `emulator-5554` → pp 只能出「模拟器口径 + 未定稿」。降级档位在 **VOCA-451** 登记（见本节末行） | SRE + 人类评审（装真机跑） |
+| 2 | §9.8 ③ T9 态 `-`/`=` 滚动、④ 上屏后偏移归零 | 模拟器软键坐标靠权重推算，面板态抢焦点；换真机或固化 uiautomator 定位后可测。**已不是「下轮补」的口头挂账**——洞察BA 11-17 立了 **VOCA-443**（`backlog`，medium，无人接）专门收这两条，本轮结论仍写「未取证」，但**归属改为该单**，不再由本报告反复承诺 | VOCA-443（当前无 assignee，需 PM 推一把） |
 | 3 | 语音键上滑取消、语音失败文案 | 需要真实音频输入 | 测试 + 前端 |
 | 4 | TalkBack 真机朗读与 600ms 窗口 | 模拟器未装 TalkBack 服务态 | 测试 + UX |
 | 5 | 真机手指触摸的滚动/长按手感（fling 不可复现，本轮一律用 `-`/`=` 与 `input swipe` 固定位移） | 触摸离散度 | 人类评审 |
@@ -282,6 +328,10 @@ check_t9.py          SUMMARY: passed=87  failed=0 warned=1
 | 8 | **PR #9（VOCA-170 修复 `d3b6f84`）未合入 main，而 VOCA-170 看板状态与事实不符** | 模拟器判不了「该不该进哪个合并窗口」：这是范围/窗口裁决。本轮核到的事实——`gh pr view 9` → `state=OPEN`、`mergedAt=null`；`git merge-base --is-ancestor d3b6f84 origin/main` → rc=1（缺陷仍在 main）；`multica issue get VOCA-170` → **`status=in_review`**（裁决 §2 当时读到的是 `done`，本轮实测已漂，`updated_at=2026-11-17T07:26:53Z`）。B 包已验证「合了就修好」（§3.3 D2），剩下的只是落地位置 | PM + 人类评审 |
 | 9 | **VOCA-203 本体未取证** | 该 issue 现在 `in_progress`、**没有任何自己的实现提交**（阻塞在人类对「快捷字母长度基线」的答复，评论显示已停摆 63 小时）。本轮能覆盖的只有它的实现子单 VOCA-207（PR #11 `4d6363c`，仍 OPEN），且只覆盖到**键盘交互面**（候选条渲染、恒高、pp、退格阶梯）；快捷字母长度 / trigger 所有权 / 同步回写这三条判据属 VOCA-207/206 自己的验收面，不在本 issue 的回归范围 | 洞察BA + 前端（另单验收） |
 | 10 | **B 包 ≠ 合并窗口产物** | 三方合并的冲突由 QA 按「后合入者适配先合入者」解决（§13.1 清单），真实窗口若采用别的解法（例如保留 1 参 `backgroundFor` 重载、或给 `buildEnterKey` 换一套留白），§13.2/13.3 的结论必须在新产物上复跑；另外 `d283706` 误提交的 gitlink `.claude/worktrees/voca-74` 我是在本地排除的（§13.1 表末行、§13.3 D4），窗口里怎么处置需要人拍 | 项目经理（leader）+ 人类确认 |
+| 11 | **横滚的无障碍节点挂载层**（规格 `8324b03:589` 要求「确认可无障碍节点确实挂在 `candidate_scroll` 这层而不是外层 `LinearLayout`」） | 静态侧只能证到「全仓没有显式 scroll action 代码、也没有触摸探索分支」：`git grep -l -E 'ACTION_SCROLL_FORWARD\|ACTION_SCROLL_BACKWARD' fa57a07 -- app/src/main/java` → 命中 **0** 个文件，`git grep -l isTouchExplorationEnabled fa57a07` → **0**（`ev_r6_a11y_main.txt` C 段）。挂载层归属是运行时行为，要 TalkBack 或 `uiautomator dump` 实测，模拟器本轮未装无障碍服务态 | 测试 + UX |
+| 12 | `dy=20` 那一档「键盘整条被收掉」的成因 | 读数是确定的（`band_top=None`、`after='<NONE>'`、`ime_gone=True`），但分不清是手势被判成「下滑收起 IME」还是共享 AVD 的环境争用。需要 `InputDispatcher` / IME visibility 的 logcat 打点或真机手指触摸才能定因果；本轮只把「`dy=20` 不进判据」这条口径写死（§8-4），不写结论 | 测试 |
+| 13 | **规格 §8.5 那份 54 条「文档断言 → 代码行」清单在 `c524351` 上 24 条 FAIL** | 不是回归：清单本身锚的是 main 现状（`spec85_anchors.sh fa57a07` → **54/0**，逐行现算、非手抄）。24 条 = **21 条纯行号漂移 + 3 条实质变更**，那 3 条恰好是本轮采纳项的落点（`DEFAULT_KEY_HEIGHT_DP 52→46`、`keyHeightDp 52→46`、`candidate_view.xml minHeight 44dp→恒高 46dp`）。PR #18 合并后**必须重锚**，否则下一轮又出现「文档说 `:38`、代码在 `:39`」这类核空。归属文档层，本轮只报不改（裁决 §2-3 为同类问题付过代价） | UX + 架构 |
+| 14 | **真机不可用时 pp 怎么定级**（本轮暴露的规则缺口，不是本轮能自处的） | 本报告按「模拟器口径 + 一律未定稿」处理，但「设备缺席时哪几条判据可降级、哪几条必须拦」这条规则不在验收口径里，属于门禁规则本身的缺口。**已登记到 VOCA-451**（该单专门收这件事，`backlog`/high），本 issue 只交付事实与档位建议，不替它定规则 | VOCA-451（规则单）+ 洞察BA |
 
 ## 10. 复现方式
 
@@ -302,10 +352,21 @@ adb -s emulator-5554 install -r -d -g <app-debug.apk of c524351>
 adb -s emulator-5554 shell ime enable com.ispeech.ime/com.ispeech.input.IspeechImeService
 adb -s emulator-5554 shell ime set   com.ispeech.ime/com.ispeech.input.IspeechImeService
 
-# 2) 恒高 / 字体缩放 / 截字 / spec-AC-10（§3.1、§4；第五轮带闸门版）
+# 2) 恒高 / 字体缩放 / 截字 / spec-AC-10（§3.1、§4；第六轮闸门与判据解耦版，`MIN_CAND=1`）
 #    闸门不过就只打一行 GATE，stdout 不出现 RESULT/INK/delta（裁决 §6-1）
 python3 tools/qa/voca-37/fs115.py <apk> 440 1.0,1.15 shijian,dashu
-python3 tools/qa/voca-37/fs115.py <apk> 520 1.15 shijian,dashu    # dashu 这档实测是 GATE reason=cand_low rc=13
+python3 tools/qa/voca-37/fs115.py <apk> 520 1.15 shijian,dashu
+#    第 5 个位置参数 `label`（默认 `a`）是**截图文件名标记**，不是判定开关：`r5_<label>_<dens>_fs<fs>_<code>_<kind>.png`。
+#    加它的原因是第五轮 B 包复跑没带标记，把 A 包同名候选带裁图覆盖了（文本证据没受影响，但帧对不上包）。
+#    第六轮 A 包档传 `a6` → 帧名 `shots/r5_a6_520_fs1.15_shijian_{empty,comp}.png`；B 包那 8 帧是 label 方案加入**之前**跑的，
+#    文件名直接是 `shots/r5u_520_fs1.15_shijian_{empty,comp}.png`（不带 `r5_` 前缀）→ `ac10_offline.py` 按包分别拼名（`base = "r5_"+tag if pkt=="a6" else tag`）。
+
+# 2-e) 第六轮新增的三条（打回项 1 / 2 / 3 与 6 附）
+python3 tools/qa/voca-37/ppwin.py --ime sogou   --tiers 440:1.0,440:1.15,520:1.15
+python3 tools/qa/voca-37/ppwin.py --ime ispeech --tiers 440:1.0,440:1.15,520:1.15 --apk <c524351 的 app-debug.apk>
+#     同一个连续窗口内两侧各三档，只出 WINDOW/FRAME/RAW/IDENT（量高度、不出判据，不做宿主回读闸门）→ ev_r6_pp_window.txt
+python3 tools/qa/voca-37/ac10_offline.py       # 已交付帧离线复算 AC-10a 双口径 + AC-10b reason，重算与设备侧读数同值 → ev_r6_ac10_offline.txt
+bash  tools/qa/voca-37/spec85_anchors.sh <sha> # 规格 §8.5 那 54 条「文档断言→代码行」原样重跑；fa57a07 → 54/0，c524351 → 54/24 → ev_r6_spec85_main.txt
 
 # 2-a) 作废自查（打回项 1 的第 3 条自证）：旧帧重扫，旧口径墨迹逐位复现 + 新口径候选数
 python3 tools/qa/voca-37/voidcheck.py      # → FRAME/NEW/VERDICT/SUMMARY；rc=0 = 三帧全部低于 4 条闸门（作废成立）
@@ -420,12 +481,12 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ANDROID_HOME=/opt/homebrew/share/android-
 |---|---|---|
 | `ev_r5_voidcheck.txt` | 采信（作废自证） | 打回项 1 的第 3 条：旧口径墨迹逐位复现（1400..1441 / 1397..1445 / 1185..1284）+ 新口径 `cand_counts=440/fs1.0:0, 440/fs1.15:0, 520/fs1.15:1`、`ink_entirely_inside_chip=440/fs1.0, 440/fs1.15`，rc=0 → 三帧全部低于 4 条闸门，**旧 §4 三行与旧 §3 AC-1 三组 Δ 作废成立** |
 | `ev_r5_440.txt` | 采信（第五轮重测） | A 包 440dpi fs1.0/1.15 × `shijian`/`dashu` 四组：`GATES` 行 + `RESULT`（Δ=0、x0、cand_count、full_count、pool）+ `INK`（chip 右侧字身）+ `CAND`（逐条 x0/x1/glyph/pitch/badge/tangent）+ `AC10 verdict=PASS` |
-| `ev_r5_520_fs115.txt` | 采信（含一条闸门取证） | A 包 520dpi/fs1.15：`shijian` 过闸门后 `AC10 full_count=3 verdict=FAIL`（D3）；`dashu` → `GATE reason=cand_low rc=13`，**该组不出数**（stdout 无 RESULT/INK/delta） |
-| `ev_r5_gates_440.txt` | 采信（闸门取证） | 裁决 §5 五个 Given 的逐条点名行（`readback_equals_code` / `chip_text_equals_code` / `scrollview_visible` / `cand_visible` / `pool_at_least`）；第四、五轮的 chip-only 帧在这一版会被直接拒 |
+| `ev_r5_520_fs115.txt` | 采信（含一条闸门取证） | A 包 520dpi/fs1.15：`shijian` 过闸门后 `AC10 full_count=3 verdict=FAIL`（D3）；`dashu` → `GATE reason=cand_low rc=13 cand_count=3 need=4 x0=227`，**该组当时不出数**（stdout 无 RESULT/INK/delta）。⚠ 这一行是**旧闸口语义**：第五轮那版把「可见候选 ≥4」当闸门（`MIN_CAND=4`，`reason=cand_low`）。裁决 §9.2 把它退回判据层后，同一 `rc=13` 在第六轮只代表 `chip_only`（有 chip 无候选，`MIN_CAND=1`）→ 读这行时按当期代码口径解释，第六轮的 `dashu@520` 两条判据行见 `ev_r6_ac10_decoupled.txt` |
+| `ev_r5_gates_440.txt` | 采信（闸门取证，**旧字段名**） | 这一版逐条点名的 5 个字段（`readback_equals_code` / `chip_text_equals_code` / `scrollview_visible` / `cand_visible` / `pool_at_least`）是**第五轮工装自定的 5 条**，不是规格 Given 数——规格 `8324b03:525` 只有 3 条 Given，`≥4` 混在里面把判据当闸门用了（裁决 §9.2 打回点）。第六轮的 `GATES` 行改按 `spec_anchor=8324b03:525` + `given1/2/3` 点名，两条工装前提（`key_map_fail rc=16`、`host_not_ready rc=18`）单列（§2.5）。第四、五轮的 chip-only 帧在两版里都会被拒 |
 | `ev_r5_ac9.txt` | 采信 | spec-AC-9 阶梯实测：200→1、1000→7、**1500→13（`spec_ac9_gt3=PASS`，实测）**、2000→21；`PROBE_RETRY first_deleted=0` 如实入库（注入式同点 swipe 偶发丢手势，探针补按后才出数）；`NOTE` 行标注旧「1.5s≈10 字」是两点内插非实测 |
 | `ev_r5_switches.txt` | 采信 | AC-2/AC-3 披露第 2 项：`chinese_punctuation=True`、`double_space_period=False`，两条都 `source=code_default(never_written)`；同轮 `DS ls -R files` 有 `cell_dicts`、无 `datastore/ispeech_settings.preferences_pb` → 不是 run-as 失败，是该键从未写过 |
 | `ev_r5u_440.txt` | 采信（B 包） | 集成候选 440dpi fs1.0/1.15 四组：Δ=0（952→952）、`tangent_items=0`、`AC10` 全 PASS；`KEYMAP runs=[10,9,7,3]`（VOCA-184 新几何下重新标定成功） |
-| `ev_r5u_520.txt` | 采信（B 包，含闸门取证） | 集成候选 520/fs1.15：Δ=0（1128→1128）、`shijian` `full_count=3 FAIL`（与 A 包同形 → D3 不是被 170/184/207 掩盖的）、`dashu` `GATE reason=cand_low rc=13` |
+| `ev_r5u_520.txt` | 采信（B 包，含闸门取证） | 集成候选 520/fs1.15：Δ=0（1128→1128）、`shijian` `full_count=3 FAIL`（与 A 包同形 → D3 不是被 170/184/207 掩盖的）、`dashu` `GATE reason=cand_low rc=13 cand_count=3 need=4 x0=227`（**旧闸口语义**，同上） |
 | `ev_r5u_ac9.txt` | 采信（B 包） | 集成候选退格阶梯：200→1、1000→8、**1500→9（>3 PASS）**、2000→17 |
 | `ev_r5u_d2_union.txt` | 采信（B 包） | `d2check.py` 在 B 包：`fatal_count=0`、`keyboardviewmodel_frames=0`、pid 19562 前后不变 → **`v1.6-AC9` / PR #9 的修复在并集上有效** |
 | `ev_r5u_d2_control_c524351.txt` | 采信（阳性对照） | 同一脚本装回 A 包：`fatal_count=2`、栈顶 `KeyboardViewModel.kt:35`、pid 18755→19089 重启 → 证明工装的「未崩」不是假阴性，同时是 D2 的**第三次复现** |
@@ -474,13 +535,31 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ANDROID_HOME=/opt/homebrew/share/android-
 | `ev_paths2.txt` | 采信（反面用途） | `IDENT match=False` —— 身份校验确实拦得住换包，是校验有效性的证据 |
 | `ev_paths{3,4,5}.txt` | 采信 | §6 ①④⑤ 与 ③T9 的当场尝试（含 `HOST ok=False` 的失败原样） |
 | `ev_paths{6,7,8,9}.txt` | 采信（未取证原样） | `GATE blocked=拿不到「-/= 进 IME」的宿主字段` —— ③④ 记「未取证」的凭据 |
-| `gradle_test.log` | 采信 | §7 单测 14 条 0 失败 0 跳过 + 全量仅 1 条基线噪声 |
+| `ev_r6_pp_window.txt` | 采信（**打回项 1 的主证据**） | 第六轮同窗重测：`WINDOW phase=open/close` 两个连续段（搜狗 22:02:17→22:03:30、iSpeech 22:03:47→22:04:39 +0800），6 帧 `FRAME` + 每帧两行 `RAW`（`dumpsys window displays` 的 `InsetsSource type=ime` 原文）+ iSpeech 侧每帧 `IDENT … match=True`。两侧都在敲完 `shijian` 的组合态取数；`host=` 字段是**敲码前**的宿主读数（`搜索设置` = Settings 搜索框占位文案，证明宿主在位且为空），`comp_top/comp_h` 与 `top/h` 同一份读数、不是第二次测量（文件头写死了这三条口径） |
+| `ev_r6_ac10_decoupled.txt` | 采信（**打回项 2＋3 的主证据**） | A 包 520/fs1.15 两码各一轮：`GATES … spec_anchor=8324b03:525 given1/2/3` + `POOL pool=17/13 need=8` + `RESULT` + `AC10 verdict=FAIL … gauge=spec_sampling_x_end=1060 / gauge_screen=x_end=1080 boundary=False` + `AC10b reason=viewport_clip clipped_idx=[3]`（shijian）/ `reason=long_word_budget clipped_idx=[]`（dashu）。**含一条被弃的第一次尝试**：`GATE reason=readback_mismatch rc=10 want=dashu got=<NONE>`（共享 AVD 焦点被抢），随后重跑成功 —— 两次都原样入库 |
+| `ev_r6_ac10_offline.txt` | 采信（同批帧的重算） | `ac10_offline.py` 只读已交付的 8 帧（A 包 `r5_a6_*` ＋ B 包 `r5u_*`）离线复算 AC-10a/AC-10b，逐帧给 `spec=` / `screen=` 双口径与 `boundary`：440 那 4 帧 `4/PASS`、520/fs1.15 那 4 帧 `3/FAIL`、**8/8 `boundary=False`**（裁决 §9.4 风险 3(a) 的「两口径不一致才单列」本轮不触发）。设备侧与离线侧读数逐字节一致（重生成后 diff 只差 `src` 字段名） |
+| `ev_r6_gradle_a.txt` | 采信（**打回项 5**） | A 包 JVM 单测原文：① 过滤跑 14 条/0 失败（两次运行都带 `--rerun`，含「过滤跑的 XML 会被随后的全量跑覆盖」这条 attribution）；② 全量 `56 tests completed, 1 failed` BUILD FAILED + `<testsuite>` 与 `<failure message=…AndroidJUnit4ClassRunner…could not be found>` 原文；③ 归因命令与结论（PR #18 对 test 源集只新增 `SpaceKeyPolicyTest.kt`） |
+| `ev_r6_gradle_b.txt` ＋ `ev_r6_gradle_b_*.xml`（4 份） | 采信（**打回项 5，B 包**） | B 包 = 本地分支 `qa/merge-window-candidate-r5` head `cffc0cd`，**有意不推 origin**（项目规则一/二/五；裁决 §9.4 打回项 5「不许为了让证据入库去 push B 包分支」）。22 条 / 0 失败的 `<testsuite>` 原文入库，四类逐条对应判据；4 份 XML 可按 `testcase` 复核 |
+| `ev_r6_a11y_main.txt` | 采信（**打回项 6**） | §12 的 4＋1 缺口按派工 §四-1 重列，`fa57a07` 上逐条现算行号（不手抄）：`candidate_view.xml:38 minHeight=38dp`（:590）、`CandidateView.kt:53` ＋ 两处 scroll-action/触摸探索**命中文件数 0**（:589）、`CandidateView.kt:116-117 (index+1)` 角标无上限（:593）、`KeyboardLayouts.kt:73 "⌫"` ＋ `SoftKeyboardView.kt:475-478/516`（:595）、对比度 `CandidateView.kt:106/179` ＋ `colors.xml:4` ＋ `candidate_view.xml:9`（:597）；:594「候选词朗读」= `CandidateView.kt:141` **合规**，本轮从缺口清单撤掉 |
+| `ev_r6_spec85_main.txt` | 采信（**打回项 6 附**） | 规格 §8.5 那 54 条「文档断言 → 代码行」清单原样重跑：`spec85_anchors.sh fa57a07` → **54/0**（证明 §12 每个行号都是现算）；同清单打在 `c524351` → **54/24**，并逐条分类为 **21 条纯行号漂移 ＋ 3 条实质变更**（`DEFAULT_KEY_HEIGHT_DP 52→46`、`keyHeightDp 52→46`、`candidate_view.xml minHeight 44dp→恒高 46dp`）→ §9 第 13 行的重锚需求由此而来 |
+| `ev_r6_calibers.txt` | 采信（**打回项 6(a) ＋ 风险 3(a) ＋ 本轮没动什么**） | ① PR #18 两种变更量口径并列（累计 `16 files, +519/−30` vs 单提交 `e528c08 15/391` ＋ `c524351 6/136`，差额来自两提交改同批文件，引用必须点名口径）；② 8/8 帧 `boundary=False` 的双读数；③ 两个树上 `grep -ci slop` 都 = `0`（命令：`git show fa57a07:app/src/main/java/com/ispeech/input/CandidateView.kt` 再接 `grep -ci slop`，同法打 `c524351`）——AC-11 的修复在 main 与 PR #18 上都不存在＋ `git diff --name-only` 的 16 文件清单不含任何无障碍行（§12「未观测到恶化」的出处） |
+| `gradle_test.log` | 采信 | 早期那轮 gradle 输出。**「14 条 0 失败」与「全量 56 条 / 1 失败（既有，非本变更面）」现在的可 grep 出处是 `ev_r6_gradle_a.txt` ①②③**（打回项 5 要求的是 evidence 里的原文行，不是日志摘要） |
 
 第三人若按文件名读过去：`ev_font115.txt`（Δ=12）与 `ev_trunc.txt`（贴边）都不是本包在身份校验窗口内的行为，引用前先看本表状态列。
 
 ## 12. 范围外已知缺口（PM 裁定不计入本轮 FAIL）
 
-`fa57a07` 既有债务，本轮未回归、也未恶化：§5 遗留 4 项无障碍（候选条朗读、滚动位置播报、键位 label 缺失、面板焦点顺序）+ 候选文字对比度 3.82:1（低于 4.5:1）。52→46dp 的 UI 批准已由人类于 11-09 给出，不再重开。
+**上一版这里的五行是错的**（写成了「候选条朗读、滚动位置播报、键位 label 缺失、面板焦点顺序」＋对比度）：其中「候选条朗读」在规格 `8324b03:594` 明确标的是**合规**、不是缺口；「面板焦点顺序」在 `8324b03` 与旧版 `28c1cac` 的 §5 表里都**找不到出处**（`git show <sha>:docs/keyboard-ux-spec.md | grep 焦点顺序` 两版都是 0 命中）；「滚动位置播报」也不是表里那一项的名字。按派工 §四-1 的「4＋1」重列如下，**每条行号都是 `fa57a07` 上现算的**（`ev_r6_a11y_main.txt`，同目录 `spec85_anchors.sh fa57a07` → 54 条 0 失败，证明不是手抄）：
+
+| # | 规格行 | 缺口 | `fa57a07` 现状（现算依据） |
+|---|---|---|---|
+| 1 | `:589` 连续横滚的可访问路径 | 候选容器缺 `ACTION_SCROLL_FORWARD/BACKWARD` 的确认挂载 | `CandidateView.kt:53` 只 `findViewById(R.id.candidate_scroll)`；全仓 `git grep -l ACTION_SCROLL_FORWARD\|ACTION_SCROLL_BACKWARD` → **0 个文件**，`isTouchExplorationEnabled` → **0 个文件**。`-`/`=` 的 KeyEvent 路径（G5）已合规，**但「无障碍节点挂在哪一层」本轮未实测**（§9 第 11 行） |
+| 2 | `:590` 候选项命中高度 ≥48dp | **不合规**：现状 38dp | `candidate_view.xml:38` = `android:minHeight="38dp"`（外层 `HorizontalScrollView` 在 `:33-34`） |
+| 3 | `:593` 角标只 1–9 | **不合规**：无上限，第 10 项起照样出数字角标 | `CandidateView.kt:116-117` `val badge = TextView(…).apply { text = (index + 1).toString()` |
+| 4 | `:595` 退格键 `contentDescription` | **不合规**：键面文案是符号 `⌫`，读屏念不出「删除」语义 | `KeyboardLayouts.kt:73` `KeyDef.fn(KeyAction.BACKSPACE, "⌫", …)`；`SoftKeyboardView.kt:475-478` 非 SHIFT 键一律 `contentDescription = keyLabel(effectiveKey)`（`:516`） |
+| ＋ | `:597` 对比度 | **不合规**：首选高亮 `#5B6CFF` on `#F4F5F7` = **3.82:1** < 4.5:1（正文 `#222222` = 14.58:1 合规） | `CandidateView.kt:106` `setTextColor(if (highlighted) primaryColor else TEXT_PRIMARY)` ＋ `:179 resolvePrimaryColor()` ＋ `colors.xml:4` ＋ `candidate_view.xml:9` |
+
+**「本轮未观测到恶化」这句现在有了出处，不再是无凭断言**：PR #18 的变更面（`git diff --name-only fa57a07 c524351` → 16 个文件，全列在 `ev_r6_calibers.txt` ③）**不含任何无障碍相关行**——没有 `contentDescription`、没有 `importantForAccessibility`、没有命中高度相关改动，所以这 4＋1 项在 PR #18 前后是同一组缺口。**这不是「已验证无恶化」，是「变更面不含该路径」的静态论证**；上表 5 项本身在 A 包 `c524351` 上未重测。规格 `:592` 那条「一屏 ≥4 候选 × 命中高度 ≥48dp × 恒高 46dp 三角无解」按 `:592` 回 **UI + PM** 裁让步顺序，不由测试自处；52→46dp 的 UI 批准已由人类于 11-09 给出，不重开。
 
 ---
 
@@ -508,8 +587,8 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ANDROID_HOME=/opt/homebrew/share/android-
 |---|---|---|---|
 | spec AC-1 恒高 Δ | 4 组全 0（988 / 1168） | 4 组全 0（952 / 1128） | **两包都成立**，恒高契约没被 170/184/207 破坏 |
 | 截字（`tangent_items`） | 全 0（440/fs1.15 底部余量 19px） | 全 0（同 19px） | **纵向不截**，余量薄这条留给真机 |
-| spec AC-10a | 440 PASS（full=4）/ 520·fs1.15 **FAIL（3）** | 440 PASS（full=4）/ 520·fs1.15 **FAIL（3）** | **D3 与三条 PR 无关**，不是被掩盖、也不是被引入 |
-| spec AC-10b | 520 `dashu` `GATE cand_low` | 同 | 长词档两包都不给数 → 回 UX/UI + PM |
+| spec AC-10a（第六轮双口径读数） | 440 PASS（full=4）/ 520·fs1.15 **FAIL（3）**，`boundary=False` | 440 PASS（full=4）/ 520·fs1.15 **FAIL（3）**，`boundary=False` | **D3 与三条 PR 无关**，不是被掩盖、也不是被引入；两包 8 帧的逐帧双读数见 `ev_r6_ac10_offline.txt` |
+| spec AC-10b | 520 `dashu` 第六轮**出数**：`verdict=FAIL full_count=3` ＋ `reason=long_word_budget clipped_idx=[]`，同轮 `pool=13`；`shijian` 则是 `reason=viewport_clip clipped_idx=[3]` | 520 `dashu` 第五轮旧闸门（`MIN_CAND=4`）拒出数 → `GATE reason=cand_low rc=13`；第六轮用**同一批已交付帧**离线重算得 `spec=3/FAIL screen=3/FAIL`（`ev_r6_ac10_offline.txt`） | 长词档的 `reason` 两包都能给了：A 包当场、B 包离线。**离线重算不替代设备侧复跑**，窗口产物上仍要按 §10-2/2-e 现跑一遍 |
 | spec AC-9 阶梯 | 200→1 / 1000→7 / **1500→13** / 2000→21 | 200→1 / 1000→8 / **1500→9** / 2000→17 | **两包都 >3 → PASS**；B 包 1500ms 档删得少一些（键位/退格重复频率受键高变化影响），不影响判据 |
 | 键盘总高 / pp | 988 → 42.22%（+0.43pp）；1168 → 49.91%（+7.09pp） | 952 → 40.68%（**−1.11pp**）；1128 → 48.21%（**+5.39pp**） | VOCA-184 的留白收紧**改善** pp，但 520dpi 仍 >1pp → 真机口径照旧拦路 |
 | 键位标定 | `runs=[10,9,7,3]` | `runs=[10,9,7,3]`（修 `merge_gap` 后） | 零死区命中改动没改变可见键帽段数 |
@@ -534,4 +613,6 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ANDROID_HOME=/opt/homebrew/share/android-
 
 ### 附：本报告引用的原始证据
 
-`ev_headline.txt`（作废段已标注）、`ev_ac47.txt`（键名作废）、`ev_ac47b.txt`、`ev_ac47_probe.txt`、`ev_ac47_falsify.txt`、`ev_ac47_gate_{probe_zero,host_buffer,host_residue,forward}.txt`、`ev_ac23{,b,c,d}.txt`、`ev_ac2_{soft,hw}.txt`、`ev_r4.txt`、`ev_ac9*.txt`、`ev_g46.txt`（−870 两行作废）、`ev_vswipe.txt`（部分采信）、`ev_vswipe_{a,b,c}.txt`、`ev_pp.txt`、`ev_sogou{115,520}.txt`、`ev_fs115b.txt`、`ev_fs115_440_fs10.txt`、`ev_fs115_440_final.txt`、`ev_fs115_520.txt`、`ev_fs115_520_ink.txt`、`ev_fs115_gate.txt`、`ev_crash_kbsettings.txt`、`ev_paths{2,3,4,5,6,7,8,9}.txt`、`gradle_test.log`、**第五轮新增 12 份**：`ev_r5_{voidcheck,440,520_fs115,gates_440,ac9,switches}.txt` + `ev_r5u_{440,520,ac9,ac2_hw,d2_union,d2_control_c524351}.txt`（全部在 `tools/qa/voca-37/evidence/`，共 66 份，逐文件口径见 §11.1——旧 chip-only 三份已标「不得再用于 AC-1/截字」），截图 `shots/f440_1.0_c_cand.png`、`f440_1.15_c.png`、`f440_1.15_c_cand.png`、`f520_1.15_c_cand.png`、`p5_phrase.png`、`p5_clip.png`、`reg_phr_after.png`。工装脚本：`tools/qa/voca-37/{fs115,ac2,ac47,vswipe,drive,paths,paths2,paths3,qa_kb,qa_rows,band,ac9,dsdump,voidcheck,d2check}.py` + `tools/qa/voca-37/{run_gate_r4,run_gate_r4b}.sh` + `tools/qa/voca-37/README.md`。截图新增 `shots/r5u_*.png`（B 包 440/520 候选带裁图）。
+`ev_headline.txt`（作废段已标注）、`ev_ac47.txt`（键名作废）、`ev_ac47b.txt`、`ev_ac47_probe.txt`、`ev_ac47_falsify.txt`、`ev_ac47_gate_{probe_zero,host_buffer,host_residue,forward}.txt`、`ev_ac23{,b,c,d}.txt`、`ev_ac2_{soft,hw}.txt`、`ev_r4.txt`、`ev_ac9*.txt`、`ev_g46.txt`（−870 两行作废）、`ev_vswipe.txt`（部分采信）、`ev_vswipe_{a,b,c}.txt`、`ev_pp.txt`、`ev_sogou{,115,440,520}.txt`、`ev_fs115b.txt`、`ev_fs115_440_fs10.txt`、`ev_fs115_440_final.txt`、`ev_fs115_520.txt`、`ev_fs115_520_ink.txt`、`ev_fs115_gate.txt`、`ev_crash_kbsettings.txt`、`ev_paths{2,3,4,5,6,7,8,9}.txt`、`gradle_test.log`、**第五轮 12 份**：`ev_r5_{voidcheck,440,520_fs115,gates_440,ac9,switches}.txt` + `ev_r5u_{440,520,ac9,ac2_hw,d2_union,d2_control_c524351}.txt`、**第六轮 12 份（8 txt ＋ 4 XML）**：`ev_r6_{pp_window,ac10_decoupled,ac10_offline,gradle_a,gradle_b,a11y_main,spec85_main,calibers}.txt` + `ev_r6_gradle_b_{input.InputModePolicyTest,input.KeyHitTesterTest,input.SpaceKeyPolicyTest,settings.keyboard.KeyboardViewModelInitOrderTest}.xml`。
+
+目录合计 **78 份**（73 份当场 stdout 原文 `.txt` ＋ 4 份 B 包单测 XML ＋ `gradle_test.log`），**逐文件口径与采信/部分采信/作废状态见 §11.1**（旧 chip-only 三份已标「不得再用于 AC-1/截字」）。截图 **31 张**：`shots/f440_*.png`（3）＋ `f520_1.15_c_cand.png`（1）＋ `p5_{phrase,clip}.png`（2）＋ `reg_phr_after.png`（1）＋ B 包 `r5u_*.png`（12）＋ A 包 `r5_440_fs1.0_haizi_*.png`（2）＋ 第六轮 A 包 `r5_a6_520_fs1.15_*.png`（4）＋ 第六轮同窗 pp `r6_{sogou,ispeech}_{440_fs1.0,440_fs1.15,520_fs1.15}.png`（6）＝ 31，与 `ls shots | wc -l` 一致。工装脚本 **20 个**：`tools/qa/voca-37/{fs115,ac2,ac47,ac9,ac10_offline,band,d2check,drive,dsdump,paths,paths2,paths3,ppwin,qa_kb,qa_rows,voidcheck,vswipe}.py` ＋ `tools/qa/voca-37/{run_gate_r4,run_gate_r4b,spec85_anchors}.sh` ＋ `tools/qa/voca-37/README.md`。
