@@ -2,7 +2,7 @@
 
 - 被测构建：`c524351e2e509ed294f49dd3d2f7a1bf29e07a4d`（PR #18 head，base `fa57a07`；PR #18 仍为 OPEN，未合并）
 - 两个 PR 别混：**PR #18 = 被测变更集**（产品代码，16 个文件，本文凡是「变更面内 / 拦路项」所说的「本 PR」都指它，本轮统一改写为 `PR #18`）；**PR #25 = 本 issue 的交付 PR**（branch `test/voca-37-stage3-regression`，只含 `docs/` 报告 + `tools/qa/` 工装与证据，**不含任何产品代码**：`git diff --name-only fa57a07...57f5f5b` 里 `app/src` 命中 0 个）。
-- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（50 份当场 stdout 原文）+ `shots/`（7 张截图）。三个口径分开写：返修提交 `57f5f5b` 单独 13 files +597/−35；第二轮返修提交 `4009fb4` 单独 11 files +609/−39；**PR #25 累计到 head `d5dac79`** 是 67 files +2599/−0（其中 evidence 48、shots 7、`tools/` 66、`docs/` 1）。复算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`——本句所在行的这次措辞修改本身还会让 head 往前挪一格、行数差两三行，所以以 head SHA 为准，不要拿本行的数字当最新值。
+- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（50 份当场 stdout 原文）+ `shots/`（7 张截图）。三个口径分开写：单个提交的口径（`git show --stat` / `git diff --stat` 当场可核）：返修提交 `57f5f5b` 13 files +597/−35；第二轮返修提交 `4009fb4` 11 files +609/−39。**PR #25 的累计口径不在本文写死数字**——它每推一次就漂一点，写进报告就会立刻变成假数（上一版把「PR 累计 61 files +2029」和「单提交 13 files +597」混在同一行就是这个坑）。现算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`；本轮最后一次推送的实测值写在 VOCA-47 的交付评论里（带当时的 head SHA），以那条为准。
 - 规格权威：`agent/ux/voca-45-spec` @ `28c1cac`（main 上的 602 行翻页版与 `agent/ux/voca-45` @ `fc564aa` 均已过期，本报告不引用）
 - 执行环境：本地 AVD `ispeech_test`（1080×2340 / 440dpi / arm64 / 2G），Android 14 模拟器；对照基准为同机搜狗 `com.sohu.inputmethod.sogou/.SogouIME`
 - 执行人：测试工程师（QA）· 2026-11-17 03:40–05:20 首测，06:55–07:45 按质检 6 条返修，12:25–12:45 按质检第二轮 4 条返修（本地时区）
