@@ -2,7 +2,8 @@
 """VOCA-37 §3 AC-4~AC-7 取证：硬件键 `-` / `=` 驱动候选条横滚的步长、方向、端点钳制。
 
 键→方向不手工标注，从被测构建的代码里读出来，并逐行署名到每个读数上：
-  IspeechImeService.kt:612-614  KEYCODE_MINUS → scrollCandidates(-1)，KEYCODE_EQUALS → scrollCandidates(+1)
+  IspeechImeService.kt:612-614（行号锚 c524351；main fa57a07 同一段在 :601-603）
+  KEYCODE_MINUS → scrollCandidates(-1)，KEYCODE_EQUALS → scrollCandidates(+1)
   CandidateView.kt:90-92        scrollCandidates(steps) → smoothScrollBy(steps * dp(SCROLL_STEP_DP), 0)
   CandidateView.kt:199          SCROLL_STEP_DP = 72
 位移口径见 drive.shift()：正 = 候选内容左移 = 视口向右（看后面的候选）。

@@ -41,7 +41,7 @@
 
 1. 测前 `settings put secure autofill_service null`，否则自动填充会多报一个 `type=ime` InsetsSource。
 2. 位移一律用硬件 `-`/`=`（198px=72dp 一档，可复现）；触摸 fling 位移不可复现，禁止作为判据。
-   **键名↔方向不靠人记**：`IspeechImeService.kt:612-614` 定死 `KEYCODE_MINUS`(69) → `scrollCandidates(-1)`、
+   **键名↔方向不靠人记**：`IspeechImeService.kt:612-614`（行号锚 c524351；main `fa57a07` 上是 `:601-603`）定死 `KEYCODE_MINUS`(69) → `scrollCandidates(-1)`、
    `KEYCODE_EQUALS`(70) → `scrollCandidates(+1)`，`CandidateView.kt:90-92,199` 是 `smoothScrollBy(steps*72dp,0)`，
    「steps 为正向右」。互相关 `shift` 的符号约定是「正 = 内容左移 = 视口向右」，所以 **`=` 读 +198、`-` 读 −198**，
    末端钳制在**右端**且靠 `=` 到达（左端靠 `-` 钳住）。往左端之外滚是 no-op：
