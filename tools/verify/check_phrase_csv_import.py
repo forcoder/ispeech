@@ -680,6 +680,11 @@ def quick_trigger_limits() -> tuple[int, int]:
 #  整份 QuickPhrasesViewModel.kt —— 那是 UI 文件；VOCA-454 质检打回项 1 后按大括号配平取 object 体，不再是字符窗口）。
 #  作用域内与长度无关的字面量 `out.take(8)` 也会红，规定出口是收敛成具名常量；命中行号按文件绝对行报，
 #  object 挪出 QuickPhrasesViewModel.kt 会让第三处作用域取空、正向存在性断言先红（fail-closed，不会静默变绿）。
+#  本节三段判定（①/② 与接线）都在抠掉注释的文本上求值；接线那三段还额外抠掉字符串字面量（code_only()）。
+#  VOCA-454 质检打回项 1 第二轮实测：摘掉守卫调用 + 同函数体留一行提到守卫名的注释 = 48/0 假绿，
+#  行注释 / 整行块注释 / 行尾 `/* … */` / 跨行块注释 / 字符串五种形态都能绕，注释冒充代码不需要跨函数分析。
+#  抠完仍然锁不住的那一层：调用点写在代码里、结果却被丢掉或落在永不成立的条件里 —— 那是行为，
+#  归 `QuickPhraseLegacyRemoteRowTest`，本脚本不假装会做数据流分析（契约 C1-6b 行的口径与此一致）。
 # ──────────────────────────────────────────────────────────────
 
 MODE_GUARD_DEF_RE = re.compile(r"\bfun\s+(\w+)\s*\([^)]*\)\s*:\s*QuickMatchMode\b")
@@ -702,6 +707,9 @@ REMOTE_THEN_BRANCH_UNGUARDED_RE = re.compile(
 FIRST_PARSE_AFTER_OPEN_REMOTE_RE = re.compile(
     r"openRemote\([^)]*\)[\s\S]{0,400}?QuickPhraseEngine\.from(Remote)?Text\("
 )
+# 接线断言的求值面（VOCA-454 质检打回项 1）：整段块注释（含跨行、挂在代码行尾部的）与字符串字面量。
+BLOCK_COMMENT_RE = re.compile(r"/\*[\s\S]*?\*/")
+STRING_LITERAL_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 
 def strip_kotlin_comment(line: str) -> str:
@@ -713,6 +721,26 @@ def strip_kotlin_comment(line: str) -> str:
     if cut > 0 and text.count('"', 0, cut) % 2 == 0:
         text = text[:cut]
     return text.strip()
+
+
+def code_only(src: str) -> str:
+    """把注释与字符串字面量都抠掉，只留下真会被执行的代码 —— 接线断言在这份文本上求值。
+
+    `strip_kotlin_comment` 只管整行注释与行尾 `//`：跨行块注释里不以 `*` 开头的中间行、
+    挂在代码行尾部的 `/* … */`、以及字符串里的同名片段都还在。VOCA-454 质检打回项 1 实测
+    「`parse` 里摘掉守卫调用 + 同函数体留一行 `// 之后接上 guardedRemoteMode(trigger, declaredMode)`」
+    能把断言哄成 48/0 绿 —— 那是注释冒充代码，同一个函数体内，不需要跨函数分析就能堵。
+    块注释替换成等量换行，行号与文件绝对行保持一致；字符串最后抠，`//` 说明里那个未配对的
+    引号已经先随注释去掉了，不会把两段真代码当成一个字符串吃掉。抠文本只会让断言更难满足，
+    方向是 fail-closed：宁可误红，不再假绿。
+    缩进按原行补回（`strip_kotlin_comment` 会把行首空白一起去掉）—— `function_body()` 靠缩进
+    收口表达式体，缩进丢了它就把函数签名单独当成一个函数，实测 baseline 从 48/0 掉到 47/1。
+    """
+    blocked = BLOCK_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), src)
+    kept: list[str] = []
+    for line in blocked.splitlines():
+        kept.append(line[:len(line) - len(line.lstrip())] + strip_kotlin_comment(line))
+    return STRING_LITERAL_RE.sub('""', "\n".join(kept))
 
 
 def mode_guard_lines(lines: list[str]) -> set[int]:
@@ -829,30 +857,34 @@ def remote_read_wiring(engine_src: str, locator_src: str) -> list[str]:
     锁的是「接线」两段（REMOTE → fromRemoteText → parse 用上返回 QuickMatchMode 的守卫函数），
     不锁函数体里的判定效果 —— 把守卫函数体掏空、改阈值、删 mode 判据都还是绿的，
     那三层由 `QuickPhraseLegacyRemoteRowTest` 兜（VOCA-454 质检实测，别把它说成静态门禁的能力）。
+    两段都在 `code_only()` 的结果上匹配：注释与字符串里写一句 `guardedRemoteMode(trigger, declaredMode)`
+    不算调用点（VOCA-454 质检打回项 1 实测：摘掉调用 + 留一条注释 = 48/0 假绿）。
+    还是锁不住的那一层：调用点写在代码里、结果却被丢掉或落在永不成立的条件里 —— 那是行为，归单测。
     """
     bad: list[str] = []
+    engine_code, locator_code = code_only(engine_src), code_only(locator_src)
     # 守卫改名（语义不变）不该让门禁变红：按返回类型取名字集合，parse 调其中任一即算接上。
-    guard_calls = {n + "(" for n in mode_guard_names(engine_src)}
-    remote_body = function_body(engine_src, "fun fromRemoteText(")
+    guard_calls = {n + "(" for n in mode_guard_names(engine_code)}
+    remote_body = function_body(engine_code, "fun fromRemoteText(")
     if not remote_body:
         bad.append("QuickPhraseEngine.kt 没有 fromRemoteText —— C1-6b 守卫的入口被删")
     elif "applyTriggerLengthGuard = true" not in remote_body and not any(g in remote_body for g in guard_calls):
         bad.append("fromRemoteText 函数体内没有启用长度守卫 —— 退化成 fromText 的别名")
-    if "QuickPhraseEngine.fromRemoteText(" not in locator_src:
+    if "QuickPhraseEngine.fromRemoteText(" not in locator_code:
         bad.append("QuickLocator.kt 里没有任何 fromRemoteText 调用 —— 云端读取链路不走守卫")
     # 守卫的调用点有两段：fromRemoteText 把开关传下去，parse 真的拿它去问守卫函数。
     # 只查前一段的话，`val mode = declaredMode`（收下开关却不用）会让守卫变成无人调用的正确函数还报绿。
-    parse_body = function_body(engine_src, "private fun parse(")
+    parse_body = function_body(engine_code, "private fun parse(")
     if "applyTriggerLengthGuard" in parse_body and not any(g in parse_body for g in guard_calls):
         bad.append("parse(...) 收了 applyTriggerLengthGuard，却没调用本文件内任何返回 QuickMatchMode 的函数 —— "
                    "名字无关的范围是本文件内：守卫挪出 QuickPhraseEngine.kt 同样会红，"
-                   "出口是把守卫与 parse 留在同一文件")
-    if REMOTE_THEN_BRANCH_UNGUARDED_RE.search(locator_src):
+                   "出口是把守卫与 parse 留在同一文件；注释或字符串里写一遍守卫名不算调用点")
+    if REMOTE_THEN_BRANCH_UNGUARDED_RE.search(locator_code):
         bad.append("QuickLocator.kt 的 REMOTE 分支走的是 fromText —— 存量 >4 位行的 DEF-3 静默复发")
-    if not (REMOTE_THEN_BRANCH_GUARDED_RE.search(locator_src)
-            or FIRST_PARSE_AFTER_OPEN_REMOTE_RE.search(locator_src)):
+    if not (REMOTE_THEN_BRANCH_GUARDED_RE.search(locator_code)
+            or FIRST_PARSE_AFTER_OPEN_REMOTE_RE.search(locator_code)):
         bad.append("找不到「REMOTE → fromRemoteText」的接线（addGroup 的 REMOTE 分支 / openRemote 两种形态都不成立）")
-    for m in FIRST_PARSE_AFTER_OPEN_REMOTE_RE.finditer(locator_src):
+    for m in FIRST_PARSE_AFTER_OPEN_REMOTE_RE.finditer(locator_code):
         if m.group(1) is None:
             bad.append("openRemote(...) 解析走的是 fromText —— 那条云端链路没有守卫")
     return bad
@@ -897,7 +929,8 @@ def check_existing_contract_unchanged() -> None:
         codec_present and "isValidShortcutTrigger" not in read_side,
         "读取侧（QuickPhraseCodec 整个 object / QuickPhraseEngine / QuickLocator）不调用编辑器校验器（C1-5）",
         ("第三处作用域取空 —— QuickPhrasesViewModel.kt 里已取不到 QuickPhraseCodec 的 parse"
-         "（object 挪出该文件，或声明名不再含 QuickPhraseCodec），C1-5 的读取侧断言失去落点"
+         "（object 挪出该文件、声明名不再含 QuickPhraseCodec，或调用点文本不再是 QuickPhraseCodec.parse( —— "
+         "codec 整体改名 / 拆文件都会走到这里），C1-5 的读取侧断言失去落点"
          if not codec_present else
          "读取侧引用了编辑器校验器 isValidShortcutTrigger，导入的超 4 位历史条目会被静默丢弃"),
     )
