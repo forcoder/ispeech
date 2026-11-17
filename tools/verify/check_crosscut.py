@@ -22,11 +22,17 @@
      `android.speech.RecognitionService`（不是调用方的 RECOGNIZE_SPEECH）、必须保留
      BIND_RECOGNITION_SERVICE 真服务过滤、判定计数必须进 AsrTrace、拦下会话的 reason
      必须走 RecognitionServices.REASON_*，且 ev=blocked 的两个打点出口（服务侧 traceVoiceBlocked
-     / 控制器侧 startListening 的绑定失败）逐个钉住。出口按**发射器**的调用点采集（`AsrTrace.w(` /
-     `AsrTrace.i(` / `AsrTrace.line(`，点号与实参之间允许换行），不按 `AsrTrace.EV_BLOCKED` 这个 token
-     采集：多一个没断言的出口——无论它引用常量、把事件名写成裸串、还是把点号折下一行——都 FAIL；
-     事件名写裸串另有单独一条断言，绕过封装直接 `Log.x(AsrTrace.TAG, …)` 也单独拦一条（条件项 C1）。
-     少钉一个也 FAIL
+     / 控制器侧 startListening 的绑定失败）逐个钉住，少钉一个也 FAIL。
+     拦下出口按**发射器**的调用点采集，不按 `AsrTrace.EV_BLOCKED` 这个 token 采集（打回项 4）：
+     引用常量、把事件名写成裸串、把点号折下一行、ev 绕本地 `val`，这四种走
+     `AsrTrace.w(` / `AsrTrace.i(` / `AsrTrace.line(` 的写法多一个没断言的出口都 FAIL。
+     绕过封装直接 `Log.x(AsrTrace.TAG, …)` 也单独拦一条（条件项 C1），`AsrTrace.kt` 内部
+     不带限定名的 `Log.w(TAG, line(…))` 是发射器本体，不在采集里。
+     经 `import … as` 别名发射、把 TAG 存进变量、把 TAG 写成字面串 `"AsrTrace"` 三种写法实测走得出
+     采集，明确记为不在采集范围（`tools/verify/check_voca310_gate.py` 的 N1 / N2 / N3 ——
+     条件项 C1′），它们照样打出一行 `ev=blocked`，破的是覆盖面被写成全称，不是「拦下必有归类」这条契约。
+     上面这几句措辞与变异结果是否一致、条数是否漂了，由 `python3 tools/verify/check_voca310_gate.py`
+     逐只复跑核对，不靠人肉对照
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -948,6 +954,8 @@ def check_voice_chain() -> None:
     # 条件项 C1 补的两个方向：点号与实参之间允许换行（`AsrTrace` ↵ `.w(…)` 是同一条语句），
     # 以及 `AsrTrace.line()` —— 它和 w/i 的形参同序（第二个实参就是事件名），走它拼日志同样算发射。
     # 事件名的取值从 AsrTrace.kt 现读，门禁里不另抄一份字面量。
+    # 采集只到**带限定名**的调用点：`import … as` 别名、TAG 存进变量、TAG 写成字面串这三种走得出
+    # （check_voca310_gate.py 的 N1/N2/N3 实测），别把下面两条正则当成全称覆盖。
     m_ev_blocked = re.search(r'const val EV_BLOCKED\s*=\s*"([^"]+)"', strip_comments(read(ASR_TRACE)))
     ev_blocked_value = m_ev_blocked.group(1) if m_ev_blocked else ""
 
@@ -1103,13 +1111,15 @@ def check_voice_chain() -> None:
     check(
         blocked_sites == {("IspeechImeService.kt", "traceVoiceBlocked"),
                           ("VoiceInputController.kt", "startListening")},
-        "ev=blocked 的打点出口有两个、逐个被上面钉住（main 里不存在第三处未断言的出口）",
+        "ev=blocked 的打点出口有两个、逐个被上面钉住（采集范围内不存在第三处未断言的出口：仅指写成 "
+        "`AsrTrace.w/i/line(` 或 `Log.x(AsrTrace.TAG, …)` 这两种带限定名的调用点）",
         f"app/src/main 下 AsrTrace 打点里 ev=blocked 的实际出口（按发射器调用点采集：`AsrTrace.w/i/line`，"
         f"点号换行与写裸串都算；绕过封装的 `Log.x(AsrTrace.TAG, …)` 由上面一条单独拦）是 "
         f"{sorted(blocked_sites)}，应为 "
         f"[('IspeechImeService.kt', 'traceVoiceBlocked'), ('VoiceInputController.kt', 'startListening')]："
         f"少一个说明拦下会话又出现查不到日志的路径，多一个说明新增了没配断言、也没进 docs 表格的出口"
-        f"（VOCA-310 打回项 2）",
+        f"（VOCA-310 打回项 2）。采集范围只到带限定名的调用点为止：`import … as` 别名发射、TAG 存进变量、"
+        f"TAG 写成字面串 `\"AsrTrace\"` 三种写法走得出这一条（见 check_voca310_gate.py 的 N1/N2/N3）",
     )
     check(
         not re.search(r'"reason"\s+to\s*"', toggle_region + bind_region)
