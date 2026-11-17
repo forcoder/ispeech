@@ -31,17 +31,34 @@ build-voca30/
 # 智能体运行时写进工作区根目录的文件（不属于产品代码）
 .multica/
 .pi/
+.qoder/
 AGENTS.md
 
 # 临时 worktree / 本地运行时
 .claude/worktrees/
 .claude/settings.local.json
 
-# dist/ 下的部署产物（release 包、dist/README.md、SHA256SUMS 继续入库）
-dist/deploy-*.log
-dist/screenshots/
-dist/ispeech-debug-*.apk
-dist/app-debug.apk
+# dist/ 白名单：只放开「已交付」的形状（dist/README.md、SHA256SUMS、ispeech-<type>-vN.M.apk）。
+# tools/deploy/deploy.sh:158 产出带时间戳的一次性部署包
+# （ispeech-<debug|release>-<versionName>-<YYYYMMDD>-<HHMM>.apk），加上 internal 内测包，体积可远超
+# GitHub 单文件 100 MiB 硬上限；一旦落进工作区，智能体运行时的基线提交会把它写进分支历史，
+# 该分支就再也推不上去（VOCA-445）。所以放开项必须约束到「v + 数字.数字」的交付包命名，
+# 不能用 ispeech-debug*、ispeech-release-v* 这种会把时间戳形态一起放进来的通配。
+# 新产物默认不入库，确要交付用 git add -f。
+dist/*
+!dist/README.md
+!dist/SHA256SUMS
+!dist/_archive/
+dist/_archive/*
+!dist/ispeech-debug.apk
+!dist/ispeech-release-v[0-9].[0-9].apk
+!dist/ispeech-release-v[0-9].[0-9][0-9].apk
+!dist/ispeech-debug-v[0-9].[0-9].apk
+!dist/ispeech-debug-v[0-9].[0-9][0-9].apk
+!dist/_archive/ispeech-release-v[0-9].[0-9].apk
+!dist/_archive/ispeech-release-v[0-9].[0-9]-build[0-9].apk
+!dist/_archive/ispeech-debug.apk
+!dist/_archive/ispeech-debug-v[0-9].[0-9].apk
 
 # 短语数据导出
 通用短语.csv
