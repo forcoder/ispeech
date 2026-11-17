@@ -45,3 +45,7 @@ dist/app-debug.apk
 
 # 短语数据导出
 通用短语.csv
+
+# Python 字节码缓存（跑离线自查时生成，不入库）
+__pycache__/
+*.pyc
