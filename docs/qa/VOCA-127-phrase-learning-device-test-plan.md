@@ -13,7 +13,7 @@
 | # | 等待项 |  owner | 到期 | 自证信号（成立即推进本单） |
 |---|---|---|---|---|
 | ① | VOCA-124 解冲突 + rebase 到 VOCA-185 形态并收口 | 前端工程师 | ~~2026-11-18 12:00 CST~~ **11-17 已闭环** | `gh pr view 4` = `OPEN`/`MERGEABLE`/`CLEAN`，head `8ab0a88`；第四轮质检 **PASS-WITH-CAVEAT**，VOCA-124 状态 `done`（11-17 04:39Z）。C-1 已并入本文件 §4.1 |
-| ② | PR #4 合入 `main` + 重新出官方包 | 项目经理出合并清单 → **人类批准**（项目规程第五、六条） | 合并窗口 11-18 12:00 CST | `git merge-base --is-ancestor 8ab0a88 origin/main` 返回 `0`（11-17 12:40 CST 实测 **exit=1**，`origin/main` 仍 `fa57a07`、`versionName="1.5"`） |
+| ② | PR #4 合入 `main` + 重新出官方包 | 项目经理出合并清单 → **人类批准**（项目规程第五、六条） | 合并窗口 11-18 12:00 CST | **11-18 已把「PR #4（head `8ab0a88`）是否进 11-19 窗口」这个 ask 补登到 VOCA-203 与 VOCA-419（带真 `mention://member` 链接）**——此前该 ask 无任何载体，是本单被巡检判为「假阻塞」的那一段。`git merge-base --is-ancestor 8ab0a88 origin/main` 返回 `0`（11-17 12:40 CST 实测 **exit=1**，`origin/main` 仍 `fa57a07`、`versionName="1.5"`） |
 | ③ | 包自证 + 真机接入 | 人类（qiaozhou）提供设备 | 2026-11-19 | 装机包 `versionName` ≠ `1.5` **且** `adb shell dumpsys package com.ispeech.ime` 可见；APK 内 `strings`/`dexdump` 能捞到日志 tag `phrase_learn`；`adb devices -l` 出现目标真机 serial `23F0224224000950` 为 `device` |
 
 ②与③**必须同时成立**：只有②而拿旧包装机，验的是空对象；只有③而包里没有条目 3 的代码，同样验空。①已闭环，不再等。
@@ -67,6 +67,11 @@ adb install -r <官方包路径>
 # 2) 干净起点：adb shell pm clear com.ispeech.ime（或 设置 → 用户词库 → 清空）
 
 # 3) 切五笔态：设置 → 键盘与输入 → 中文输入法 → 五笔
+#    ★ 11-18 实测：该入口在 8ab0a88 / fa57a07 上都必崩（§6.3 P1），真机同样不可用；
+#      模拟器改走持久化等价路径（§6.1 末段）：run-as 写
+#      files/datastore/ispeech_settings.preferences_pb 内 input_method_mode="WUBI"
+#      （androidx datastore-preferences 1.0.0：PreferenceMap.entries=1 / key=1 / value=2 /
+#        Value.string=field 5 -> tag 0x2a；写成 0x12 会被忽略并退回拼音）
 #    换输入态会 phraseTracker.reset()，两组验证之间不要切中/英
 ```
 
@@ -167,19 +172,58 @@ adb install -r <官方包路径>
 
 一键取证：`scripts/qa/voca127-device-capture.sh`（`pre` / `cand` / `gate` / `dict` / `anr` / `post`），产物落 `./qa-evidence/voca127-<时间戳>/`。
 
-## 6. 当前判定
+## 6. 当前判定（11-18 换口径：先拆「可模拟器化 / 必须真机」，再分别给读数）
 
-| # | 必验项 | 状态 |
+### 6.1 拆分
+
+| # | 必验项 | 可模拟器化？ | 依据 |
+|---|---|---|---|
+| 1 | AC-3.4 ①②③ + F1 探测 | **可** | 全链路都是「注入码 → 上屏 → 读 logcat / user_dict」，模拟器与真机等价；② 的光标移动用 `KEYCODE_MOVE_HOME`，③ 的面板开合用工具条第 4 键 + `ESCAPE`，都可在 emulator 触发 |
+| 2 | AC-3.7 index 0 | **可（观察量降级）** | 本机 `uiautomator dump` 不含 IME 窗口 → 按 §4.9 末条走 `screencap` 目视 + 点选后宿主文本双证 |
+| 3 | AC-3.8 开关关闭不写库 | **半** | 学习逻辑对 `learning` 值的响应可验；**开关本身的 UI 路径不可达**（见 6.3 P1） |
+| 4 | AC-3.10 设置页治理 | **不可（被 P1 挡住）** | 「设置 → 键盘与输入」打开即崩，用户词库入口不可达；崩溃与设备无关，真机同样进不去 |
+| 5 | AC-3.11 连续学习无 ANR | **可（弱证）** | ANR / `Input dispatching timed out` 日志判据可跑；但模拟器时序余量比真机宽，只算弱证 |
+| 6 | AC-3.12 前/后快照 | **可（观察量降级）** | 同 #2，靠截图判序列 |
+
+**进入五笔态的方式（重要口径）**：两条 UI 路径都不可用（#4 的崩溃 + 面板选择行对注入点击无响应），本单改用 `run-as` 往 `files/datastore/ispeech_settings.preferences_pb` 写产品自己那个 key（`input_method_mode = "WUBI"`，androidx datastore-preferences 1.0.0 的 `Value.string` 是 **field 5**，写成 field 2 会被静默忽略退回拼音）。**这只证明学习逻辑读的是持久化值，不证明「用户能在 UI 上切到五笔」**——后者正是 6.3 的 P1 影响面。
+
+### 6.2 模拟器读数（11-18，emulator-5554，被测包 = `8ab0a88` 自构建 debug APK）
+
+| # | 必验项 | 读数 | 关键证据 |
+|---|---|---|---|
+| 1 | AC-3.4 ① | **PASS** | 10 组不同字对连拼：**10/10 `phrase_learn commit`**，期望合并码 10/10 命中；`reason=interrupt`（不带 `count=`）**0 次**；`user_dict.txt` 10 行四列 `code\t词\t1\twb` |
+| 1 | AC-3.4 ② | **PASS** | 首字上屏 +0.8 s 后 `MOVE_HOME` → `skipped reason=interrupt`（无 `count=`）、无 commit、词库无该条 |
+| 1 | AC-3.4 ③ | **PASS** | 首字上屏后开「快捷短语 · csBaby」面板再 `ESCAPE` 关 → 该合并码**无 commit、无词库新增**（按 §4.3 弱判据两条） |
+| 1 | F1 探测 | **无漏判** | A 组（<300 ms 移动光标）5/5 出中断；B 组（500 ms~1 s）5/5 出中断且 0 commit → **不升级为缺陷** |
+| 2 | AC-3.7 | **PASS** | 学到「喂猫」后新输入框打 `klqt`，按数字键 1（index 0）上屏 **喂猫**、缓冲清空 |
+| 3 | AC-3.8 | **PASS（逻辑段）** | `learning=false` → `skipped reason=disabled`、词库零新增；改回 `true` 后同一序列 `commit code=klqt text=喂猫` |
+| 4 | AC-3.10 | **未执行** | 前置入口崩溃（6.3），非本单可绕过 |
+| 5 | AC-3.11 | **PASS（弱证）** | 10 次连续学习全程 `ANR in com.ispeech.ime` / `Input dispatching timed out` **0 命中** |
+| 6 | AC-3.12 | **PASS** | 干净词库前快照 **2 条**：`中国银行①, 喂猪②`；学「喂猫」后 **3 条**：`喂猫①, 中国银行②, 喂猪③` → ①不丢失（相对顺序不变）②数量 +1 ③index 0 = 喂猫，三条门禁同一次会话内成立 |
+
+**模拟器层：6 项全部执行，5 项通过读数，1 项（AC-3.10）被 P1 挡住 → 5/6。**
+
+### 6.3 缺陷单（P1，非 PR #4 引入）
+
+- **标题**：设置 → 键盘与输入 打开即 NPE，`com.ispeech.ime` 整个进程被杀（含输入法）
+- **严重级**：P1（核心入口不可用；同时挡住 AC-3.10 与「用户切五笔」）
+- **环境**：emulator-5554（Android 14 / sdk_gphone64_arm64），`8ab0a88` 与 `fa57a07` 两个自构建 debug APK **都复现**
+- **复现**：`adb shell am start -n com.ispeech.ime/com.ispeech.settings.MainActivity` → 点「键盘与输入」(308,964) → 进程 PID 5587 → 5652（被杀重启），弹「Application Error: com.ispeech.ime」
+- **实际**：`java.lang.NullPointerException: Attempt to invoke interface method 'void kotlinx.coroutines.flow.MutableStateFlow.setValue(java.lang.Object)' on a null object reference` at `KeyboardViewModel.kt:36`（`fa57a07` 同一形状，行号 35）
+- **根因**：`init { }`（`:30`）里 `viewModelScope.launch` 的第二个收集器在 `:36` 写 `_chineseInputMethod.value`，而该属性声明在 **`:103`**——`viewModelScope` 用 `Dispatchers.Main.immediate`，收集器在构造期就能拿到首个发射，此时属性尚未初始化。`fa57a07` 是 `_inputMethodMode` 声明在 `:101`、收集器在 `:34`，同一缺陷
+- **期望**：设置页正常打开；本条与 PR #4 无关，属 main 既存问题 → 建议新开 issue 交前端，不挂在本单门禁里
+- **影响面**：① AC-3.10 无法验收；② 真机上用户也无法把「中文输入法」切成五笔，条目 3 的入口功能对普通用户不可达
+
+### 6.4 真机层判定与 go / no-go
+
+| 层 | 读数 | 说明 |
 |---|---|---|
-| 1 | AC-3.4 真机三组（含反向 + F1 探测） | **blocked** — 无真机、无含条目 3 的官方包 |
-| 2 | AC-3.7（index 0） | 同上 |
-| 3 | AC-3.8 | 同上 |
-| 4 | AC-3.10（序列断言） | 同上 |
-| 5 | AC-3.11 | 同上 |
-| 6 | AC-3.12（①②③） | 同上 |
+| 模拟器（emulator-5554，`8ab0a88`） | **5/6** | 上表 6.2，可复现命令与截图随本单评论交付 |
+| 真机（serial `23F0224224000950`） | **0/6** | 设备仍不在线；按 issue 明文与项目规程，模拟器读数不替代真机验收 |
 
-**go / no-go：no-go（blocked，非实现失败）。** 真机层 0/6 有证据，不具备发布条件。
-**不得**据此判定 VOCA-124 实现有问题——本单至今没有产生任何真机 fail 证据。
+**go / no-go：no-go。** 三条硬理由：① 真机 0/6，核心链路无真机回归记录；② AC-3.10 未执行且被 P1 挡住；③ PR #4 尚未合入 `main`（§1 ②），装到真机上的包里没有条目 3。
+**不得**据 6.2 判定 VOCA-124 实现有问题——模拟器层 5 项全绿，未产生任何功能 fail 证据；6.3 的 P1 属 main 既存缺陷。
+
 
 ## 7. 待确认 / 已收敛
 
