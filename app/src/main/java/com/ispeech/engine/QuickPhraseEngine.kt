@@ -104,8 +104,50 @@ class QuickPhraseEngine(
         /** 联想扫描上限，避免规则很多时每次都全量排序大列表。 */
         private const val ASSOCIATION_SCAN_LIMIT = 64
 
-        /** 解析规则文本；没有任何有效条目时返回 null。 */
-        fun fromText(text: String, minTriggerLength: Int = 2): QuickPhraseEngine? {
+        /**
+         * 五笔态能敲全的触发码长度上限（与 `IspeechImeService.MAX_CODE_LENGTH` 同值）。
+         * 超过它的简写在五笔态只能靠前缀 / 子串命中，而 `minTriggerLength` 只挡单字母，
+         * 挡不住「敲 4 位 `dtws` 命中 5 位码 `dtwsl`」把整段长正文顶到候选首位。
+         */
+        const val WUBI_REACHABLE_TRIGGER_LENGTH = 4
+
+        /** 解析规则文本，按文件声明的匹配方式原样生效；没有任何有效条目时返回 null。 */
+        fun fromText(text: String, minTriggerLength: Int = 2): QuickPhraseEngine? =
+            parse(text, minTriggerLength, applyTriggerLengthGuard = false)
+
+        /**
+         * 解析云端落盘的远端规则（`filesDir/quick_phrases_remote.txt`），并对存量行补一道读盘侧长度守卫：
+         * `trigger` 超过 [WUBI_REACHABLE_TRIGGER_LENGTH] 位且声明 `PREFIX` / `CONTAINS` 的行按 `EXACT` 生效。
+         *
+         * 为什么守卫要放在读盘侧：VOCA-391 的降级只做在拉取侧，对「装上新包之后再点一次同步」的设备才有效；
+         * 升级前已经写在盘上的 `CONTAINS` / `PREFIX` 行不会被回写，那些设备升级后行为一切照旧。
+         *
+         * 只重解释匹配方式：`trigger` / `label` / `content` / `weight` / `kind` 原样保留，磁盘文件也不动。
+         * 内置资产与用户文件不走这里——那两份的 `>4 位 + prefix` 是有意的（搜狗 18 条 5 位常用语、
+         * CSV 导入「打前 4 位即前缀命中」），口径见 ADR-0002 C1-5 / C1-10。
+         */
+        fun fromRemoteText(text: String, minTriggerLength: Int = 2): QuickPhraseEngine? =
+            parse(text, minTriggerLength, applyTriggerLengthGuard = true)
+
+        /**
+         * 读盘侧长度守卫的判定，与拉取侧云端 `match_type` 映射（VOCA-391）、ADR-0002 C1-6 同口径。
+         * `REGEX` 不降级：它与 `EXACT` 同属不受长度守卫的模式（`check_quick_trigger.py` 的 `UNGUARDED_MODES`），
+         * 命中与否由表达式自己决定。
+         */
+        fun guardedRemoteMode(trigger: String, declared: QuickMatchMode): QuickMatchMode =
+            if (trigger.length > WUBI_REACHABLE_TRIGGER_LENGTH &&
+                (declared == QuickMatchMode.PREFIX || declared == QuickMatchMode.CONTAINS)
+            ) {
+                QuickMatchMode.EXACT
+            } else {
+                declared
+            }
+
+        private fun parse(
+            text: String,
+            minTriggerLength: Int,
+            applyTriggerLengthGuard: Boolean,
+        ): QuickPhraseEngine? {
             val parsed = ArrayList<QuickEntry>()
             for (rawLine in text.split('\n')) {
                 val line = rawLine.trim()
@@ -117,7 +159,9 @@ class QuickPhraseEngine(
                 // 写入侧（SyncRepository / QuickPhraseCodec）把换行 / 制表符写成字面量 \n \t，这里还原
                 val content = unescapeLineText(fields[2])
                 if (trigger.isEmpty() || content.isEmpty()) continue
-                val mode = if (fields.size > 3) QuickMatchMode.parse(fields[3]) else QuickMatchMode.PREFIX
+                val declaredMode =
+                    if (fields.size > 3) QuickMatchMode.parse(fields[3]) else QuickMatchMode.PREFIX
+                val mode = if (applyTriggerLengthGuard) guardedRemoteMode(trigger, declaredMode) else declaredMode
                 val weight = if (fields.size > 4) fields[4].toIntOrNull() ?: 100 else 100
                 val kind = if (fields.size > 5) {
                     if (fields[5].lowercase().startsWith("a")) LookupKind.QUICKAPPLY else LookupKind.PHRASE
