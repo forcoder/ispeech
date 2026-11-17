@@ -1,11 +1,12 @@
 # VOCA-37 · Stage 3 键盘交互回归报告（模拟器口径）
 
 - 被测构建：`c524351e2e509ed294f49dd3d2f7a1bf29e07a4d`（PR #18 head，base `fa57a07`；PR #18 仍为 OPEN，未合并）
-- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（48 份当场 stdout 原文）+ `shots/`（7 张截图）。三个口径分开写：返修提交 `57f5f5b` 单独 13 files +597/−35；第二轮返修提交 `4009fb4` 单独 11 files +609/−39；**PR #25 累计到 head `4009fb4`** 是 67 files +2599/−0（其中 evidence 48、shots 7、`tools/` 66、`docs/` 1）。复算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`——本句所在行的这次措辞修改本身还会让 head 往前挪一格、行数差两三行，所以以 head SHA 为准，不要拿本行的数字当最新值。
+- 两个 PR 别混：**PR #18 = 被测变更集**（产品代码，16 个文件，本文凡是「变更面内 / 拦路项」所说的「本 PR」都指它，本轮统一改写为 `PR #18`）；**PR #25 = 本 issue 的交付 PR**（branch `test/voca-37-stage3-regression`，只含 `docs/` 报告 + `tools/qa/` 工装与证据，**不含任何产品代码**：`git diff --name-only fa57a07...57f5f5b` 里 `app/src` 命中 0 个）。
+- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（48 份当场 stdout 原文）+ `shots/`（7 张截图）。三个口径分开写：返修提交 `57f5f5b` 单独 13 files +597/−35；第二轮返修提交 `4009fb4` 单独 11 files +609/−39；**PR #25 累计到 head `d5dac79`** 是 67 files +2599/−0（其中 evidence 48、shots 7、`tools/` 66、`docs/` 1）。复算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`——本句所在行的这次措辞修改本身还会让 head 往前挪一格、行数差两三行，所以以 head SHA 为准，不要拿本行的数字当最新值。
 - 规格权威：`agent/ux/voca-45-spec` @ `28c1cac`（main 上的 602 行翻页版与 `agent/ux/voca-45` @ `fc564aa` 均已过期，本报告不引用）
 - 执行环境：本地 AVD `ispeech_test`（1080×2340 / 440dpi / arm64 / 2G），Android 14 模拟器；对照基准为同机搜狗 `com.sohu.inputmethod.sogou/.SogouIME`
 - 执行人：测试工程师（QA）· 2026-11-17 03:40–05:20 首测，06:55–07:45 按质检 6 条返修，12:25–12:45 按质检第二轮 4 条返修（本地时区）
-- 结论：**no-go**。**本 PR 的拦路项 2 条**，任一成立即拦：① 真机口径缺失——「占屏比 ≤1pp」在按真机参数（520dpi / font_scale 1.15）复现时变成 **+7.09pp**，模拟器无权定稿；② AC-2 按「开关态 × 键路径」拆开重测后，**硬件/注入键路径 4 组全阴性**（开关当场读到 `true`、间隔 0ms 仍不出句号），规格 AC-2 未把判据限定在软键 → 记 **P1**（D1）。此外还有一条 **`fa57a07`（main）既有的 P1** D2：进入设置页「键盘与输入」即 NPE 崩掉输入法进程。缺陷真实且用户可见，但**不是本 PR 引入、本 PR 也未触碰其代码**，是否卡住统一合并窗口属 PM/人类的范围裁决，本报告不替它判，也不计入本 PR 的拦路项。门禁：P1 未清零不判 go。
+- 结论：**no-go**。**PR #18 的拦路项 2 条**，任一成立即拦：① 真机口径缺失——「占屏比 ≤1pp」在按真机参数（520dpi / font_scale 1.15）复现时变成 **+7.09pp**，模拟器无权定稿；② AC-2 按「开关态 × 键路径」拆开重测后，**硬件/注入键路径 4 组全阴性**（开关当场读到 `true`、间隔 0ms 仍不出句号），规格 AC-2 未把判据限定在软键 → 记 **P1**（D1）。此外还有一条 **`fa57a07`（main）既有的 P1** D2：进入设置页「键盘与输入」即 NPE 崩掉输入法进程。缺陷真实且用户可见，但**不是 PR #18 引入、PR #18 也未触碰其代码**，是否卡住统一合并窗口属 PM/人类的范围裁决，本报告不替它判，也不计入 PR #18 的拦路项。门禁：P1 未清零不判 go。
 
 ---
 
@@ -16,10 +17,10 @@
 | 模拟器可判面（AC-1/3/4/5/6/7、G1–G7、恒高×1.15、面板路径） | **全绿**（1 项 P2 观察、2 项规格/实现差异记录） | 见 §3–§6；AC-4~AC-7 的键名↔方向在本轮按代码订正（步长/钳制结论不变），见 §3 与 `ev_ac47b.txt` |
 | AC-2 双击空格句号（返修轮按路径拆开） | **软键路径 PASS / 硬件·注入键路径 FAIL** | 开关态当场从 DataStore 读出 `true`；硬件键 4 组全阴性 → P1，见 §3.1 D1 |
 | AC-9 退格长按阶梯 | **代码级确认，行为级未证** | 原判 `PASS（带说明）` 按质检意见下调：只观测到 90ms 慢档，45ms 快档无证据（§3） |
-| 本 PR 变更面内撞出的产品缺陷 | **1 条 P1（D1 · 硬件键路径）** | 拦路，见 §3.1 |
-| `main`（`fa57a07`）既有缺陷，本 PR 未触碰 | **1 条 P1（D2 · 设置页崩溃）** | 质检在 `fa57a07` 构建上复现到同一 FATAL；不记在本 PR 头上，是否卡合并窗口交 PM/人类，见 §3.1 D2 |
+| PR #18 变更面内撞出的产品缺陷 | **1 条 P1（D1 · 硬件键路径）** | 拦路，见 §3.1 |
+| `main`（`fa57a07`）既有缺陷，PR #18 未触碰 | **1 条 P1（D2 · 设置页崩溃）** | 质检在 `fa57a07` 构建上复现到同一 FATAL；不记在 PR #18 头上，是否卡合并窗口交 PM/人类，见 §3.1 D2 |
 | 真机可判面（绝对占屏 pp、520dpi 键高观感、真机手指触摸） | **未取证** | 见 §5、§9；按 issue 约束不得写「通过」 |
-| 发布建议 | **no-go** | 门禁：本 PR 拦路 2 条 = P1 D1 未清零 + 真机 pp 未定稿；D2 另列 |
+| 发布建议 | **no-go** | 门禁：PR #18 拦路 2 条 = P1 D1 未清零 + 真机 pp 未定稿；D2 另列 |
 
 ## 2. GATE 0（前置门禁）
 
@@ -60,7 +61,7 @@ package:com.sohu.inputmethod.sogou
 | G6 编辑后偏移复位 | 归零 | 滚动态 shift=762 → 编辑宿主后 shift=0 | **PASS** |
 | G2 / G7 | 只记用户可见影响 | 见 §8 | 记录 |
 
-### 3.1 缺陷单（2 条 P1：D1 在本 PR 变更面内，D2 在 main 上就有）
+### 3.1 缺陷单（2 条 P1：D1 在 PR #18 变更面内，D2 在 main 上就有）
 
 **D1 · P1 · AC-2 双击空格句号在硬件/注入键路径完全不生效**
 
@@ -72,15 +73,16 @@ package:com.sohu.inputmethod.sogou
 - 附带收口：规格开放问题 #10（「keyevent 与触摸等价性未验证」）本轮给出答案——**不等价**。
 - 归属：前端（`IspeechImeService` 空格键路径）修复；UX 需裁定硬件键是否纳入 AC-2 范围（若明确不纳入，要把规格 When 改成「软键盘空格键」并回改本报告判定）。
 
-**D2 · P1（main 既有，非本 PR 引入）· 进入设置页「键盘与输入」即 NPE 崩掉整个输入法进程**
+**D2 · P1（main 既有，非 PR #18 引入）· 进入设置页「键盘与输入」即 NPE 崩掉整个输入法进程**
 
 - 复现序列（关键是先让 DataStore 进进程缓存）：① 弹出键盘（任意宿主输入框）→ ② `am start -n com.ispeech.ime/com.ispeech.settings.MainActivity` → ③ 点「键盘与输入」卡片（bounds `[193,851][423,917]`，中心 308,884）→ ④ `FATAL EXCEPTION: main`，`Process: com.ispeech.ime, PID: 30743`，栈顶 `KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)` ← `SettingsStore$chineseInputMethodFlow$$inlined$map$1$2.emit(Emitters.kt:219)` ← `KeyboardViewModel.<init>(KeyboardViewModel.kt:34)`。证据：`ev_crash_kbsettings.txt`。全新数据态（`pm clear` 后）可复现；冷进程（没弹过键盘直接进设置页）不复现——因为 DataStore 未缓存时首次 emit 走异步读盘，属性已初始化完。
 - 根因：`KeyboardViewModel` 的 `init{}`（c524351 的 `:29-39`）里 launch 了三个 collector，而它们写的 `_chineseInputMethod`（`:107`）、`_spaceLongPressMs`（`:110`）**声明在 `init` 之后**。Kotlin 属性初始化按声明顺序排在 `init` 块之后执行，`viewModelScope.launch` 用 `Dispatchers.Main.immediate` 同步起跑，命中进程缓存的第一次 emit 就打在尚未赋值的 null 字段上（崩点 `:35` = `chineseInputMethodFlow` 那个 collector 的 `emit`）。
-- 归属与紧迫性（**本轮按质检打回项 1 订正**）：这是 **`fa57a07`（main）既有的缺陷，本 PR 没有触碰它的代码**。三条依据，都能当场复跑：
-  1. `git diff fa57a07 c524351 -- app/src/main/java/com/ispeech/settings/keyboard/KeyboardViewModel.kt` 只有 **+5 行**，是新增的 `setDoubleSpacePeriod()` setter（`:102-106`），三个 collector 与两个 `MutableStateFlow` 声明一字未动；
-  2. `git blame -L 34,40 fa57a07 -- .../KeyboardViewModel.kt` → 第 37-39 行（`voiceSpaceLongPressMsFlow` 那个 collector）落在 `904a98d`（Mini，2026-11-09 初始提交），不是 PR #18 的提交；
-  3. 质检专员在 `fa57a07` 自己的构建上、同一台模拟器、同一时序复现到**同一行、同一栈**的 `FATAL EXCEPTION`（PID 13926），本报告上一轮写的「PR #18 在 `:38-39` 新增第二个同形 collector，把暴露面翻倍」是**错误归因**，已删除。
-- 定级与去向：崩溃本身是真的、用户可见（「打字后改键盘设置 → 键盘整个消失，进程重启」），P1 定级不变；但它今天就在 main 上，**属 main 既有债**。是否因此卡住统一合并窗口，是 PM/人类的范围裁决，本报告只给事实与影响，不替它判，也不把它记进本 PR 的拦路项（本 PR 拦路 2 条 = D1 + 真机 pp）。修法沿用上一轮的建议：把两个 `MutableStateFlow` 声明提到 `init` 之前，或让 collector 延后启动。
+- 归属与紧迫性（**本轮按质检打回项 1 订正**）：这是 **`fa57a07`（main）既有的缺陷，PR #18 没有触碰它的代码**。四条依据，都能当场复跑：
+  1. `git diff --numstat fa57a07...c524351 -- app/src/main/java/com/ispeech/settings/keyboard/KeyboardViewModel.kt` → `5  0`：PR #18 对这个文件只有 **+5 行**，是新增的 `setDoubleSpacePeriod()` setter（c524351 的 `:102-106`），三个 collector（`:34-39`）与两个 `MutableStateFlow` 声明一字未动；
+  2. `git blame -L 34,39 c524351 -- .../KeyboardViewModel.kt` → `:34/36/37/38/39` = `904a98d`（Mini，2026-11-09），崩点 `:35`（`chineseInputMethodFlow` 那行）= `2a1883e9`（Lin，2026-11-10，VOCA-29）。两个 SHA 都 `git merge-base --is-ancestor <sha> fa57a07` 成立（即今天就在 main 上），而 PR #18 的提交清单只有 `e528c08` + `c524351`，两者都不在其中；
+  3. 反向自查：`git diff -U0 fa57a07...c524351 -- app/src | grep '^+' | grep -E 'viewModelScope|MutableStateFlow|collect'` 在 PR #18 的 16 个变更文件、全部新增行里**只命中 1 行**，就是那个 setter 自己的 `viewModelScope.launch { SettingsStore.setDoubleSpacePeriod(...) }`——PR #18 没在任何文件加过第二个 collector；
+  4. 质检专员在 `fa57a07` 自己的构建上、同一台模拟器、同一时序复现到**同一行、同一栈**的 `FATAL EXCEPTION`（PID 13926）。本报告上一轮写的「PR #18 在 `:38-39` 新增第二个同形 collector，把暴露面翻倍」是**错误归因**，已删除。
+- 定级与去向：崩溃本身是真的、用户可见（「打字后改键盘设置 → 键盘整个消失，进程重启」），P1 定级不变；但它今天就在 main 上，**属 main 既有债**。是否因此卡住统一合并窗口，是 PM/人类的范围裁决，本报告只给事实与影响，不替它判，也不把它记进 PR #18 的拦路项（PR #18 拦路 2 条 = D1 + 真机 pp）。修法沿用上一轮的建议：把两个 `MutableStateFlow` 声明提到 `init` 之前，或让 collector 延后启动。
 - 本轮取证影响：AC-2 的开关置位因此改走输入法内配置面板（齿轮键 → `openPanel(Panel.SETTINGS)`，`IspeechImeService.kt:2071`），不再经过会崩的 App 设置页。
 
 ## 4. 命名必证项：恒高 46dp × font_scale 1.15 会不会截字
