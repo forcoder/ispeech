@@ -29,6 +29,11 @@
 | `https://www.agentai0.com/funasr/…tar.bz2` | `404`（站点正常，未挂模型） | 已有 Let's Encrypt 证书，**可改造** |
 | `https://github.com/k2-fsa/sherpa-onnx/releases/…` | 首次实测：200 / `application/octet-stream` / 77,920,048 B / `BZh` / Range 206 / sha256 一致；同日稍后复测曾出现 `github.com:443` TCP 超时；**换源当天再次复测：整包 5.4s / 14.5 MB/s 可达** | 官方源内容正确，但链路**时通时断** —— 只能做兜底/对照，不宜做默认源 |
 
+> **2026-11-18 复核（VOCA-475，探测机出口经 `ipinfo.io` 判为 Guangzhou / Guangdong / CN，境内）**：默认源 `curl -sI` 仍是
+> `200 / application/octet-stream / Content-Length 77920048 / Accept-Ranges: bytes`，
+> `check_model_host.py --sha256` 9/9 全绿（整包 2.9s / 26.6 MB/s），`--samples 3` 3/3 可用 exit 0；
+> 旧源 `cvm.agentai0.com` 3 次采样仍**全部** 302 → dnspod 拦截页，exit 1 —— 故障形态未变，不作恢复候选。
+
 关键结论：
 
 0. **默认源已换成 OSS**（§5.1）。上面的 OSS 行就是当前 `app/build.gradle.kts` 的兜底值，
@@ -52,11 +57,21 @@ python3 tools/verify/check_model_host.py
 # 探测指定源；--sha256 会整包下载并校验摘要（约 78MB，用于换源验收）
 python3 tools/verify/check_model_host.py <url> --sha256
 
-# 不联网验证判定逻辑本身（本地伪造 6 类故障）
+# 不联网验证判定逻辑本身（本地伪造 6 类故障 + 5 条多数采样用例）
 python3 tools/verify/check_model_host.py --self-test
+
+# 多次采样取多数——定时任务必须带这个参数，理由见下方「采样纪律」
+python3 tools/verify/check_model_host.py --samples 3 --sample-interval 5
 ```
 
 退出码：`0` 全绿；`1` 任一断言失败（含 DNS/TCP/TLS 失败）。可直接接 CI / cron。
+
+**采样纪律（2026-11-18 定死，VOCA-475）**：判断源可用性**必须多次采样取多数**，不能拿单次结果
+下结论。旧默认源 `cvm.agentai0.com` 在被拦截期间有 **10~17% 请求返回 502**（migration log §2 的
+复测记录）—— 单次采样会把「抖一下」读成「源挂了」，也会把「运气好的一跳」读成「源恢复了」。
+规则：`--samples N` 取**严格多数**（`ok*2 > N` 才判可用），平局（偶数样本）判不可用 ——
+宁可多一条告警，不漏一次真故障。出现 `2/3` 这类结果时脚本额外打 `WARN: 采样结果不一致`，
+那是**降级（P3）**信号，不是「已经恢复」。
 
 断言清单（缺一不可）：
 
@@ -75,31 +90,40 @@ python3 tools/verify/check_model_host.py --self-test
 | 层 | 触发时机 | 落点 |
 |---|---|---|
 | 发布前门禁（**强制**） | 每次出包前 | 人工跑一次；红则 no-go，不许发版 |
-| 定时探测（**待接**） | 每 30 分钟 | 见下方 cron / Actions 片段 |
+| 定时探测（**未接 · 卡在人类答复**） | 每 30 分钟（目标） | 脚本可用且已在境内出口实跑（见下方「首次实跑记录」）；**没有调度器**。问过的记录：2026-11-09 提出 → 未答；2026-11-18 在 VOCA-33 / VOCA-475 再问 → 限期 2026-11-20。答复「不接」就在本行改写为「决定不接 · 决定人 · 日期 · 理由」，不接受继续挂着 |
 | 用户侧信号 | 持续 | logcat `FunAsrModelStore` 出现 `HTTP_4xx` / `NOT_MODEL_PAYLOAD`；源站日志 404 突增；`R.string.voice_model_failed` 相关反馈 |
 
-定时探测两种接法（执行环境需人类确认后再接，二者选一）：
+**接法候选（执行环境需人类确认后再接）**：
 
 ```bash
-# ① 远端构建机 crontab（43.136.44.72，与构建机同一台，出网到源站链路与用户侧不同，
-#    因此还要在本机/办公网各跑一次作为对照）
-*/30 * * * * cd ~/workspace/ispeech && python3 tools/verify/check_model_host.py \
-  >> ~/logs/model-host.log 2>&1 || curl -s "$ALERT_WEBHOOK" -d '{"text":"ASR 模型源不可用"}'
+# ① 境内常驻机器 crontab —— 建议项。改动最小，探测链路即国内用户链路。
+#    注意 crontab 里 `%` 必须写成 `\%`（否则被解析成换行）；用 `;` 而非 `&&` 串接，
+#    这样 `cd` 失败时 python 也会失败并触发告警，而不是静默跳过。
+*/30 * * * * cd ~/workspace/ispeech; { date '+\%F \%T \%z'; python3 tools/verify/check_model_host.py --samples 3 --sample-interval 5 --quiet; } >> ~/logs/model-host.log 2>&1; RC=$?; [ $RC -eq 0 ] || curl -s "$ALERT_WEBHOOK" -d '{"text":"ASR 模型源不可用（3 次采样多数判红）"}'
 ```
 
-```yaml
-# ② GitHub Actions（仓库已有 origin: forcoder/ispeech；需人类确认是否允许在 CI 里跑）
-# .github/workflows/model-host-probe.yml
-on:
-  schedule: [{ cron: "*/30 * * * *" }]
-  workflow_dispatch:
-jobs:
-  probe:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: python3 tools/verify/check_model_host.py --quiet
-```
+② 阿里云函数计算定时触发：境内 region、常驻、按量成本近零（一次探测只有 3 个请求头 + 16 字节），
+不依赖任何一台机器开着。需要人类确认是否允许为此开函数 —— 属新付费资源，未确认前不接。
+
+③ ~~GitHub Actions `on: schedule`~~ —— **已排除，不再作为候选**（原片段在此文件里保留过，2026-11-18 删除）：
+runner 在境外，探测结论不代表国内用户链路；VOCA-33 那次「境外看着正常、境内被备案拦截」的误判就是这么来的。
+它同时依赖第三方 CI 与境外出口，作为可用性告警源是**假阴性发生器**。真要用 Actions，只适合做
+「包内容完整性」对照（`--sha256` 对官方 Release），不承担链路可用性判定。
+
+**监控自身的盲区**（接上调度器后必须一起处理）：cron 挂了不会有告警。判据是日志里
+**超过 1 小时没有新行** —— 恢复探测前先确认探测器在跑，否则「一直没红」可能只是「一直没测」。
+
+**首次实跑记录（2026-11-18 03:18~03:27 +0800，探测机出口经 `ipinfo.io` 判为 Guangzhou / CN —— 境内，不是境外链路）**：
+
+| 目标 | 命令 | 结果 | 退出码 |
+|---|---|---|---|
+| 默认源（OSS） | `check_model_host.py`（单次，×3 轮） | `SUMMARY: passed=7 failed=0 warned=0` ×3 | `0` |
+| 默认源（OSS） | `check_model_host.py --samples 3` | `MAJORITY: 3/3 次可用`、`passed=21 failed=0` | `0` |
+| 默认源（OSS） | `check_model_host.py --sha256` | 整包 77,920,048 B / `da92b3db…c6b1450` 一致，`passed=9 failed=0` | `0` |
+| 旧源 `cvm.agentai0.com` | `check_model_host.py <url> --samples 3` | `3/3` 均 `302 → dnspod webblock` 拦截页，`MAJORITY: 0/3` | `1` |
+| 判定逻辑本身 | `check_model_host.py --self-test` | `cases=11 unexpected=0` | `0` |
+
+绿红两路都跑通过，说明「接上就会响」；缺的只是那个调度器。
 
 ### 2.3 分级与首响
 
@@ -115,9 +139,16 @@ jobs:
 
 | 告警名 | 阈值 | 分级 | 通知 | Runbook |
 |---|---|---|---|---|
-| `ModelHostProbeFailed` | 连续 2 次探测退出码 ≠ 0 | P1（无备源）/ P2（有备源） | on-call（qiaozhou）+ 本 issue 评论 | §3 |
+| `ModelHostProbeFailed` | **单次** `--samples 3` 多数判红（退出码 ≠ 0）即告警 | P1（无备源）/ P2（有备源） | on-call（qiaozhou）+ 本 issue 评论 | §3 |
+| `ModelHostProbeFlaky` | 单次 `--samples 3` 出现 `MAJORITY: 2/3`（采样不一致） | P3 | 值班邮件 | §2.1 采样纪律 |
+| `ModelHostProbeSilent` | 探测日志超过 1 小时没有新行（探测器本身挂了） | P2 | on-call | §2.2「监控自身的盲区」 |
 | `ModelHostCertExpiring` | 证书剩余 < 14 天 | P2 | on-call | 仅适用自建源；OSS 默认域名的证书由阿里云签发/续期，**默认源不再需要本条** |
 | `ModelHostSlow` | 首字节 > 5s 或 < 500KB/s 持续 10 分钟 | P3 | 值班邮件 | §7 |
+
+> **原阈值「连续 2 次探测退出码 ≠ 0」已于 2026-11-18 收紧为「单次多数判红」**：去噪已经由
+> `--samples 3` 在单次运行内做完，再叠一层「连续 2 次」会把发现时间推到 60 分钟，
+> 而源挂了是分钟级用户可见故障（§2.3 给 P1 的首响只有 30 分钟）。
+> 平局与全红都判红 —— 宁可多一条误报，不漏一次真故障。
 
 ## 3. 换源处置 SOP（目标 30 分钟内恢复）
 
@@ -197,19 +228,65 @@ jobs:
 |---|---|---|
 | 主（默认值） | 上表的 OSS URL | `check_model_host.py` 无参数探测的就是它 |
 | 兜底 / 对照 | `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2` | 内容权威、sha256 可核对；国内链路不稳，只做应急与取证 |
+| 异地留档（**不是下载源**） | `oss://baigong-code-backup/ispeech/asr-model/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2` | cn-shenzhen / IA / **private**，见 §5.4。私有桶 + 签名 URL 会过期，**不能填进 `-PasrModelUrl`**；它的用途是「OSS 主对象被删/被覆盖后不必依赖官方 Release 就能恢复」，恢复步骤见 §7.1 |
 | 兼容期保留 | `http://cvm.agentai0.com/funasr/…` | 域名仍被备案拦截，但 `network_security_config.xml` 的明文放行条目**保留**，旧包切回时不必重编 |
 
 回滚（≤10 分钟）：`./gradlew assembleRelease -PasrModelUrl=<备用源>` 重新出包分发；**OSS 对象不删**。
-对象无版本控制 → 误覆盖/误删只能从官方 Release 重下、校验 sha256 后重传（步骤见 §7 恢复小节）。
+对象无版本控制 → 误覆盖/误删只能从异地留档（§5.4）或官方 Release 取包、校验 sha256 后重传（步骤见 §7.1）。
 
 ### 5.3 依赖与已知风险
 
 | 风险 | 影响 | 现有缓解 |
 |---|---|---|
 | bucket 属**另一个业务**（`delivery-service-smzk` 是交付服务的公共读桶），对方调整 ACL / 清理对象不受本组控制 | 默认源 403 / 404，新包装不上模型 | 30 分钟一次探测（§2.2）；对象清单可在 `ossutil ls oss://delivery-service-smzk/models/` 核对；恢复见 §7.1 |
-| 对象**无版本控制**，覆盖/删除不可逆 | 只能重传 | §7.1 恢复步骤；替换前先在本地留档 + sha256。**当前这份包未额外留档**，恢复依赖官方 Release（sha256 可核，实测下载 5.4s）—— 记为已接受风险 |
+| 对象**无版本控制**，覆盖/删除不可逆 | 只能重传 | §7.1 恢复步骤；替换前先在本地留档 + sha256。**2026-11-18 起已有异地留档**（§5.4，另一 region 的私有桶，逐字节复验一致），恢复不再依赖官方 Release |
 | 阿里云 OSS 默认域名无 SLA 承诺的加速能力（未上 CDN） | 弱网用户体验差于 CDN | 探测记录吞吐；P3 阈值 500KB/s（§2.3）触发时评估 CDN |
 | 默认域名不支持自定义缓存策略 | 每次下载都回源 OSS | 本轮量级可接受（§7）；量大时再上 CDN + 自定义域名（需备案） |
+| 定时探测仍未接（§2.2） | 源挂了仍只能靠用户投诉发现 | 脚本与 cron 片段已就绪并境内实跑过；卡在人类答复，限期 2026-11-20 |
+
+### 5.4 异地留档（2026-11-18 新增，VOCA-475 残余风险 3 的闭合）
+
+质检专员·项目经理 11-17 的残余风险 3 是「OSS 上那个 74 MB 对象只有它自己一份」。已落一份异地副本：
+
+| 项 | 值 |
+|---|---|
+| 对象 | `oss://baigong-code-backup/ispeech/asr-model/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2` |
+| Region | `oss-cn-shenzhen`（主源在 `oss-cn-guangzhou`）—— 跨 region，才算异地 |
+| 桶 | `baigong-code-backup`：与主源**同一账号**的既有备份桶（2026-08-27 建，桶内已有仓库 bundle 备份），ACL `private`、StorageClass `IA`、ZRS；**未新建任何付费资源，未改任何 ACL / policy / 生命周期规则** |
+| 上传时间 | 2026-11-18 03:19:29 +0800，`aliyun oss cp` 2.35s / 33 MB/s |
+| 对象元数据 | `Content-Type: application/octet-stream`、`X-Oss-Meta-Sha256`、`X-Oss-Meta-Origin`、`X-Oss-Meta-Issue: VOCA-475` |
+| 大小 | `77920048`（与主源逐字节一致） |
+| ETag / Content-Md5 | `A60C3BF0709FA20DB40313028CC7DC53` / `pgw78HCfog20AxMCjMfcUw==` —— 与主源**完全相同** |
+| CRC64 | `4639922393290880809` —— 与主源**完全相同**（服务端逐对象校验和，最强的一致性证据） |
+| sha256 | `da92b3db5218c5be53aad53e57d1b6e63e7fc98a0e054fbdd6dbe18e9c6b1450` —— 从备份对象**重新整包下载**后本地计算，与权威值逐字符相同 |
+
+复跑验证命令（签名 URL 含凭据，不要贴进日志或评论）：
+
+```bash
+aliyun oss stat oss://baigong-code-backup/ispeech/asr-model/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2 \
+  -e oss-cn-shenzhen.aliyuncs.com --region cn-shenzhen
+
+U=$(aliyun oss sign oss://baigong-code-backup/ispeech/asr-model/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2 \
+     -e oss-cn-shenzhen.aliyuncs.com --region cn-shenzhen --timeout 600 | grep '^https://')
+curl -s -o backup.tar.bz2 -w 'http_code=%{http_code} size=%{size_download}\n' "$U"   # 200 / 77920048
+curl -s -H 'Range: bytes=16780-' -o /dev/null -w 'http_code=%{http_code}\n' "$U"     # 206（备份也可续传）
+shasum -a 256 backup.tar.bz2                                                          # da92b3db…c6b1450
+```
+
+实测结果（2026-11-18 03:19~03:21 +0800，对象 `Last-Modified: 2026-11-18 03:19:29 +0800`）：`GET 200 / 77920048 B / 2.79s`、`Range 206` +
+`Content-Range: bytes 16780-77920047/77920048`、`sha256` 与权威值一致。
+
+成本与回滚：常态成本只有存储 74.3 MB IA ≈ **¥0.003/月**；本次建档 + 三次复验下载产生的一次性外网流量合计约 **¥0.2**。
+回滚 = 删这一个对象（精确 key，不用 `-r`，桶内其余数据属别的业务）：
+
+```bash
+# 删除属不可逆操作：需人类确认后再执行，SRE 不单独承担
+aliyun oss rm oss://baigong-code-backup/ispeech/asr-model/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2 \
+  -e oss-cn-shenzhen.aliyuncs.com --region cn-shenzhen
+```
+
+**留档只有一份的现状已被解掉，但它不是自动的**：桶未开版本控制、未开跨区域复制（CRR），
+主源将来被替换时需手工同步这一份 —— 已写进 §7.1 与 §8 检查表。
 
 ## 6. OSS 行为差异（客户端与探测脚本必须知道的点）
 
@@ -240,6 +317,9 @@ jobs:
   - 10,000 次 ≈ **¥200–400**；
   - 若并发集中在忙时，按忙时单价估算。
 - 存储与请求费：74.3MB Standard LRS ≈ ¥0.12/GB/月 → **≈ ¥0.01/月**；千次 GET 也在分级内，可忽略。
+- 异地留档（§5.4）：常态成本只有 74.3MB IA ≈ **¥0.003/月**（取回时另有 IA 数据取回费，量级 ¥0.002/次）；
+  一次性成本 = 建档 + 复验下载的外网流出合计 ≈ **¥0.2**。**留档不改变上面的流量结论**：
+  它是私有对象、只用于恢复，用户下载不经过它。
 - **成本上限建议**：月外网流出预算先按 **¥100（≈ 2,500 次下载/月）** 定，用到 70% 时在阿里云控制台加流量告警；
   超过上限的处置是「切 CDN + 压缩分片」或「按需限流」，不是直接停服。
 - 对比自建单机（方案 A/B）：量小时 OSS 更贵但不需要带宽预留；量大时自建更省但要考虑与 `api` 业务抢带宽。
@@ -247,10 +327,32 @@ jobs:
 
 ### 7.1 OSS 对象误删 / 误覆盖的恢复
 
-1. 从官方 Release 重新下载（地址见 §5.2），`shasum -a 256` 必须等于 `da92b3db…c6b1450`；
-2. `ossutil cp <file> oss://delivery-service-smzk/models/asr/… --content-type application/octet-stream --region cn-guangzhou -e oss-cn-guangzhou.aliyuncs.com`；
-3. `python3 tools/verify/check_model_host.py --sha256` 全绿后再结束事件。
-   对象未开版本控制 → **没有「一键还原」**，恢复时间取决于下载速度（官方源实测 5.4s，可按 5–15 分钟计）。
+**先取异地留档（§5.4，境内、不依赖官方 Release）**：
+
+```bash
+# 1) 拉回留档（约 3s，境内到境内）
+aliyun oss cp oss://baigong-code-backup/ispeech/asr-model/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2 . \
+  -e oss-cn-shenzhen.aliyuncs.com --region cn-shenzhen
+
+# 2) 摘要必须等于 da92b3db…c6b1450；不符就是备份也坏了 → 立即转官方 Release 路线并升级 P1
+shasum -a 256 sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2
+
+# 3) 传回主源桶
+aliyun oss cp sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2 oss://delivery-service-smzk/models/asr/ \
+  --content-type application/octet-stream -e oss-cn-guangzhou.aliyuncs.com --region cn-guangzhou
+
+# 4) 两条都全绿（exit 0）才算事件结束
+python3 tools/verify/check_model_host.py --sha256
+python3 tools/verify/check_model_host.py --samples 3
+```
+
+5. 事后把「谁 / 何时 / 用了哪份留档 / 探测输出」写进 issue 评论，并确认 §5.4 的留档仍是同一份内容。
+
+留档不可用（被一起清掉、或内容不符）时的兜底：从官方 Release 重新下载（地址见 §5.2），
+`shasum -a 256` 必须等于权威值，再走上面第 3–5 步。
+
+两个桶都未开版本控制 → **没有「一键还原」**。恢复时长估算：境内到境内约 3s（2026-11-18 实测 33 MB/s），
+按流程 + 复核取 **5–15 分钟**；走官方 Release 取决于境外链路，历史上从 5.4s 到超时都出现过。
 
 ## 8. 发布与回滚检查表（换源类变更）
 
@@ -260,6 +362,8 @@ jobs:
 - [ ] 若为 OSS：`curl -I` 的 `Content-Length` 与 `ossutil stat` 一致；`Range: bytes=16780-` 回 206（§6）
 - [ ] 真机走通「下载 100% → 解压 → 识别一句话」
 - [ ] 旧源保留 ≥ 30 天：OSS 对象不删、`cvm` 明文放行条目不删（回滚只需换回 URL）
+- [ ] **异地留档已同步到新一份**（§5.4）：包内容一旦变化，先改留档再切流量；不得出现「主源是新的、备份是旧的」
+- [ ] 探测器在跑：接了调度器就看日志最后一行的时间戳是否在 1 小时内；没接就在评论里写明「本次变更期间无定时探测」
 - [ ] 本次实测数据已回填 §1 表格，并把「谁 / 何时 / 旧 URL → 新 URL」写进 issue 评论
 
 ## 9. 责任与升级
@@ -268,8 +372,10 @@ jobs:
 |---|---|
 | 探测脚本、告警规则、Runbook 维护 | SRE |
 | 换源方案决策、费用/账号审批 | qiaozhou（人类） |
-| **OSS 对象生命周期**（上传/替换/删除、内容校验） | SRE（每次替换前后跑探测；不得覆盖未留档的对象） |
+| **OSS 对象生命周期**（上传/替换/删除、内容校验） | SRE（每次替换前后跑探测；**不得覆盖未留档的对象**，留档见 §5.4） |
+| **异地留档副本**（`baigong-code-backup`，cn-shenzhen） | SRE（内容变更时同步；不删桶内其他备份数据，不改该桶 ACL / 生命周期） |
 | **OSS bucket 归属与权限**（`delivery-service-smzk` 属交付业务桶） | 云账号管理员（人类）；SRE 只在该桶加 `models/asr/` 前缀，不改 ACL |
+| 定时探测的**执行环境**（crontab / 函数计算） | qiaozhou（人类）批准落点 → SRE 接；未批准前探测不进任何调度器 |
 | 服务器 / 域名 / 证书操作（自建源、备案） | 持有运维权限者（人类确认后执行） |
 | 客户端下载器校验与自愈 | 后端（VOCA-34） |
 | 远端配置下发（若要做「不发版换源」） | 架构师（需新 issue） |
@@ -280,3 +386,4 @@ jobs:
 |---|---|---|
 | 2026-11-09 | 新建；实测 `cvm` 被备案拦截、官方源可用、探测脚本上线 | 见 §1 与 issue VOCA-35 评论 |
 | 2026-11-09 | **默认源切到阿里云 OSS**；§1 复测 `cvm`（302 → dnspod 拦截页后 502 / 166 B）；新增 §5.1 落地配置、§6 OSS 行为差异、§7 成本与恢复、§8 检查表 OSS 项 | `check_model_host.py --sha256` 9/9 全绿、无参数探测 7/7 全绿、`check_static` 6/6、`check_crosscut` 138/138；见 VOCA-35 评论 |
+| 2026-11-18 | VOCA-475 收口：§1 复核行；§2.1 采样纪律 + `--samples`；§2.2 「待接」改为「未接 · 卡在人类答复（限期 11-20）」并给出首次实跑记录、排除 GitHub Actions、补监控盲区；§2.4 阈值收紧为「单次多数判红」+ 新增 Flaky/Silent 两条告警；§5.2/§5.3/§5.4 异地留档落地与复验；§7.1 恢复改为先取留档；§8/§9 补留档与探测落点 | 默认源 `--samples 3` → 3/3 可用 exit 0、`--sha256` 9/9；旧源 3/3 拦截页 exit 1；`--self-test` 11 项 unexpected=0；备份对象 `GET 200/77920048`、`Range 206`、重下载后 sha256 与权威值一致、ETag/MD5/CRC64 与主源逐项相同 |
