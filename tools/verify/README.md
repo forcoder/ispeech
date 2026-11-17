@@ -73,35 +73,56 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 VOCA-167 的机检与回归口径。**结论按「被验的那棵树」出**，不是按当前工作目录出：
 `--tree <rev>` 用 `git archive` 把该提交导出到临时目录后再解析，每行输出前缀
 `<tree-oid>:<label>`，所以 main / 出包分支 / PR head 的结论不会互相冒名。
+`--tree` 也可以指**目录**（导出后改过东西的树、别人的工作区），此时身份只从该目录自身字节算：
+干净 checkout ⇒ 它自己的 `HEAD^{tree}`，有改动 ⇒ `workdir-<摘要>`，快照 ⇒ `dir-<摘要>`，
+并且**必须同时给 `--label`** —— 不给就拒绝运行，绝不拿运行仓库的 HEAD 当对象 id 给别棵树背书。
 不写 `check_crosscut.py` 是为了避开 9 个在跑的 PR 对同一文件的冲突（ADR VOCA-398 §4.3）。
+
+判定分三层，编号不互相冒充：
+
+| 层 | 编号 | 什么时候才有结论 |
+|---|---|---|
+| 静态前置 | `AC3-S` / `AC4-S` / `AC5-S1..S3` | 读源码就能判（入口在不在、文案在不在、兜底链齐不齐）。**只证明「有实现」，不等于验收判定** |
+| 运行时判定 | `AC3-1` / `AC4-1` / `AC5-1..3` / `AC6-1..2` | 只有 `--device --exclusive-device` 才判；没设备一律 `SKIP`，写明**「运行时判定未取证」** |
+| 署名链 | `PRE-0/1/2/3` | 只有传了 `--package` 才跑；没传每棵树显式 `SKIP`，免得读者以为跑过 |
 
 ```bash
 python3 tools/verify/check_voca167.py --tree main                      # 主干
 python3 tools/verify/check_voca167.py --tree fa57a07 --tree pr20       # 多棵树逐个出结论
+python3 tools/verify/check_voca167.py --tree <目录> --label <名字>      # 目录输入必须署名
 python3 tools/verify/check_voca167.py --tree <rev> \
     --package dist/ispeech-internal-v1.6.apk --package-sha256 <摘要>   # 带上被验安装包
 python3 tools/verify/check_voca167.py --tree <rev> --device emulator-5554 --exclusive-device
 python3 tools/verify/check_voca167.py --self-test                      # 不读仓库，验证断言本身
 ```
 
+汇报读数时**连同参数一起报**（脚本会回显 `CMD:`）：没传 `--package` 就没有署名链，
+没传 `--device` 就没有运行时判定 —— 少了参数的读数不能写成「全量跑过」。
+
 | # | 断言 | 说明 |
 |---|------|------|
 | AC1-1 | 键数 | 文档写「工具栏（N 键）」必须等于该树 `toolbarKeys()` 解析出的键数 |
 | AC1-2 | 「第 N 键」指位 | 按 `KeyAction.*` > `「」`内称呼 > 别名 > 键面 的顺序定指位对象，再比该树实际位置；解析不出/多义只 `WARN`，不猜 |
 | AC1-3 | 键序 | 键名清单与反引号键序行逐位比对；个别称呼在该树解析不出时降级人工核对，但**错位就是红** |
-| AC1-5 | 内嵌摘录 | `SoftKeyboardView.kt:起-止` 必须覆盖该树实际跨度；摘录的键面/`weight`/`iconRes` 逐字段与代码一致 |
+| AC1-5 | 内嵌摘录 | `DOC_GLOBS` 里**任何** ```kotlin 块中的 `KeyDef.fn(...)` 都逐字段比（键面 / `weight` / `iconRes`），不要求先写 `SoftKeyboardView.kt:起-止`；`SWITCH_IME` 无条件按工具栏比，其余按最近锚点定归属，数字页 / 符号页 / 候选条的摘录不参与工具栏比对，判不出归属只 `WARN` 不猜。没写行号标记的摘录额外 `WARN`：键面比过了，但「行号随主干腐烂」这一维本轮无判据 |
 | AC1-6 | 权重 | 权重序列与「权重和」声明都按该树实际值算 |
-| AC1-7 | 机检文案 | `tools/verify/check_*.py` 里硬编码的键面称呼必须与该树键面同源（注释不算声明） |
+| AC1-7 | 机检文案 | `tools/verify/check_*.py` 里硬编码的键面称呼必须与该树键面同源（注释不算声明；`def self_test(` 之后的反例夹具不算声明） |
 | AC1-8 | 口径腐烂 | 文档承诺「不嵌源码摘录」的**那一节**里不许回潮摘录 |
 | AC2-1 | `<queries>` | `android.view.InputMethod` intent 必须在清单里 —— 缺陷 D（Android 11+ 包可见性裁掉 `enabledInputMethodList`）的根因门禁 |
 | AC2-2/2-3 | 同源与截断 | 「共 N 个」与列表行同源；不允许 `take/drop/slice/filter` 截断 |
-| AC2-4 | 滚动阈值 | 从面板源码符号链（`makeMeasureSpec` → 构造参数 → `dp(SYM)`）算出可视行数，据此把「≥6 条需滚动」标为**条件用例** |
+| AC2-4 | 滚动阈值 | 从面板源码符号链（`makeMeasureSpec` → 构造参数 → `dp(SYM)`）算出可视行数，据此把「≥6 条需滚动」标为**条件用例**。行距按取证设备实测（`DEVICE_DPI=440`、均值 `118.7px`）推得，换密度的设备报数必须写明「按 440dpi 取证设备」 |
 | AC2-5/2-6 | 取列表 | `enabledInputMethodList` 存在且未被过滤 |
 | AC2-8/2-9 | 分类计数 | 解析 `ImeListVisibility.kt` 的判据并移植到 Python 跑向量：被框架裁掉的项 ≠ 系统里就不存在 |
-| AC2-D | 真机取证 | 行数 == `|ENABLED|`、每个 id 有行、「共 N 个」== `|ENABLED|`；**仅在 `--exclusive-device` 时执行**，否则 `SKIP` |
+| AC2-D | 真机取证 | 行数 == `|ENABLED|`、「共 N 个」== `|ENABLED|`；行按 `InputMethodPanel.createRowView()` 写的 `contentDescription`（输入法名，当前项带「（当前）」）认，源码里没有 `ime-row:` / `ime_row` 这类标识。**「每个 id 都有行」只 `SKIP`** —— 面板行没有组件级 id 可对账，需产品侧加稳定标识后才能判。**仅在 `--exclusive-device` 时执行**，否则 `SKIP` |
+| AC3-S / AC3-1 | 切走 | `S`：服务侧调了 `setInputMethod`。`1`：点行前后 `settings get secure default_input_method` 真的变了 —— 只有设备上取到才算 |
+| AC4-S / AC4-1 | 失败兜底 | `S`：失败 → `showInputMethodPicker` → 「系统不允许切换输入法」链条齐备。`1`：切换真失败时选择器或文案真出现了；两者都没有 = `FAIL`（静默失败）。判据会先摘掉面板自带的「打开系统输入法选择器」按钮，否则面板一开着就永远算兜底成功 |
+| AC5-S1..3 / AC5-1..3 | 空态 | `S`：空态文案与「系统选择器」入口在源码里存在。`1`：`|ENABLED| = 1` 时显示「没有其他输入法」；`2`：读不到列表时的文案（无外部注入手段，常态 `SKIP`）；`3`：dump 里那颗选择器按钮 `clickable="true"` |
+| AC6-1 / AC6-2 | E 类（EMUI·鸿蒙拦截） | `1`：`ro.build.hw_emui_api_level` / `ro.build.version.emui` / manufacturer·brand 命中；不命中只 `SKIP` 并写明需要 EMUI 真机。`2`：命中后看切换是否被拦截 + 兜底是否出现，被拦且无提示 = `FAIL`。非独占设备一律 `SKIP`；E 类真机栈归 VOCA-228 第 5 项 |
 | PRE-0/1/2 | 被验对象署名 | 安装包字节的 sha256 与声称摘要、与该树 `dist/SHA256SUMS` 条目三者对齐；对不上就不许按这份清单谈结论 |
+| PRE-3 | 目录输入署名 | `--tree` 指目录时，前缀里的 id 必须能追溯到该目录自身字节（或它自己的 checkout tree），不得是运行仓库 HEAD |
 
 输出除 `PASS/FAIL/WARN` 外还有 `SKIP`：`SKIP` **不计入通过**，也不许在汇报里写成绿。
+运行时判定在没有独占取证设备时**只能是 `SKIP`** —— 「代码里有这段字符串」不是验收判定。
 
 ## 局限（这些脚本覆盖不到的东西）
 
