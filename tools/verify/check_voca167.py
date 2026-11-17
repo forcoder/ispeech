@@ -915,35 +915,44 @@ def check_ac1(r: Report, root: Path, keys: list[dict], span: tuple[int, int]) ->
                     break
 
     # VOCA-399 / PR #20 的口径：承诺小节里只给符号引用，摘录一旦回潮就是红。
-    # 定位不到这条承诺（改词 / 整节删掉）= 守卫本身失效，同样必须红：
-    # 只锚五个字的文案，换一句同义表述就让这条编号从读数里消失，等于没有守卫。
+    # 承诺落在哪个文件、用哪句措辞，都不该成为守卫的开关：整棵比对范围内定位不到承诺
+    # （改词 / 整节删掉 / 搬走却没落地）= 守卫本身失效，同样必须显式红 —— 只锚五个字时，
+    # 换一句同义表述就让这条编号从读数里消失，等于没有守卫。
     t9 = read(root, T9_DOC_REL)
-    embedded = len(EXCERPT_CLAIM.findall(t9))
-    if not t9:
-        r.skip("AC1-8", f"该树没有 {T9_DOC_REL}（早于这份文档的版本），摘录口径守卫无从谈起")
-    else:
-        am = PROMISE_ANCHOR.search(t9)
-        if not am:
+    promises: list[tuple[str, int, str, int]] = []
+    embedded_all = 0
+    for f in files:
+        rel = f.relative_to(root).as_posix()
+        text = f.read_text(encoding="utf-8", errors="replace")
+        embedded_all += len(EXCERPT_CLAIM.findall(text))
+        for pm in PROMISE_ANCHOR.finditer(text):
+            at = text.count("\n", 0, pm.start()) + 1
+            sec = len(EXCERPT_CLAIM.findall(section_scope(text, pm.group(0))))
+            promises.append((rel, at, pm.group(0), sec))
+    if not promises:
+        if not t9:
+            r.skip("AC1-8", f"该树没有 {T9_DOC_REL}（早于这份文档的版本），摘录口径守卫无从谈起")
+        else:
             r.fail(
                 "AC1-8",
-                f"{T9_DOC_REL} 里定位不到「不嵌源码摘录」的承诺小节（同义表述也搜了）—— 守卫失效：这条承诺被改词或整节删掉后，"
-                f"摘录回潮不再有人拦。该文档当前仍有 {embedded} 处内嵌 KeyDef 摘录；要么把承诺写回来，"
-                f"要么这棵树确实还没落地 VOCA-399 的口径（那就该显式红，不许静默不判）",
+                f"比对范围内定位不到「不嵌源码摘录」的承诺（同义表述也搜了，含 {T9_DOC_REL}）—— 守卫失效：这条承诺被改词、"
+                f"整节删掉或搬出比对范围后，摘录回潮不再有人拦。范围内当前仍有 {embedded_all} 处内嵌 KeyDef 摘录；"
+                f"要么把承诺写回来，要么这棵树确实还没落地 VOCA-399 的口径（那就该显式红，不许静默不判）",
             )
-        else:
-            at = t9.count("\n", 0, am.start()) + 1
-            in_sec = len(EXCERPT_CLAIM.findall(section_scope(t9, am.group(0))))
-            if in_sec:
-                r.fail(
-                    "AC1-8",
-                    f"{T9_DOC_REL}:{at} 承诺「{am.group(0)}」的同一节里仍有 {in_sec} 处内嵌 KeyDef 摘录 —— 口径又腐烂了",
-                )
-            else:
-                r.ok(
-                    "AC1-8",
-                    f"{T9_DOC_REL}:{at} 守卫本次生效：承诺「{am.group(0)}」的那一节内已无内嵌 KeyDef 摘录"
-                    f"（该文档另有 {embedded} 处摘录在别处，由 AC1-5 逐字段比，不属本条追究范围）",
-                )
+    else:
+        rotted = [p for p in promises if p[3]]
+        for rel, at, wording, cnt in rotted:
+            r.fail(
+                "AC1-8",
+                f"{rel}:{at} 承诺「{wording}」的同一节里仍有 {cnt} 处内嵌 KeyDef 摘录 —— 口径又腐烂了（守卫按承诺所在文件现定位，不靠固定文件名）",
+            )
+        if not rotted:
+            where = "、".join(dict.fromkeys(f"{rel}:{at}" for rel, at, _, _ in promises))
+            r.ok(
+                "AC1-8",
+                f"守卫本次生效：{len(promises)} 处承诺（{where}）所在小节内已无内嵌 KeyDef 摘录；"
+                f"范围内另有 {embedded_all} 处摘录在承诺小节之外，由 AC1-5 逐字段比，不属本条追究范围",
+            )
 
     r.ok(
         "AC1-0",
@@ -1748,6 +1757,19 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
         if want_a8 == "PASS" and not rr.hits("AC1-5", "FAIL"):
             fails.append("承诺在、腐烂摘录写在节外时 AC1-5 没红 —— 节外摘录只剩 WARN，不计红的口子还开着")
 
+    # 承诺搬去别的文档时，守卫要跟着走：只盯着一个文件名，等于「换个文件就绕过守卫」。
+    (a8 / "docs" / "t9-and-symbols.md").write_text("## 4. 接线\n\n（承诺搬走了）\n\n" + rot, encoding="utf-8")
+    (a8 / "docs" / "internal-qa-build.md").write_text(
+        "## 3. 取包说明\n\n只给符号引用，不嵌源码摘录。\n\n" + rot, encoding="utf-8"
+    )
+    rr = Report("selftest-ac18-moved")
+    keys8, a8s, b8 = parse_toolbar(read(a8, VIEW_REL))
+    check_ac1(rr, a8, keys8, (a8s, b8))
+    moved = rr.hits("AC1-8", "FAIL")
+    moved_txt = "FAIL" if moved else ("无结论" if not rr.hits("AC1-8") else rr.hits("AC1-8")[0][0])
+    if not any("internal-qa-build.md" in h[2] for h in moved):
+        fails.append(f"承诺搬到别的文档后 AC1-8 没跟着咬（实际 {moved or rr.hits('AC1-8')}）—— 守卫仍绑在固定文件名上")
+
     # 摘录行自称「数字页」/ 整段没有任何锚点，都不许让「字段不符」降级成不判：
     # 前者换锚点、后者删锚点，是能绕开逐字段比对的两条最短路径。
     (a8 / "docs" / "t9-and-symbols.md").write_text(
@@ -1771,6 +1793,14 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
     a15_warn = [h[2] for h in rr.hits("AC1-5", "WARN")]
     if not any("逐字段一致" in w and "不计绿" in w for w in a15_warn):
         fails.append("无锚点但字段抄对的摘录没有留「不计绿」的可见记录，读起来像漏了这条用例")
+    print(
+        "SELFTEST: AC1-5 绕过路径 自称非工具栏锚点="
+        + ("FAIL" if "锚点写着非工具栏" in a15_fail else "没咬")
+        + " 无锚点字段不符="
+        + ("FAIL" if "摘录归属判不出" in a15_fail else "没咬")
+        + " 无锚点巧合一致="
+        + ("WARN不计绿" if any("不计绿" in w for w in a15_warn) else "没记录")
+    )
 
     cap = panel_scroll_rows(
         "private val maxPanelHeightDp = 240\n"
@@ -1804,6 +1834,7 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
             f"{name}={('无结论' if not rr2.hits('AC1-8') else rr2.hits('AC1-8')[0][0])}"
             for name, rr2 in ac18_reports.items()
         )
+        + f" 承诺搬到别的文档={moved_txt}"
     )
     print(f"SELFTEST: 目录署名 id={d_id} -> {d_id2} -> {d_id3}（内容变则 id 变）")
     for m in fails:
