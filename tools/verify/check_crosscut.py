@@ -946,21 +946,53 @@ def check_voice_chain() -> None:
     # 事件名的取值从 AsrTrace.kt 现读，门禁里不另抄一份字面量。
     m_ev_blocked = re.search(r'const val EV_BLOCKED\s*=\s*"([^"]+)"', strip_comments(read(ASR_TRACE)))
     ev_blocked_value = m_ev_blocked.group(1) if m_ev_blocked else ""
+
+    def top_level_arg(body: str, i: int):
+        """从下标 i 读到下一个顶层逗号 / 右括号，返回 (实参文本, 该逗号的下标)。
+
+        按括号与引号配平，是为了让 `if (x) AsrTrace.EV_EMPTY else AsrTrace.EV_RESULT` 这种
+        ev 写法（PR #12 里就有）不被切成半截 —— 只按 [^,] 截会误报成违规。
+        """
+        depth, quote, chars = 0, None, []
+        while i < len(body):
+            c = body[i]
+            if quote is not None:
+                if c == quote:
+                    quote = None
+            elif c in '"\'':
+                quote = c
+            elif c in "([{":
+                depth += 1
+            elif c in ")]}":
+                if depth == 0 and c == ")":
+                    break
+                depth -= 1
+            elif c == "," and depth == 0:
+                break
+            chars.append(c)
+            i += 1
+        return "".join(chars).strip(), i
+
     blocked_sites = set()
     ev_sites = []
     for kt in sorted(JAVA.rglob("*.kt")):
         kt_body = strip_comments(read(kt))
-        for m in re.finditer(r"AsrTrace\.(?:w|i)\(\s*[^,]*,\s*([^,)\n]+)", kt_body):
-            ev = m.group(1).strip()
+        for m in re.finditer(r"AsrTrace\.(?:w|i)\(", kt_body):
+            _, comma = top_level_arg(kt_body, m.end())  # 第一实参 = sessionId
+            ev, _ = top_level_arg(kt_body, comma + 1)   # 第二实参 = 事件名
             site = (kt.name, enclosing_fun(kt_body, m.start()), ev)
             ev_sites.append(site)
-            if ev == "AsrTrace.EV_BLOCKED" or ev.strip('"') == ev_blocked_value:
+            literals = re.findall(r'"([^"]*)"', ev)
+            if re.search(r"AsrTrace\.EV_BLOCKED\b", ev) or ev_blocked_value in literals:
                 blocked_sites.add(site[:2])
-    off_const_ev = sorted(s for s in ev_sites if not s[2].startswith("AsrTrace.EV_"))
+    off_ev = sorted(
+        s for s in ev_sites
+        if re.search(r'"[^"]*"', s[2]) or not re.search(r"AsrTrace\.EV_\w+", s[2])
+    )
     check(
-        bool(ev_sites) and not off_const_ev,
-        "AsrTrace 打点的 ev 实参一律引用 AsrTrace.EV_* 常量（不写裸串、不绕本地常量）",
-        f"app/src/main 下这些打点调用点的第二个实参不是 AsrTrace.EV_* 引用：{off_const_ev} —— "
+        bool(ev_sites) and not off_ev,
+        "AsrTrace 打点的 ev 实参只由 AsrTrace.EV_* 常量给出（不写字面量、不绕本地常量）",
+        f"app/src/main 下这些打点调用点的第二个实参不是 AsrTrace.EV_* 常量引用：{off_ev} —— "
         f"ev 形参是无类型 String，写成裸串 \"blocked\"（或绕一道本地常量）与引用常量编出来的字节码、"
         f"打进 logcat 的一模一样，上面的出口集合与 docs 里的 grep 口径都抓不到这种新出口"
         f"（VOCA-310 打回项 4）",

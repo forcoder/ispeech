@@ -51,7 +51,7 @@
 
 ### 前置判定：为什么这一按没进「识别中」（VOCA-310）
 
-判定收在一处、打点有两处出口：`IspeechImeService.toggleVoiceInput()` 问 `controller.probeBlockedReason(asr)`，非空就走 `traceVoiceBlocked(reason)` 拦下（控制器为空的分支同走这个入口）；第三条 `service_bind_failed` 在 `VoiceInputController.startListening()` 里就地打——探测放行、识别器却建不起来时已经不在服务侧代码路径上。所以「点了语音键却没进识别中、日志里却什么都查不到」这条路是被门禁堵住的，不是被单一出口堵住的：`tools/verify/check_crosscut.py` 8.2b 逐处钉住这两个出口（删掉任一处调用、或把某一处换成注释，离线门禁即 FAIL），再加两条断言把「新出口绕过上面这条」的路堵死：出口集合按**发射器**采集——`app/src/main` 下每个 `AsrTrace.w(` / `AsrTrace.i(` 调用点都算一个出口（第二实参写 `AsrTrace.EV_BLOCKED` 还是裸串 `"blocked"`，编出来的字节码与 logcat 一模一样，只按常量 token 采集会漏掉后者），集合必须恰好等于这两处；且 ev 实参一律要引用 `AsrTrace.EV_*` 常量，出现字符串字面量或本地常量即 FAIL。三个 reason 是日志契约（同一节钉住字面量，改名即 FAIL）：
+判定收在一处、打点有两处出口：`IspeechImeService.toggleVoiceInput()` 问 `controller.probeBlockedReason(asr)`，非空就走 `traceVoiceBlocked(reason)` 拦下（控制器为空的分支同走这个入口）；第三条 `service_bind_failed` 在 `VoiceInputController.startListening()` 里就地打——探测放行、识别器却建不起来时已经不在服务侧代码路径上。所以「点了语音键却没进识别中、日志里却什么都查不到」这条路是被门禁堵住的，不是被单一出口堵住的：`tools/verify/check_crosscut.py` 8.2b 逐处钉住这两个出口（删掉任一处调用、或把某一处换成注释，离线门禁即 FAIL），再加两条断言把「新出口绕过上面这条」的路堵死：出口集合按**发射器**采集——`app/src/main` 下每个 `AsrTrace.w(` / `AsrTrace.i(` 调用点都算一个出口（第二实参写 `AsrTrace.EV_BLOCKED` 还是裸串 `"blocked"`，编出来的字节码与 logcat 一模一样，只按常量 token 采集会漏掉后者），集合必须恰好等于这两处；且 ev 实参一律要由 `AsrTrace.EV_*` 常量给出——出现字符串字面量（含 `if/else` 里混一条裸串）或整个实参不引用任何 `EV_*` 常量（绕本地 `val`）即 FAIL；`if (ok) AsrTrace.EV_EMPTY else AsrTrace.EV_RESULT` 这种纯常量条件是合法的，门禁按括号配平取实参，不会把它切半截误报。三个 reason 是日志契约（同一节钉住字面量，改名即 FAIL）：
 
 | `ev=blocked reason=` | 判定条件 | 候选条文案 |
 | --- | --- | --- |
