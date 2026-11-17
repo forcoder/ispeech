@@ -23,7 +23,7 @@
 | `ppsum.py` | **pp 判据离线计算器**（第七轮打回项 2 补）：读 `ppwin.py` 那份 stdout，按**当档 dpi** 现算逻辑宽与档位，出 `PPSUM … delta_pp verdict=` ＋ `PPSUM_SENSITIVITY … 25/H`；缺任一侧读数 `GATE reason=one_side_missing rc=40`。为什么要它：`SUMMARY` 原来是人在文件头写的加法，那不算工具输出。`logic_w_dp` 不能用 `PANEL` 行那个值（它在 `wm density` 切换**之前**打，1260×2720 上会读成 458.2dp 而不是 387.7dp） |
 | `band.py` | 候选带像素取证底座：底色/chip/item/主题色四组常量 + 连通块切候选项 + **角标圆片按外形剔除** + `first_item_left = chip 右沿 + 1`（字身只在它右边量）。为什么必须这样：`CandidateView.kt:76-77` 在候选列表为空时把 `scrollView` 置 `GONE`，整带宽里就只剩 chip 的墨迹——旧口径把「量 chip」当成了「量候选」 |
 | `voidcheck.py` | 作废自查（裁决 §6-3 的自证）：用旧报告的窗口重扫交付帧，先逐位复现旧墨迹行，再用新口径数候选 → `x>240` 命中列=0 就证明旧数据确实还在量 chip。rc=0 = 三帧全部低于闸门（作废成立） |
-| `ac9.py` | spec-AC-9 退格长按阶梯（200/1000/**1500**/2000ms）。两条硬规矩：退格键位从截图反推（不写死像素）；先做一次 200ms 短按**必须恰好删 1 字**，删不动说明点到的不是退格键 → `GATE reason=del_key_miss rc=20`，后面所有档位都是废数。长度一律 `hold()` 连读稳定值（批量敲键后紧接着 `uiautomator dump` 拿到的是旧文本，会把「删掉了」量成「没删」）。宿主文本一律用**已上屏中文**——组合缓冲里的退格走删 composing 的另一条路径，不是 AC-9 说的「删除字符」 |
+| `ac9.py` | spec-AC-9 退格长按阶梯（200/1000/**1500**/2000ms）——被测面唯一读数是 `ev_r7_ac9.txt` **B 段**（200/1000/1500/2000 → 删 1/10/20/31，`rate_ms=200.0/100.0/75.0/64.5`）。两条硬规矩：退格键位从截图反推（不写死像素）；先做一次 200ms 短按**必须恰好删 1 字**，删不动说明点到的不是退格键 → `GATE reason=del_key_miss rc=20`，后面所有档位都是废数。长度一律 `hold()` 连读稳定值（批量敲键后紧接着 `uiautomator dump` 拿到的是旧文本，会把「删掉了」量成「没删」）。宿主文本一律用**已上屏中文**——组合缓冲里的退格走删 composing 的另一条路径，不是 AC-9 说的「删除字符」 |
 | `dsdump.py` | AC-2/AC-3 披露用的开关运行时取值：`chinese_punctuation` + `double_space_period`。DataStore 只在**首次写入**时建文件，所以「文件不存在」是有效结论（`source=code_default(never_written)`），不是失败；脚本先 `ls -R files` 自证 run-as/路径没错（看不到 `cell_dicts` 才是真失败 → `rc=21`） |
 | `d2check.py` | `v1.6-AC9` / D2 崩溃时序（脚本化，含阳性对照）。三道闸门：入口读 `default_input_method`（rc=17）、预热后必须「键盘真弹出 + IME 进程在」（rc=19，否则是假 FIXED）、崩溃只数 `Process: com.ispeech.ime` 的 FATAL 块（否则会把别人家的崩溃算进来） |
 | `ac2.py` | 双击空格句号：按「开关态（读 DataStore 原始字节）× 键路径（`keyevent` / 软键点击）」二维取证 |
@@ -36,7 +36,7 @@
 | `qa_kb.py` | 早期手工探针集合（frame/host/text/bands/shift/ink） |
 | `d1regress.py` | **接管空格键（`35cdbfa`）的 6 档回归面**：档① 开关关=与修复前逐字节同（`--diff` 比两份 stdout 的宿主文本）、档② 英文态/T9 数字态、档③ 需要自己吃空格的宿主、档④ 长按语音（截图带差分，无日志可用）、档⑤ `repeatCount`、档⑥ `spaceProbe` 跨进程读成本。装错包 `rc=19`；基线包无开关键时 `SWITCH route=absent_means_default_off`，**不走设置页试点**（会误伤别的开关） |
 | `spec_ux_anchors.py` | 规格行号重锚：报告引用的每条锚点在 `git show OLD` / `git show NEW` 两侧逐行比内容，出 `match=True` / `DRIFT` / `MISS`（MISS 由人工给 `verdict=REPLACED` 落点）→ `evidence/ev_r7_spec_ux_anchors.txt` |
-| `run_r7_all.sh` / `run_r7b.sh` / `run_r7c.sh` / `run_r7d.sh` / `run_r7e.sh` | 第七轮的分串编排：每档单独 stdout + `# rc=`，一档跑挂不拦后面。`r7c` 是「`drive.log` 打上逐行 `ts=`」之后的重跑串，正文 AC-4~7 / AC-9 / AC-1 / D2 的数字以它为准 |
+| `run_r7_all.sh` / `run_r7b.sh` / `run_r7c.sh` / `run_r7d.sh` / `run_r7e.sh` / `run_r7f.sh` | 第七轮的分串编排：每档单独 stdout + `# rc=`，一档跑挂不拦后面。`r7c` 是「`drive.log` 打上逐行 `ts=`」之后的重跑串，正文 AC-4~7 / AC-1 / D2 的数字以它为准；`r7d`/`r7e` 补 `paths.py`、`ac2`（两条路径）与目标几何 pp ＋ 空格 6 档；**`r7f` 是 AC-9 的唯一采信串**（`r7c` 里那一档吃 `key_map_fail rc=16`，见上面「套件之间会污染键盘态」那条）|
 
 ## fs115 / ac9 / d2check 的退出码（拒绝出数时看这个，别看有没有数字）
 
@@ -79,6 +79,13 @@
    `rc=17`，`IME_START` 还是本包、两秒后 `FRAME_1` 读到 833px 的 Gboard 几何 + `pidof` 空）。
    要冷数据态请用 `pm clear` + 紧接着 `ime set` + 重新 `host_ready()`；**别 force-stop 自己选中的输入法**。
    同理：数 FATAL 时必须按 `Process: com.ispeech.ime` 过滤，否则别的 run 的崩溃会被算成你的结论。
+
+5. **套件之间会污染键盘态：跑 AC-9 之前必须先看一眼 `key_map()`**（第七轮实测踩到，报告 §9-20）。
+   `d1regress.py` 的档②③ 会把输入法切进英文态 / T9 数字态并留在原地，紧接着跑 `ac9.py` 就是
+   `GATE reason=key_map_fail rc=16`（`runs` 变成 `[8,8,8,7,1,1]` 或 `[10,9,5,1]`，反推不到 10 键行）。
+   复位：`adb shell pm clear com.ispeech.ime` + `adb shell ime set com.ispeech.ime/com.ispeech.input.IspeechImeService`
+   + 重新起宿主；或按 `run_r7f.sh` 的做法：先 `pm clear` + `ime set`，再用 `drive.log` 打 `HOST`/`PRECHECK` 证键位，才跑阶梯。**别照抄 `run_r7c.sh` 的跑序**——
+   那一版的 AC-9 就是这么吃 rc=16 的，`ev_r7_ac9.txt` 的 A 段是失败原文（无读数），B 段才是复位后的采信读数。
 
 ## 测量纪律（违反就不可比）
 
@@ -188,7 +195,7 @@ B 包 `cffc0cd` = 旧 head + `d3b6f84`(VOCA-170) + `d283706`(VOCA-184) + `4d6363
 
 ## evidence/ 与 shots/
 
-`ev_*.txt` 为当场 stdout 原文（第七轮的每行都带 `ts=`，文件头还带 `# 被测=` / `# cmd:` / `# rc=`），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模：`tools/qa/voca-37/` 下 20 个 `.py` + 8 个 `.sh`，`evidence/` 102 份（97 `.txt` + 4 `.xml` + 1 `.log`，其中 24 份 `ev_r7_*.txt`），`shots/` 86 张**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
+`ev_*.txt` 为当场 stdout 原文（第七轮的每行都带 `ts=`，文件头还带 `# 被测=` / `# cmd:` / `# rc=`），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模：`tools/qa/voca-37/` 下 20 个 `.py` + 9 个 `.sh`，`evidence/` 102 份（97 `.txt` + 4 `.xml` + 1 `.log`，其中 24 份 `ev_r7_*.txt`），`shots/` 86 张**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
 
 ```bash
 python3 tools/qa/voca-37/ac2.py <apk> 440 keyevent   # 硬件/注入键路径 + 开关开/关反例
@@ -213,6 +220,7 @@ export QA_HEAD=78343a4 QA_SPEC=0e4eeb0 QA_SERIAL=emulator-5554 QA_APK=<PR#18 构
 bash    tools/qa/voca-37/run_r7c.sh                                    # AC-4~7 / vswipe / paths3 / paths2 / AC-9 / D2 / fs115 重跑（逐行 ts=）
 bash    tools/qa/voca-37/run_r7d.sh                                    # paths.py + ac2 soft 路径
 bash    tools/qa/voca-37/run_r7e.sh                                    # 补漏：ac2 keyevent + 目标几何 pp + 6 档（RAW/PER 行也要 ts=）
+bash    tools/qa/voca-37/run_r7f.sh                                    # AC-9 专用：复位数据态 + 键位 PRECHECK + 200/1000/1500/2000 阶梯（→ ev_r7_ac9.txt C 段）
 python3 tools/qa/voca-37/ppwin.py --panel 1260x2720 --tiers 520:1.0,520:1.15 --round r7t --apk "$QA_APK"   # 目标几何的 pp
 python3 tools/qa/voca-37/ppsum.py /tmp/r7e_pp_target_geom.txt                          # 目标几何 pp 的判据由它算 → 落进 ev_r7_pp_target_geom.txt 的 B 段
 python3 tools/qa/voca-37/d1regress.py "$QA_APK" --base "$QA_BASE_APK" --diff                # 接管空格的 6 档
