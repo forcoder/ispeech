@@ -9,21 +9,24 @@
 候选条从头到尾就是空的。
 
 本版三条硬规矩：
-1. **闸门先于读数**：回读宿主文本 == 所敲串、chip 像素盒存在且在候选区左边、可见候选项 ≥ 4、
-   池内候选 ≥ 8（用 `=` 键滚动 + 互相关累计位移去重数出来）。任一不成立 → 只打 `GATE reason= rc=`
-   并以非零码退出，stdout 不出现 RESULT / INK / delta。
+1. **闸门先于读数，闸门只守规格 `8324b03:525` AC-10 的那三条 Given**：回读宿主文本 == 所敲串、
+   chip 像素盒存在且在候选区左边、候选行在位（不是 chip-only）、池内候选 ≥ 8（用 `=` 键滚动 +
+   互相关累计位移去重数出来）。任一不成立 → 只打 `GATE reason= rc=` 并以非零码退出，
+   stdout 不出现 RESULT / INK / delta。**「可见候选 ≥ 4」不是闸门**（第六轮解耦，裁决 §9.2）：
+   它是 AC-10a 的判据，写在闸门里就等于让 AC-10 只会「不给数」而永远不会「出 FAIL」。
 2. **INK 行带 `cand_count` 与采样起点 `x0`（= chip 右沿 + 1）**，字身墨迹只在 chip 右边量，
    角标圆片按外形剔除（见 `band.py`）。
 3. 键位一律从当场截图反推（`drive.key_map`），不写死像素。
-4. 闸门全过后先打一行 `GATES`，把裁决 §5 的五个 Given 逐条点名（回读 == 所敲串、
-   chip 盒、chip 右侧有候选字身 = scrollView VISIBLE、可见候选数、池内条数），
+4. 闸门全过后先打一行 `GATES`，把规格 `8324b03:525` AC-10 的三条 Given 逐条点名
+   （① chip==所敲串、② 候选行在位（`cand_count ≥ 1`）、③ 池 ≥8），
    再打 `RESULT`。
 
 用法：python3 fs115.py <apk> <density> <fs1,fs2> [code1,code2] [label]
 
 `label`（默认 `a`）进截图文件名：第五轮 B 包（集成候选）复跑时没带 label，把 A 包同名候选带裁图覆盖了——
 文本证据不受影响，但帧必须能对上包，所以加了这一位（`r5_<label>_<dens>_fs<fs>_<code>_<kind>.png`）。
-退出码：0 全部通过 / 10 回读不符 / 11 无候选 / 12 chip 不在候选区左 / 13 可见候选不足 4
+退出码：0 全部通过 / 10 回读不符 / 11 连 chip 盒都没画出来（no_chip_box）/ 12 chip 不在候选区左
+        / 13 有 chip 但候选 0 条 = chip-only（Given ② 不成立）
         / 14 池内候选不足 8 / 15 滚动后未回原点 / 16 键位反推失败 / 17 IME 不是本包 / 18 宿主没起来
 """
 import hashlib, os, subprocess, sys, time, zipfile
@@ -33,11 +36,13 @@ import drive as D
 
 LABEL = sys.argv[5] if len(sys.argv) > 5 else "a"
 
-MIN_CAND = 4          # 裁决 §6-1：可见候选项 < 4 就是「chip-only 伪装态」，拒绝出数
-MIN_POOL = 8          # 裁决 §5 Given：候选池 ≥ 8 条
+MIN_CAND = 1          # 规格 8324b03:525 AC-10 Given ②「候选行在位（不是 chip-only）」的下界，
+                      # 不是 AC-10a 的门限 —— ≥4 只进 AC10 判定行（裁决 §9.2）。
+MIN_POOL = 8          # 规格 8324b03:525 AC-10 Given ③：候选池 ≥ 8 条
 NEED_FULL = 4         # spec-AC-10a 硬门限：字身完整可见 ≥ 4
 SCROLL_STEPS = 8      # 池取证用 `=` 键档数（每档 SCROLL_STEP_DP=72）
-RC = dict(readback_mismatch=10, no_candidates=11, chip_not_left=12, cand_low=13,
+SPEC_GIVEN = "8324b03:525"   # AC-10 的三条 Given，闸门只守这三条
+RC = dict(readback_mismatch=10, no_chip_box=11, chip_not_left=12, chip_only=13,
           pool_low=14, not_at_origin=15, key_map_fail=16, ime_not_ours=17, host_not_ready=18)
 
 
@@ -111,11 +116,15 @@ def measure(dens, fs, code, apk):
 
     a = band.analyze(p_comp, top=top1, band_px=band_px, dpi=dpi)
     if not a["ok"]:
-        gate("no_candidates", dens=dens, fs=fs, code=code, detail=a["reason"])
+        # 连 chip 的填充盒都没找到（band.analyze 的 no_chip_fill）——帧不对，和「候选为空」是两件事
+        gate("no_chip_box", dens=dens, fs=fs, code=code, detail=a["reason"])
     if not a["chip_gate"]:
         gate("chip_not_left", chip=a["chip"], x0=a["first_item_left"])
+    # Given ②：候选行在位。cand_count==0 就是 chip-only 伪装态（第四轮「量错对象」那条），
+    # 必须在这一档拦住，不能让 chip-only 帧走到 pool_low —— 那会把失效原因从「量错对象」
+    # 改成「词库不够」，第三人照 §10 复跑必读错（裁决 §9.2-1）。
     if a["cand_count"] < MIN_CAND:
-        gate("cand_low", cand_count=a["cand_count"], need=MIN_CAND, x0=a["first_item_left"])
+        gate("chip_only", cand_count=a["cand_count"], need=MIN_CAND, given="2", x0=a["first_item_left"])
 
     # 池内条数：`=` 逐档右滚，每档与上一档做候选区互相关求累计位移，
     # 再把各帧候选项投到内容坐标系去重 → 池内条数下界。
@@ -151,15 +160,16 @@ def measure(dens, fs, code, apk):
         gate("pool_low", pool=pool, need=MIN_POOL, verified_steps=verified, cum_px=cum)
 
     # ===== 闸门全过，才开始出数 =====
-    # 裁决 §5 的五个 Given 逐条落一行：让读证据的人不用自己拼「这几行合起来说明了什么」。
-    # chip_text_equals_code 的口径 = 组合缓冲回读（`tap_keys` 已断言宿主文本 == 所敲串）：
+    # 规格 8324b03:525 的三条 Given 逐条落一行：让读证据的人不用自己拼「这几行合起来说明了什么」。
+    # chip==所敲串 的口径 = 组合缓冲回读（`tap_keys` 已断言宿主文本 == 所敲串）：
     # chip 画的就是这份组合串（CandidateView 用 composing 文本绘制），没有独立的 chip 文本可读。
-    # scrollview_visible 的口径 = chip 右侧存在候选字身墨迹：`CandidateView.kt:76-77` 在列表为空时
-    # 把 scrollView 置 GONE，GONE 的视图不产生任何像素，所以「右侧有墨迹」即「VISIBLE」的充分证据。
-    D.log("GATES", dens=dens, fs=fs, code=code, readback_equals_code=t["ok"],
-          chip_text_equals_code=(t["got"] == code), chip_box=a["chip"],
-          scrollview_visible=a["cand_count"] > 0, ink_cols_past_chip=a["cand_count"],
-          pool_at_least=pool, cand_visible=a["cand_count"], need_cand=MIN_CAND, need_pool=MIN_POOL)
+    # 候选行在位 的口径 = `cand_count ≥ 1`：`CandidateView.kt:76-77` 在列表为空时把 scrollView 置
+    # GONE，GONE 的视图不产生任何像素，所以「chip 右侧有墨迹」即「VISIBLE」的充分证据。
+    D.log("GATES", dens=dens, fs=fs, code=code, spec_anchor=SPEC_GIVEN,
+          given1_chip_equals_code=(t["got"] == code), given1_readback=t["ok"],
+          given2_candidate_row_present=a["cand_count"] >= MIN_CAND, cand_count=a["cand_count"],
+          given3_pool_at_least=pool, need_pool=MIN_POOL, chip_box=a["chip"],
+          chip_right=a["chip_right"], x0=a["first_item_left"])
     delta = (h1 - h0) if (h0 and h1) else None
     D.log("RESULT", fs=fs, dens=dens, code=code, empty=h0, comp=h1, delta=delta,
           band_px=band_px, band_inner=a["band_inner"], top1=top1, x0=a["first_item_left"],
@@ -187,10 +197,14 @@ def measure(dens, fs, code, apk):
               pitch=it["pitch"], badge=it["badge"], badge_clipped=it["badge_clipped"],
               tangent_top=it["tangent_top"], tangent_bot=it["tangent_bot"],
               fully_visible=it["fully_visible"])
-    ps = band.pitch_stats(a, den)
-    D.log("AC10", code=code, dens=dens, fs=fs, full_count=a["full_count"], need=NEED_FULL,
-          verdict="PASS" if a["full_count"] >= NEED_FULL else "FAIL",
-          pitch=ps, kb_h=h1, empty_h=h0, delta=delta)
+    ac10, ac10b = band.ac10_rows(a, den)
+    # 每一帧都要出 verdict（裁决 §9.2-3：两档 × 两码 = 4 帧，一帧不落）。
+    # AC-10a 的 verdict 以规格采样区口径为准，屏宽口径同行并列；两者结论不一致 → boundary=True 交洞察BA。
+    D.log("AC10", code=code, dens=dens, fs=fs, given3_pool=pool,
+          pool_need=MIN_POOL, kb_h=h1, empty_h=h0, delta=delta, **ac10)
+    # AC-10b 只记录不判（规格 `8324b03:541`）：同一批帧的逐项 x0/x1/字身 top/bot/pitch 由 CAND 行承载，
+    # 这一行给「为什么不足 4 条」的归因，不足 4 条 ≠ 不给数。
+    D.log("AC10b", code=code, dens=dens, fs=fs, **ac10b)
     D.shell("input keyevent 111")
     time.sleep(0.4)
     for tmp in ["_back.png"] + ["_scroll%d.png" % i for i in range(SCROLL_STEPS)]:

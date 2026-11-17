@@ -112,7 +112,8 @@ def analyze(png, top, band_px, dpi, thr=45, fill_tol=8, tangent_gap=1):
     if not chip:
         return dict(ok=False, reason="no_chip_fill", chip=None, first_item_fill=first,
                     inner_top=inner_top, inner_bot=inner_bot, band_inner=inner_bot - inner_top,
-                    x_end=x_end, badge_px=badge, cand_count=0, full_count=0, items=[])
+                    x_end=x_end, badge_px=badge, cand_count=0, full_count=0,
+                    full_count_screen=0, items=[])
     x0 = chip["right"] + 1
 
     # 角标 = 直径 BADGE_DP 的实心主题色圆片（Gravity.TOP|END），所以「角标右沿 = 项右沿」。
@@ -180,6 +181,11 @@ def analyze(png, top, band_px, dpi, thr=45, fill_tol=8, tangent_gap=1):
     for i, it in enumerate(items):
         it["fully_visible"] = (not it["badge_clipped"]) and it["ink_top"] is not None \
             and not it["tangent_top"] and not it["tangent_bot"]
+        # 第二个口径：右界取**屏幕右边**（1080）而不是规格采样区（1080 − paddingEnd）。
+        # 只有「角标在位」的项才可能在这个口径下算完整 —— 尾巴项的右沿是屏幕边界不是项边界，
+        # 内容仍然被切断。两口径结论不一致的那一档由调用方标 boundary=True 交洞察BA 复核。
+        it["complete_screen"] = it["badge"] is not None and it["item_right"] < W \
+            and it["ink_top"] is not None and not it["tangent_top"] and not it["tangent_bot"]
         prev = items[i - 1] if i else None
         # pitch 只在两个角标都在位时才有意义：没角标的尾巴项右沿是屏幕边界，不是项边界
         it["pitch"] = None if not prev or not prev["badge"] or not it["badge"] \
@@ -190,6 +196,7 @@ def analyze(png, top, band_px, dpi, thr=45, fill_tol=8, tangent_gap=1):
                 first_item_left=x0, x_end=x_end, inner_top=inner_top, inner_bot=inner_bot,
                 band_inner=inner_bot - inner_top, badge_px=badge, margin_px=margin,
                 cand_count=len(items), full_count=sum(1 for it in items if it["fully_visible"]),
+                full_count_screen=sum(1 for it in items if it["complete_screen"]),
                 items=items)
 
 
@@ -201,6 +208,44 @@ def pitch_stats(a, den):
     ps.sort()
     return dict(n=len(ps), min=ps[0], med=ps[len(ps) // 2], max=ps[-1],
                 med_dp=round(ps[len(ps) // 2] / den, 1))
+
+
+NEED_FULL = 4          # spec-AC-10a 硬门限（不是闸门，裁决 §9.2-2）
+GIVEN_POOL = 8         # AC-10 Given ③
+
+
+def ac10_rows(a, den, need=NEED_FULL):
+    """AC-10a 的 verdict + AC-10b 的逐项记录，两个口径同行出（裁决 §9.2-3 / 风险 3(a)）。
+
+    放这里而不是写在 fs115.py 里：设备跑与离线复算必须共用同一个判定式，
+    否则「同一帧两次跑出不同 verdict」就成了读不出来的分歧。
+    两个口径：
+      · `full_count`   —— 右界 = 规格采样区 `x_end = 1080 − paddingEnd`（`:529` 写死），verdict 以它为准；
+      · `full_count_screen` —— 右界 = 屏幕右边 1080。内缩那 6dp 会把落在里面的完整候选判成不完整，
+        两口径不一致的那一档打 `boundary=True` 交洞察BA 复核，**不许测试自己挑一个**。
+    """
+    spec_v = "PASS" if a["full_count"] >= need else "FAIL"
+    scr_v = "PASS" if a["full_count_screen"] >= need else "FAIL"
+    clipped = [it["idx"] for it in a["items"] if not it["fully_visible"]]
+    if a["full_count"] >= need:
+        reason = "meets_threshold"
+    elif clipped:
+        reason = "viewport_clip"          # 渲染出来的项里有被切的
+    else:
+        reason = "long_word_budget"       # 渲染项全完整，但一屏只放得下 cand_count < need 条
+    gw = sorted((it["glyph_right"] - it["glyph_left"] + 1) / den
+                for it in a["items"] if it["ink_top"] is not None)
+    ac10 = dict(full_count=a["full_count"], verdict=spec_v, need=need,
+                gauge="spec_sampling_x_end=%d" % a["x_end"],
+                full_count_screen=a["full_count_screen"], verdict_screen=scr_v,
+                gauge_screen="x_end=%d" % W,
+                boundary=(spec_v != scr_v), cand_count=a["cand_count"],
+                pitch=pitch_stats(a, den),
+                glyph_w_dp_med=round(gw[len(gw) // 2], 1) if gw else None)
+    ac10b = dict(cand_count=a["cand_count"], full_count=a["full_count"], need=need,
+                 recorded=True, reason=reason, clipped_idx=clipped,
+                 pitch=pitch_stats(a, den))
+    return ac10, ac10b
 
 
 def count_items_content_space(frames, tol=20, min_new_offset=40):

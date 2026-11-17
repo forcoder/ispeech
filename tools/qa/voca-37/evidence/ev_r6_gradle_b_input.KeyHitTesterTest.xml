@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ispeech.input.KeyHitTesterTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-17T08:55:59" hostname="MStudio" time="0.011">
+  <properties/>
+  <testcase name="hint小字区属于键框内点击命中该键" classname="com.ispeech.input.KeyHitTesterTest" time="0.001"/>
+  <testcase name="键框内九点全部命中该键_四角内缩1四边中点中心" classname="com.ispeech.input.KeyHitTesterTest" time="0.01"/>
+  <testcase name="水平缝中线两侧各归左右键_中线归索引较小者" classname="com.ispeech.input.KeyHitTesterTest" time="0.0"/>
+  <testcase name="圆角外露的角落与边界点命中该键" classname="com.ispeech.input.KeyHitTesterTest" time="0.0"/>
+  <testcase name="垂直缝中线上下各归上下键" classname="com.ispeech.input.KeyHitTesterTest" time="0.0"/>
+  <testcase name="超出扩展距离上限视为未命中" classname="com.ispeech.input.KeyHitTesterTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

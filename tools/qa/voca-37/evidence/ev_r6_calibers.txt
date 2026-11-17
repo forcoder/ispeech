@@ -1,0 +1,49 @@
+# VOCA-47 第六轮 · 打回项 6(a) + 风险披露：口径、双口径一致性、以及「本轮没动的东西」的自证
+
+## ① PR #18 变更量：两种口径并列（报告 §13 禁混用，这里两个都给 + 现算命令）
+$ git diff --shortstat fa57a07...c524351        # 累计口径（PR #18 相对 main）
+ 16 files changed, 519 insertions(+), 30 deletions(-)
+$ git show --shortstat --format=%H e528c08 | tail -1     # 单提交口径 1/2
+ 15 files changed, 391 insertions(+), 30 deletions(-)
+$ git show --shortstat --format=%H c524351 | tail -1     # 单提交口径 2/2
+ 6 files changed, 136 insertions(+), 8 deletions(-)
+$ gh pr view 18 --json state,baseRefName,headRefOid,commits   →  state=OPEN  base=main  head=c524351  commits=2
+#   两口径差额（累计 519 增 vs 单提交 391+136=527 增）来自两个提交改到同一批文件；报告引用时必须点名口径。
+
+## ② 风险 3(a)：AC-10a 的规格采样区口径 vs 屏宽口径，8 帧逐一是否分歧
+520/fs1.15 a6_520_fs1.15_shijian	offline=True	 spec=3/FAIL screen=3/FAIL boundary=False
+520/fs1.15 a6_520_fs1.15_dashu	offline=True	 spec=3/FAIL screen=3/FAIL boundary=False
+440/fs1.0 r5u_440_fs1.0_shijian	offline=True	 spec=4/PASS screen=4/PASS boundary=False
+440/fs1.0 r5u_440_fs1.0_dashu	offline=True	 spec=4/PASS screen=4/PASS boundary=False
+440/fs1.15 r5u_440_fs1.15_shijian	offline=True	 spec=4/PASS screen=4/PASS boundary=False
+440/fs1.15 r5u_440_fs1.15_dashu	offline=True	 spec=4/PASS screen=4/PASS boundary=False
+520/fs1.15 r5u_520_fs1.15_shijian	offline=True	 spec=3/FAIL screen=3/FAIL boundary=False
+520/fs1.15 r5u_520_fs1.15_dashu	offline=True	 spec=3/FAIL screen=3/FAIL boundary=False
+# → 8/8 帧 boundary=False：内缩 6dp 的采样右界（x_end=1060@520 / 1064@440）与屏宽 1080 同判，无档位需交洞察BA 复核
+#   （裁决 §9.4 风险 3(a)：只有两口径不一致的那一档才单列；本轮不触发，但双读数从本轮起固定进 AC10 行。）
+
+## ③ 本轮**没有**动到的东西（既防「顺手修」，也防读者以为修了）
+$ git show fa57a07:app/src/main/java/com/ispeech/input/CandidateView.kt | grep -ci slop  →  0
+$ git show c524351:app/src/main/java/com/ispeech/input/CandidateView.kt | grep -ci slop  →  0
+#   两个 0 = AC-11（带内短拖误上屏）的 slop 修复在 main 与 PR #18 上都不存在
+#   → §3.1 的 AC-11 行标 N/A（本轮不测、既有债、不计入 PR #18 拦路面）是事实陈述，不是回避。
+$ git diff --name-only fa57a07 c524351
+  README.md
+  app/src/main/java/com/ispeech/input/IspeechImeService.kt
+  app/src/main/java/com/ispeech/input/SettingsPanel.kt
+  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt
+  app/src/main/java/com/ispeech/input/SpaceKeyPolicy.kt
+  app/src/main/java/com/ispeech/settings/KeyboardScreen.kt
+  app/src/main/java/com/ispeech/settings/keyboard/KeyboardViewModel.kt
+  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt
+  app/src/main/java/com/ispeech/settings/store/SettingsStore.kt
+  app/src/main/res/layout/candidate_view.xml
+  app/src/main/res/layout/ime_input_view.xml
+  app/src/main/res/values-en/strings.xml
+  app/src/main/res/values/strings.xml
+  app/src/test/java/com/ispeech/input/SpaceKeyPolicyTest.kt
+  docs/sogou-feature-matrix.md
+  tools/verify/check_crosscut.py
+#   变更面里没有任何无障碍改动（无 contentDescription / importantForAccessibility / 命中高度相关行）
+#   → §12 那 4+1 项在 PR #18 前后同样是缺口，所以报告写「本轮未观测到恶化（依据=变更面不含无障碍路径）」，
+#     不再写没有出处的「也未恶化」。

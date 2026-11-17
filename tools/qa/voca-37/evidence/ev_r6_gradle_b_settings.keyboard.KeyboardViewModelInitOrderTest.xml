@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ispeech.settings.keyboard.KeyboardViewModelInitOrderTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-17T08:55:59" hostname="MStudio" time="0.011">
+  <properties/>
+  <testcase name="init块回写的每个后置属性都已先声明" classname="com.ispeech.settings.keyboard.KeyboardViewModelInitOrderTest" time="0.01"/>
+  <testcase name="两个后置属性的声明早于init块" classname="com.ispeech.settings.keyboard.KeyboardViewModelInitOrderTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

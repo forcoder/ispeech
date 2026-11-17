@@ -11,7 +11,11 @@
 | 文件 | 用途 |
 |---|---|
 | `drive.py` | 测量底座：ime inset frame、键帽行检测、候选带列剖面互相关位移、宿主文本真值、软键坐标表、联系人/设置宿主拉起 |
-| `fs115.py` | **spec AC-1 恒高 + 截字 + spec-AC-10**（第五轮重写版）。出数前过五道闸门：键位反推成功、宿主回读==所敲串、`chip 文本==所敲串` 且 chip 在候选区左、**chip 右侧可见候选 ≥4**、池内 ≥8；全过才打 `GATES`→`RESULT`→`INK`→`CAND`→`AC10`，否则只打一行 `GATE reason=… rc=…` 且 **stdout 不出现 RESULT/INK/delta**。第 5 位 `label`（默认 `a`）进截图名，防止两个包同名帧互相覆盖 |
+| `fs115.py` | **spec AC-1 恒高 + 截字 + spec-AC-10**（第五轮重写版，第六轮解耦闸门）。出数前只守规格 `8324b03:525` AC-10 的三条 **Given**：键位反推成功、宿主回读==所敲串（=Given ① 的唯一通道）、chip 盒在位且在候选区左、**候选行在位（`cand_count ≥ 1`，不是 chip-only）**、池内 ≥8、滚动后回原点；全过才打 `GATES`→`RESULT`→`INK`→`CAND`→`AC10`→`AC10b`，否则只打一行 `GATE reason=… rc=…` 且 **stdout 不出现 RESULT/INK/delta**。**「可见候选 ≥4」不是闸门**（裁决 §9.2）：它是 AC-10a 的判据，塞进闸门就等于让 AC-10 只会「不给数」、永远出不了 FAIL。第 5 位 `label`（默认 `a`）进截图名，防止两个包同名帧互相覆盖 |
+| `ac10_offline.py` | 对**已入库的帧**离线重算 AC-10（无 adb）。判定式与 `fs115.py` 共用同一份 `band.ac10_rows`，所以设备当场读数与交付帧重算必须逐字段相同 —— A 包 `a6_520_fs1.15_*` 两帧已核过（`ev_r6_ac10_offline.txt` ↔ `ev_r6_ac10_decoupled.txt`）。离线读不出的 Given ①③ 逐行打 `carried_from_device` + 出处文件，不冒称当场重测 |
+| `ppwin.py` | 键盘占比 pp 的**同窗对照**：一个连续窗口内先把搜狗三档量完、再量 iSpeech 三档（两侧都在敲入 `shijian` 的组合态取值），每档打 `RAW` 行（`dumpsys window displays` 的 `InsetsSource` 原文）+ 时间戳 + 帧名。第五轮的 pp 对照值是首测窗口复用来的、被写成本轮当场重测（裁决 §9.4 打回项 1），这个脚本就是为了让「同窗」可自证 |
+| `spec85_anchors.sh` | 规格 §8.5 那份「文档断言 → 代码行」清单（54 条）跑在任意 BASE 上：`bash spec85_anchors.sh fa57a07`。§12 引用的每一个代码行号都必须由它现算，不许手抄（裁决 §9.4 打回项 6） |
+
 | `band.py` | 候选带像素取证底座：底色/chip/item/主题色四组常量 + 连通块切候选项 + **角标圆片按外形剔除** + `first_item_left = chip 右沿 + 1`（字身只在它右边量）。为什么必须这样：`CandidateView.kt:76-77` 在候选列表为空时把 `scrollView` 置 `GONE`，整带宽里就只剩 chip 的墨迹——旧口径把「量 chip」当成了「量候选」 |
 | `voidcheck.py` | 作废自查（裁决 §6-3 的自证）：用旧报告的窗口重扫交付帧，先逐位复现旧墨迹行，再用新口径数候选 → `x>240` 命中列=0 就证明旧数据确实还在量 chip。rc=0 = 三帧全部低于闸门（作废成立） |
 | `ac9.py` | spec-AC-9 退格长按阶梯（200/1000/**1500**/2000ms）。两条硬规矩：退格键位从截图反推（不写死像素）；先做一次 200ms 短按**必须恰好删 1 字**，删不动说明点到的不是退格键 → `GATE reason=del_key_miss rc=20`，后面所有档位都是废数。长度一律 `hold()` 连读稳定值（批量敲键后紧接着 `uiautomator dump` 拿到的是旧文本，会把「删掉了」量成「没删」）。宿主文本一律用**已上屏中文**——组合缓冲里的退格走删 composing 的另一条路径，不是 AC-9 说的「删除字符」 |
@@ -30,12 +34,15 @@
 
 | 脚本 | `reason=` | rc | 含义 |
 |---|---|---|---|
-| `fs115.py` | `readback_mismatch` | 10 | 宿主回读 != 所敲串（键漏了/打错位置） |
-| `fs115.py` | `no_candidates` | 11 | chip 右侧一个候选字身都没有 |
+| `fs115.py` | `readback_mismatch` | 10 | 宿主回读 != 所敲串（键漏了/打错位置）。第六轮 520 档 `dashu` 首跑就吃这条（`got=<NONE>`，共享 AVD 掉焦点），重跑才出数 —— 两次尝试都入库 |
+| `fs115.py` | `no_chip_box` | 11 | **连 chip 的填充盒都没画出来**（`band.analyze` 的 `no_chip_fill`）= 帧不对/带没在位，跟「候选为空」是两件事 |
 | `fs115.py` | `chip_not_left` | 12 | chip 盒不在候选区左侧（帧不对/带没画出来） |
-| `fs115.py` | `cand_low` | 13 | **可见候选 < 4**（chip-only 伪装态的兜底，520dpi `dashu` 两包都吃这条） |
+| `fs115.py` | `chip_only` | 13 | **有 chip、候选 0 条 = chip-only 伪装态**（Given ② 不成立）。`MIN_CAND` 第六轮从 4 降到 1，但这一档**不许删**：`band.py:113/188` —— `cand_count==0` 的帧照样 `ok=True`，删了它 chip-only 会一路走到 `pool_low`（rc=14），失效原因从「量错对象」变成「词库不够」，第三人照 §10 复跑必读错（裁决 §9.2-1）。11 与 13 的语义必须分开：11=连 chip 都没有，13=有 chip 无候选 |
 | `fs115.py` | `pool_low` / `not_at_origin` | 14 / 15 | 池内 < 8 条 / 滚动后没回到原点 |
-| `fs115.py` | `key_map_fail` / `ime_not_ours` / `host_not_ready` | 16 / 17 / 18 | 键位反推失败（VOCA-184 后曾把两行粘成一行）/ 当前 IME 不是本包 / 宿主起不来 |
+| `fs115.py` | `ime_not_ours` | 17 | 当前 IME 不是本包（前后各读一次，任一端不符即拒绝） |
+| `fs115.py` | `key_map_fail` / `host_not_ready` | 16 / 18 | 键位反推失败（VOCA-184 后曾把两行粘成一行）/ 宿主起不来 |
+| `ac10_offline.py` | `frame_not_in_pr` / `no_chip_box` | 20 / 11 | 帧文件不在 `shots/`（离线没有第二次机会）/ 连 chip 盒都没找到 |
+| `ppwin.py` | `keyboard_not_shown` | 30 | 该档键盘没弹出（inset 读不到）→ 整窗作废，不许拿上一档的值凑 |
 | `ac9.py` | `del_key_miss` / `fill_short` | 20 / 21 | 200ms 探针删不掉 1 字（点错键）/ 填字没填满目标长度 |
 | `dsdump.py` | `run_as_unavailable` | 21 | `run-as` 或路径真的不对（与「文件不存在=默认值」严格区分） |
 | `voidcheck.py` | — | 22 | 有帧未低于旧口径闸门 → 作废结论需复核（0 = 作废成立） |
@@ -138,9 +145,23 @@ import drive as D; print(D.ime_frame()); print(D.key_map())"
 
 候选项是 `wrap_content` 且没有 `ellipsize`（`CandidateView.kt:101` 只设 `textSize=18f`、`:112` 设 `setPadding(dp(12),dp(6),dp(12),dp(6))`），所以**不存在「文字被省略号截掉」这种截字**：字要么整条画出来，要么被 `HorizontalScrollView` 的视口右边界切掉。因此 spec-AC-10 的「完整可见」只落在两条可测的东西上：① 该项 x 区间是否越出采样区右沿（`x_end` vs 屏幕右边界，越界即 `badge_clipped` / 不完整）；② 字身墨迹上下是否与带内沿相切（`tangent_items`，纵向截字）。报告里凡写「未截字」都必须同时给这两个字段，不能只写「仍在带内」。
 
+## AC-10 的三条读数规矩（第六轮起，违反其中任一条 = 该轮 AC-10 结论不作数）
+
+裁决 §9.2 / §9.4 风险 3(a) 把这三条钉死，实现都在 `band.ac10_rows()` 里（设备与离线共用）：
+
+1. **`≥4` 是 `full_count` 的门限，`≥8` 是池的门限，不可互换。** 池 ≥8 是 AC-10a 的**可判性来源**：
+   词库里明明有 ≥8 条、屏上凑不满 4 条完整可见 = 横向空间不够 = **FAIL 本身**，不是「不给数」的理由。
+2. **每一帧都要出 verdict**（两档 × 两码 = 4 帧，一帧不落），而且**不许看完结果再挑样本**：
+   同一批码在 440 档当 AC-10a 样本判过 PASS，到 520 档就得同样判，不能以「这码是长词、属 AC-10b」摘出去。
+3. **双口径并列，分歧不许测试自挑。** `AC10` 行同时给规格采样区口径（`x_end = 1080 − paddingEnd`，
+   规格 `:529` 写死、内缩不放开）与屏宽口径（右界 1080）：`verdict=` / `verdict_screen=`，
+   两者不一致时 `boundary=True` → 那一档单列交洞察BA 复核。第六轮 8 帧全部 `boundary=False`。
+   `AC10b` 行永远跟着出（`recorded=True reason=…`，reason ∈ `meets_threshold` / `viewport_clip` / `long_word_budget`），
+   它是「为什么不足 4 条」的归因，**不是免判通道**。
+
 ## 集成候选（B 包）复跑
 
-报告 §13 的 B 包 = `c524351` + `d3b6f84`(VOCA-170) + `d283706`(VOCA-184) + `4d6363c`(VOCA-207) 的本地三方合并，配方与冲突清单在报告 §10-6 / §13.1。**用它跑任何脚本时记得带 `label`**（`fs115.py <apk> 440 1.0 shijian b`），否则会把 A 包的候选带裁图覆盖掉——第五轮就覆盖过一次（12 张同名帧），文本证据没受影响，但帧与包对不上名就是废证据。
+报告 §13 的 B 包 = `c524351` + `d3b6f84`(VOCA-170) + `d283706`(VOCA-184) + `4d6363c`(VOCA-207) 的本地三方合并，配方与冲突清单在报告 §10-6 / §13.1。**用它跑任何脚本时记得带 `label`**（`fs115.py <apk> 440 1.0 shijian b`），否则会把 A 包的候选带裁图覆盖掉——第五轮就覆盖过一次（12 张同名帧），文本证据没受影响，但帧与包对不上名就是废证据。第六轮的 label 约定：A 包用 `a6`、B 包用 `r5u`（`r5u_*` 那批已入库，本轮不再重跑 B 的设备侧，改用 `ac10_offline.py` 在入库帧上出 AC-10 读数）。**两包都要留帧**（裁决 §9.4 风险 1）。
 
 ## evidence/ 与 shots/
 
@@ -156,4 +177,11 @@ python3 tools/qa/voca-37/vswipe.py <apk> 440 --family commit --dy 40,60,90,100,1
 python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 60,110 --dx 0        # 纯竖滑有无横滚
 python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 110 --dx 160         # 斜滑
 python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode above --start 215 --dy 215                # 起点在带外
+
+# 第六轮（打回项 1 / 2 / 3 / 6）三条，前两条要设备，第三条纯离线
+python3 tools/qa/voca-37/ppwin.py --ime sogou --tiers 440:1.0,440:1.15,520:1.15              # → ev_r6_pp_window.txt 上半
+python3 tools/qa/voca-37/ppwin.py --ime ispeech --tiers 440:1.0,440:1.15,520:1.15 --apk <构建产物 apk>   # 同窗下半，含 IDENT 自证
+python3 tools/qa/voca-37/fs115.py <apk> 520 1.15 shijian,dashu a6                            # 解耦闸门后的当场出数
+python3 tools/qa/voca-37/ac10_offline.py                                                      # 无 adb，对入库帧重算 → ev_r6_ac10_offline.txt
+bash    tools/qa/voca-37/spec85_anchors.sh fa57a07                                            # §12 的代码行号现算 → ev_r6_spec85_main.txt
 ```
