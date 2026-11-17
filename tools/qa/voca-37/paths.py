@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VOCA-37 §9.8 五条未验证路径 + 回归面取证（模拟器，c524351）。
+"""VOCA-37 §9.8 五条未验证路径 + 回归面取证（模拟器；第七轮被测面 `78343a4`）。
 
 每个路径独立 try，输出 TAB 分隔的结构化行，便于贴进报告。
 """
@@ -81,7 +81,7 @@ def p4():
     D.tap_keys("zhongguo", gap=0.11); time.sleep(1.2)
     base = D.shot("p4_base.png")
     for _ in range(4):
-        D.shell("input keyevent 70"); time.sleep(0.35)   # '=' = 右移（IspeechImeService.kt:612-614）；起点在左端，'-' 会原地不动
+        D.shell("input keyevent 70"); time.sleep(0.35)   # '=' = 右移（IspeechImeService.kt:620-622）；起点在左端，'-' 会原地不动
     moved = D.shot("p4_moved.png")
     top, h = band_top()
     s1, e1 = scroll_px(base, moved, top)

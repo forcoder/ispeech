@@ -1,19 +1,23 @@
 # VOCA-37 · Stage 3 回归工具与证据
 
-报告：`docs/qa/voca-37-stage3-regression.md`。被测两个口径：**A 包 `c524351`**（PR #18 head）与 **B 包 `cffc0cd`**（QA 本地集成候选 = A 包 + VOCA-170 `d3b6f84` + VOCA-184 `d283706` + VOCA-207 `4d6363c`，见报告 §13）。
+报告：`docs/qa/voca-37-stage3-regression.md`。第七轮起**只有一个被测面**：PR #18 head `78343a4`（用 `gh pr view 18 --json headRefOid` 现算，不抄写），规格锚 PR #17 head `0e4eeb0`。第六轮及以前的两个口径都降为**历史对照**：旧 head 的产物（硬件空格路径还是阴性的那一版）、以及 B 包 `cffc0cd`（见文末）。正文数字一律引 `evidence/ev_r7_*`。
 
 ## 常量在哪
 
-`drive.py` 顶部集中了本机常量：`ADB`（platform-tools 路径）、`S`（serial，默认 `emulator-5554`）、`IME`、`DEN=2.75`（440dpi 的 px/dp）。换机器只改这里；其余脚本 `import drive as D` 复用。
+`drive.py` 顶部集中了本机常量：`ADB`（platform-tools 路径，可用 `QA_ADB` 覆盖）、`S`（serial，读 `QA_SERIAL`）、`IME`、`DEN=2.75`（440dpi 的 px/dp）。换机器只改这里；其余脚本 `import drive as D` 复用。
+**环境变量（第七轮加）**：`QA_SERIAL`（**默认 `emulator-5554`，所有脚本统一从这里取，不许各自写死**——同机多开的 5556 会串台）、`QA_ADB`、`QA_HEAD`（默认 `78343a4`）、`QA_SPEC`（默认 `0e4eeb0`）、`QA_APK`（被测包）、`QA_BASE_APK`（档① 修复前对照包）。脚本的 `IDENT` 行会把这些值打出来，装错包直接 `rc=19`。
+
+`drive.log()` 从第七轮起给**每一行**补 `ts=`（调用方显式传了就不覆盖）。之前一份证据只有文件头一个时刻，读者只能把读数追到入库提交，这在第六轮裁决里被定为不合格证据。
+
 
 ## 脚本
 
 | 文件 | 用途 |
 |---|---|
 | `drive.py` | 测量底座：ime inset frame、键帽行检测、候选带列剖面互相关位移、宿主文本真值、软键坐标表、联系人/设置宿主拉起 |
-| `fs115.py` | **spec AC-1 恒高 + 截字 + spec-AC-10**（第五轮重写版，第六轮解耦闸门）。出数前只守规格 `8324b03:525` AC-10 的三条 **Given**：键位反推成功、宿主回读==所敲串（=Given ① 的唯一通道）、chip 盒在位且在候选区左、**候选行在位（`cand_count ≥ 1`，不是 chip-only）**、池内 ≥8、滚动后回原点；全过才打 `GATES`→`RESULT`→`INK`→`CAND`→`AC10`→`AC10b`，否则只打一行 `GATE reason=… rc=…` 且 **stdout 不出现 RESULT/INK/delta**。**「可见候选 ≥4」不是闸门**（裁决 §9.2）：它是 AC-10a 的判据，塞进闸门就等于让 AC-10 只会「不给数」、永远出不了 FAIL。第 5 位 `label`（默认 `a`）进截图名，防止两个包同名帧互相覆盖 |
+| `fs115.py` | **spec AC-1 恒高 + 截字 + spec-AC-10**（第五轮重写版，第六轮解耦闸门）。出数前只守规格 `0e4eeb0:543-54425` AC-10 的三条 **Given**：键位反推成功、宿主回读==所敲串（=Given ① 的唯一通道）、chip 盒在位且在候选区左、**候选行在位（`cand_count ≥ 1`，不是 chip-only）**、池内 ≥8、滚动后回原点；全过才打 `GATES`→`RESULT`→`INK`→`CAND`→`AC10`→`AC10b`，否则只打一行 `GATE reason=… rc=…` 且 **stdout 不出现 RESULT/INK/delta**。**「可见候选 ≥4」不是闸门**（裁决 §9.2）：它是 AC-10a 的判据，塞进闸门就等于让 AC-10 只会「不给数」、永远出不了 FAIL。第 5 位 `label`（默认 `a`）进截图名，防止两个包同名帧互相覆盖 |
 | `ac10_offline.py` | 对**已入库的帧**离线重算 AC-10（无 adb）。判定式与 `fs115.py` 共用同一份 `band.ac10_rows`，所以设备当场读数与交付帧重算必须逐字段相同 —— A 包 `a6_520_fs1.15_*` 两帧已核过（`ev_r6_ac10_offline.txt` ↔ `ev_r6_ac10_decoupled.txt`）。离线读不出的 Given ①③ 逐行打 `carried_from_device` + 出处文件，不冒称当场重测 |
-| `ppwin.py` | 键盘占比 pp 的**同窗对照**：一个连续窗口内先把搜狗三档量完、再量 iSpeech 三档（两侧都在敲入 `shijian` 的组合态取值），每档打 `RAW` 行（`dumpsys window displays` 的 `InsetsSource` 原文）+ 时间戳 + 帧名。第五轮的 pp 对照值是首测窗口复用来的、被写成本轮当场重测（裁决 §9.4 打回项 1），这个脚本就是为了让「同窗」可自证 |
+| `ppwin.py` | 键盘占比 pp 的**同窗对照**：一个连续窗口内先把搜狗各档量完、再量 iSpeech（两侧都在敲完 `shijian` 的组合态读 `type=ime` inset）。`--panel 1260x2720` 覆盖面板几何（**打回项 2 的目标真机形状**）、`--tiers 520:1.0,520:1.15` 选档、`--round` 防跨轮覆盖帧名、`--apk` 触发身份校验；退出时把 `font_scale` / `wm size` / `wm density` 还原成**入口读到的原值**，`TAIL` 行给 `font_scale_now` / `panel_now` 供复核 |
 | `spec85_anchors.sh` | 规格 §8.5 那份「文档断言 → 代码行」清单（54 条）跑在任意 BASE 上：`bash spec85_anchors.sh fa57a07`。§12 引用的每一个代码行号都必须由它现算，不许手抄（裁决 §9.4 打回项 6） |
 
 | `band.py` | 候选带像素取证底座：底色/chip/item/主题色四组常量 + 连通块切候选项 + **角标圆片按外形剔除** + `first_item_left = chip 右沿 + 1`（字身只在它右边量）。为什么必须这样：`CandidateView.kt:76-77` 在候选列表为空时把 `scrollView` 置 `GONE`，整带宽里就只剩 chip 的墨迹——旧口径把「量 chip」当成了「量候选」 |
@@ -29,6 +33,9 @@
 | `paths3.py` | 带宿主守卫（`-`/`=` 必须进 IME）与联系人弹窗自关的重试版 |
 | `qa_rows.py` | 单图工具：`python3 qa_rows.py <png> <y0> <y1> <dpi>` 出行带与间距 |
 | `qa_kb.py` | 早期手工探针集合（frame/host/text/bands/shift/ink） |
+| `d1regress.py` | **接管空格键（`35cdbfa`）的 6 档回归面**：档① 开关关=与修复前逐字节同（`--diff` 比两份 stdout 的宿主文本）、档② 英文态/T9 数字态、档③ 需要自己吃空格的宿主、档④ 长按语音（截图带差分，无日志可用）、档⑤ `repeatCount`、档⑥ `spaceProbe` 跨进程读成本。装错包 `rc=19`；基线包无开关键时 `SWITCH route=absent_means_default_off`，**不走设置页试点**（会误伤别的开关） |
+| `spec_ux_anchors.py` | 规格行号重锚：报告引用的每条锚点在 `git show OLD` / `git show NEW` 两侧逐行比内容，出 `match=True` / `DRIFT` / `MISS`（MISS 由人工给 `verdict=REPLACED` 落点）→ `evidence/ev_r7_spec_ux_anchors.txt` |
+| `run_r7_all.sh` / `run_r7b.sh` / `run_r7c.sh` / `run_r7d.sh` | 第七轮的分串编排：每档单独 stdout + `# rc=`，一档跑挂不拦后面。`r7c` 是「`drive.log` 打上逐行 `ts=`」之后的重跑串，正文 AC-4~7 / AC-9 / AC-1 / D2 的数字以它为准 |
 
 ## fs115 / ac9 / d2check 的退出码（拒绝出数时看这个，别看有没有数字）
 
@@ -42,18 +49,20 @@
 | `fs115.py` | `ime_not_ours` | 17 | 当前 IME 不是本包（前后各读一次，任一端不符即拒绝） |
 | `fs115.py` | `key_map_fail` / `host_not_ready` | 16 / 18 | 键位反推失败（VOCA-184 后曾把两行粘成一行）/ 宿主起不来 |
 | `ac10_offline.py` | `frame_not_in_pr` / `no_chip_box` | 20 / 11 | 帧文件不在 `shots/`（离线没有第二次机会）/ 连 chip 盒都没找到 |
-| `ppwin.py` | `keyboard_not_shown` | 30 | 该档键盘没弹出（inset 读不到）→ 整窗作废，不许拿上一档的值凑 |
+| `ppwin.py` | 键盘占比 pp 的**同窗对照**：一个连续窗口内先把搜狗各档量完、再量 iSpeech（两侧都在敲完 `shijian` 的组合态读 `type=ime` inset）。`--panel 1260x2720` 覆盖面板几何（**打回项 2 的目标真机形状**）、`--tiers 520:1.0,520:1.15` 选档、`--round` 防跨轮覆盖帧名、`--apk` 触发身份校验；退出时把 `font_scale` / `wm size` / `wm density` 还原成**入口读到的原值**，`TAIL` 行给 `font_scale_now` / `panel_now` 供复核 |
 | `ac9.py` | `del_key_miss` / `fill_short` | 20 / 21 | 200ms 探针删不掉 1 字（点错键）/ 填字没填满目标长度 |
 | `dsdump.py` | `run_as_unavailable` | 21 | `run-as` 或路径真的不对（与「文件不存在=默认值」严格区分） |
 | `voidcheck.py` | — | 22 | 有帧未低于旧口径闸门 → 作废结论需复核（0 = 作废成立） |
 | `d2check.py` | `card_not_found` / `ime_not_ours` / `keyboard_not_shown` | 2 / 17 / 19 | 卡片没找到 / IME 被抢 / 键盘没弹出（后两条 = 不许报 FIXED） |
 | `d2check.py` | — | 0 / 1 | 0 = 未崩（修复成立）；1 = 崩了并附 `STACK` 行 |
+| `d1regress.py` | `installed_apk_not_this_build` | 19 | 装着的包不是 `QA_APK` 那一个（逐条目 dex/arsc sha256 不等）→ 整档作废 |
+| `d1regress.py` | `switch_stuck` / `password_host_unreachable` / `repeatcount_not_injectable_on_emulator` | 33 / 0 / 0 | 开关点了不生效 / 没有可用密码宿主（如实拒绝出数）/ 注入键造不出 `repeatCount>0`（转 JVM 单测，见报告 §7） |
 
 ## 共享 AVD 的四个坑（本轮踩过，脚本已内置防护）
 
 1. **设备里可能留着别人更高 versionCode 的包**：`adb install -r -g` 会 `INSTALL_FAILED_VERSION_DOWNGRADE`。
    一律用 `install -r -d -g`（`-d` 允许降级），降级后用 `classes*.dex` + `resources.arsc` 逐条目 SHA256
-   证明装的就是 `c524351` 的产物 —— 整包哈希不可比，所以身份校验不能省。
+   证明装的就是当轮被测 head 的产物（第七轮 = `78343a4`） —— 整包哈希不可比，所以身份校验不能省。
 2. **dex 校验只证明「装的是本包」，不证明「此刻弹出的键盘是本包」**：别的 run 会在测量中途把
    `default_input_method` 切到 Gboard，`ime_frame()` 读到的就是别人的 inset（实测候选底色
    `(241,240,247)` ≠ 本包 `#F4F5F7`=(244,245,247)，933px 那组假读数就是这么来的）。
@@ -73,7 +82,7 @@
 
 1. 测前 `settings put secure autofill_service null`，否则自动填充会多报一个 `type=ime` InsetsSource。
 2. 位移一律用硬件 `-`/`=`（198px=72dp 一档，可复现）；触摸 fling 位移不可复现，禁止作为判据。
-   **键名↔方向不靠人记**：`IspeechImeService.kt:612-614`（行号锚 c524351；main `fa57a07` 上是 `:601-603`）定死 `KEYCODE_MINUS`(69) → `scrollCandidates(-1)`、
+   **键名↔方向不靠人记**：`IspeechImeService.kt:620-622`（行号锚当轮被测 head `78343a4`；旧 head 上是 `:612-614`，main `fa57a07` 上是 `:601-603`）定死 `KEYCODE_MINUS`(69) → `scrollCandidates(-1)`、
    `KEYCODE_EQUALS`(70) → `scrollCandidates(+1)`，`CandidateView.kt:90-92,199` 是 `smoothScrollBy(steps*72dp,0)`，
    「steps 为正向右」。互相关 `shift` 的符号约定是「正 = 内容左移 = 视口向右」，所以 **`=` 读 +198、`-` 读 −198**，
    末端钳制在**右端**且靠 `=` 到达（左端靠 `-` 钳住）。往左端之外滚是 no-op：
@@ -145,7 +154,7 @@ import drive as D; print(D.ime_frame()); print(D.key_map())"
 
 候选项是 `wrap_content` 且没有 `ellipsize`（`CandidateView.kt:101` 只设 `textSize=18f`、`:112` 设 `setPadding(dp(12),dp(6),dp(12),dp(6))`），所以**不存在「文字被省略号截掉」这种截字**：字要么整条画出来，要么被 `HorizontalScrollView` 的视口右边界切掉。因此 spec-AC-10 的「完整可见」只落在两条可测的东西上：① 该项 x 区间是否越出采样区右沿（`x_end` vs 屏幕右边界，越界即 `badge_clipped` / 不完整）；② 字身墨迹上下是否与带内沿相切（`tangent_items`，纵向截字）。报告里凡写「未截字」都必须同时给这两个字段，不能只写「仍在带内」。
 
-## AC-10 的三条读数规矩（第六轮起，违反其中任一条 = 该轮 AC-10 结论不作数）
+## AC-10 的四条读数规矩（第六轮立三条，第七轮加第四条；违反其中任一条 = 该轮 AC-10 结论不作数）
 
 裁决 §9.2 / §9.4 风险 3(a) 把这三条钉死，实现都在 `band.ac10_rows()` 里（设备与离线共用）：
 
@@ -159,13 +168,25 @@ import drive as D; print(D.ime_frame()); print(D.key_map())"
    `AC10b` 行永远跟着出（`recorded=True reason=…`，reason ∈ `meets_threshold` / `viewport_clip` / `long_word_budget`），
    它是「为什么不足 4 条」的归因，**不是免判通道**。
 
-## 集成候选（B 包）复跑
+4. **档位绑定几何，不许拿模拟器默认面板去套档1 的硬门限。** 逻辑宽 = 面板宽 ÷ (dpi/160)，档界 `band.TIER_SPLIT_DP = 371.0`（规格 `0e4eeb0:560`，只有一份）：1260×2720@520 = **387.7dp → 档1**；1080×2340@440 = 392.7dp → 档1；1080×2340@520 = **332.3dp → 档2**——现实机型里没有这种面板/dpi 组合，它是模拟器强行改 dpi 造出来的档位。每行 `verdict` 必须带 `tier=`；**档2 在人类签字（R21）之前只能写 `AWAITING_SIGNOFF`，不得写 PASS**，`band.R21_SIGNED = False` 时脚本不会自己变绿。
 
-报告 §13 的 B 包 = `c524351` + `d3b6f84`(VOCA-170) + `d283706`(VOCA-184) + `4d6363c`(VOCA-207) 的本地三方合并，配方与冲突清单在报告 §10-6 / §13.1。**用它跑任何脚本时记得带 `label`**（`fs115.py <apk> 440 1.0 shijian b`），否则会把 A 包的候选带裁图覆盖掉——第五轮就覆盖过一次（12 张同名帧），文本证据没受影响，但帧与包对不上名就是废证据。第六轮的 label 约定：A 包用 `a6`、B 包用 `r5u`（`r5u_*` 那批已入库，本轮不再重跑 B 的设备侧，改用 `ac10_offline.py` 在入库帧上出 AC-10 读数）。**两包都要留帧**（裁决 §9.4 风险 1）。
+## 第七轮按 SRE 五点修的工装（不修这五点，目标几何上的 pp / AC-10 根本拿不到数）
+
+1. `drive.py` 的 serial 改成读 `QA_SERIAL`，不再写死 `emulator-5554`；
+2. `ppwin.py` 顶部 `W,H = 1080,2340` 只是**默认值**，`--panel` 传入即覆盖，`PANEL` 行把 `requested / panel / logic_w_dp` 三个都打出来，方便第三人核对档位是不是算错了；
+3. `band.py` 的采样右界原来写死 `W = 1080`，改为按当场面板读——1260 面板上还按 1080 算，`full_count` 直接失真；
+4. `bring_up()` 拉起的是 Settings 搜索页，不再是厂商设置页入口（那个入口在华为 ROM 上不存在，旧写法到真机必失败）；
+5. 退出还原：`font_scale` 还原成**入口读到的原值**（不是硬写 1.0），`wm size` / `wm density` 同理。
+
+代价记在账上：换被测包要 `pm clear com.ispeech.ime` 才能回到「没有 DataStore 键 = 开关默认关」的数据态；清完必须马上 `ime set` 并等 `host_ready()`，否则后一档全部读空。
+
+## 集成候选（B 包）复跑（第七轮起作废，只作历史）
+
+B 包 `cffc0cd` = 旧 head + `d3b6f84`(VOCA-170) + `d283706`(VOCA-184) + `4d6363c`(VOCA-207) 的本地三方合并。`78343a4` 已包含 VOCA-184/207 的内容（**VOCA-170 的 `d3b6f84` 不在**：`git merge-base --is-ancestor d3b6f84 78343a4` 不成立，`branch -r --contains` 只列出 `origin/fix/voca-170-keyboard-vm-init-order`，见报告 §3.3-D2），所以第七轮不再维护 B 包口径。它的读数（`ev_r5u_*`、`ev_r6_gradle_b*`）全部降为历史对照，配方与冲突清单仍留在报告 §13，不删。用它跑任何脚本时记得带 `label`（`fs115.py <apk> 440 1.0 shijian b`），否则会把上一轮的候选带裁图覆盖掉——第五轮就覆盖过一次（12 张同名帧）。
 
 ## evidence/ 与 shots/
 
-`ev_*.txt` 为当场 stdout 原文（含时间戳与身份校验行），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
+`ev_*.txt` 为当场 stdout 原文（第七轮的每行都带 `ts=`，文件头还带 `# 被测=` / `# cmd:` / `# rc=`），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模：`tools/qa/voca-37/` 下 19 个 `.py` + 7 个 `.sh`，`evidence/` 100 份（95 `.txt` + 4 `.xml` + 1 `.log`，其中 22 份 `ev_r7_*.txt`），`shots/` 82 张**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
 
 ```bash
 python3 tools/qa/voca-37/ac2.py <apk> 440 keyevent   # 硬件/注入键路径 + 开关开/关反例
@@ -184,4 +205,13 @@ python3 tools/qa/voca-37/ppwin.py --ime ispeech --tiers 440:1.0,440:1.15,520:1.1
 python3 tools/qa/voca-37/fs115.py <apk> 520 1.15 shijian,dashu a6                            # 解耦闸门后的当场出数
 python3 tools/qa/voca-37/ac10_offline.py                                                      # 无 adb，对入库帧重算 → ev_r6_ac10_offline.txt
 bash    tools/qa/voca-37/spec85_anchors.sh fa57a07                                            # §12 的代码行号现算 → ev_r6_spec85_main.txt
+
+# 第七轮（打回项 1~4），被测面 78343a4、规格 0e4eeb0；先 export 再跑，脚本会把这两个值打进每份证据的头
+export QA_HEAD=78343a4 QA_SPEC=0e4eeb0 QA_SERIAL=emulator-5554 QA_APK=<PR#18 构建产物 app-debug.apk>
+bash    tools/qa/voca-37/run_r7c.sh                                    # AC-4~7 / vswipe / paths3 / paths2 / AC-9 / D2 / fs115 重跑（逐行 ts=）
+bash    tools/qa/voca-37/run_r7d.sh                                    # paths.py + ac2 soft 路径
+python3 tools/qa/voca-37/ppwin.py --panel 1260x2720 --tiers 520:1.0,520:1.15 --round r7t --apk "$QA_APK"   # 目标几何的 pp
+python3 tools/qa/voca-37/d1regress.py "$QA_APK" --base "$QA_BASE_APK" --diff                # 接管空格的 6 档
+python3 tools/qa/voca-37/spec_ux_anchors.py 8324b03 0e4eeb0            # 规格行号两侧逐行比 → ev_r7_spec_ux_anchors.txt
+python3 tools/verify/check_crosscut.py                                 # 第 13 组（空格键回归面）rc=0
 ```

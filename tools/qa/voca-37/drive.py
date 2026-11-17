@@ -3,11 +3,71 @@
 import subprocess, sys, time, re, os
 from PIL import Image
 
-ADB = "/opt/homebrew/share/android-commandlinetools/platform-tools/adb"
-S = "emulator-5554"
+ADB = os.environ.get("QA_ADB", "/opt/homebrew/share/android-commandlinetools/platform-tools/adb")
+# 第七轮打回项 2：工装原本只能跑 emulator-5554 + 1080×2340，换设备/换面板直接跑不通
+# （ppwin 的 pp 分母、band 的采样右界、key_map 的列扫描都写死 1080）。序列号与面板
+# 一律从设备现读，环境变量只作为显式覆盖。
+S = os.environ.get("QA_SERIAL", "emulator-5554")
 IME = "com.ispeech.ime/com.ispeech.input.IspeechImeService"
 Q = os.path.dirname(os.path.abspath(__file__))
-DEN = 2.75  # 440dpi -> px/dp
+DEN = 2.75  # 440dpi -> px/dp（兜底值；实测路径一律用 live_den() 现读）
+
+
+def panel_size():
+    """当前生效的面板像素宽/高：Override 优先，没有 Override 才用 Physical。"""
+    out = shell("wm size")
+    ov = re.search(r"Override size:\s*(\d+)x(\d+)", out)
+    ph = re.search(r"Physical size:\s*(\d+)x(\d+)", out)
+    m = ov or ph
+    if not m:
+        return None, None
+    return int(m.group(1)), int(m.group(2))
+
+
+def set_panel(size):
+    """size='1260x2720' 覆盖面板分辨率 / 'reset' 还原到物理分辨率。返回生效后的 (w,h)。"""
+    shell("wm size %s" % size)
+    time.sleep(2.5)
+    return panel_size()
+
+
+def live_density():
+    out = shell("wm density")
+    m = re.search(r"Override density:\s*(\d+)", out) or re.search(r"Physical density:\s*(\d+)", out)
+    return int(m.group(1)) if m else 440
+
+
+def live_den():
+    """px/dp，按设备当前生效密度现算（520dpi → 3.25，不是 440 的 2.75）。"""
+    return live_density() / 160.0
+
+
+def logic_width():
+    w, _ = panel_size()
+    return round(w * 160.0 / live_density(), 1) if w else None
+
+
+def orig_state():
+    """机主原值快照。收尾必须还原到这三个，而不是硬编码回 440/1.0/1080x2340 ——
+    共享 AVD 上 density/size 可能是别的 run 留下的 Override，只有「按原样写回」才算复原。"""
+    return dict(density=shell("wm density").strip().replace("\n", " | "),
+                size=shell("wm size").strip().replace("\n", " | "),
+                font_scale=shell("settings get system font_scale").strip())
+
+
+def restore_state(orig):
+    """原本是 Override 就写回那个 Override，原本没有才 reset。
+    font_scale 同理：机主没设过就删键，写 1.0 会让 `settings get` 从 null 变成有值。"""
+    d = re.search(r"Override density:\s*(\d+)", orig.get("density") or "")
+    shell("wm density %s" % d.group(1) if d else "wm density reset")
+    s = re.search(r"Override size:\s*(\d+x\d+)", orig.get("size") or "")
+    shell("wm size %s" % s.group(1) if s else "wm size reset")
+    fs = (orig.get("font_scale") or "").strip()
+    if fs in ("", "null"):
+        shell("settings delete system font_scale")
+    else:
+        shell("settings put system font_scale %s" % fs)
+    time.sleep(1.0)
 
 KC = {c: 29 + i for i, c in enumerate("abcdefghijklmnopqrstuvwxyz")}
 KC.update({str(i): (11 if i == 0 else 8 + i) for i in range(10)})
@@ -167,6 +227,8 @@ def shift(a, b, y0, y1, step=2, x0=4, x1=1076):
 
 
 def log(tag, **kw):
+    # 第七轮打回项 1：每行都要能被追到当场时刻，不然读者只能追到入库提交。
+    kw.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     print("%s\t%s" % (tag, "\t".join("%s=%s" % (k, v) for k, v in kw.items())), flush=True)
 
 
@@ -224,24 +286,26 @@ def key_map(png=None, frame=None, min_frac=0.4, min_w=28, merge_gap=8):
     # 合并「同一行被笔画切断」的小间隙，但**不许把相邻两行并成一行**：VOCA-184 把字母键
     # 行内留白从 4dp 收到 1dp（d283706），行间隙只剩 ~5px，老的 merge_gap=8 会把 qwerty 行
     # 和 asdf 行粘成一个带，列段数就不再是 10/9/7，整套键位反推直接失效。
-    max_row_px = int(52 * DEN)            # 单行键高上限 52dp（MAX_KEY_HEIGHT_DP 同口径）
+    max_row_px = int(52 * live_den())      # 单行键高上限 52dp（MAX_KEY_HEIGHT_DP 同口径），按现读密度换算
     bands = []
     for a, b in raw:
         if bands and a - bands[-1][1] <= merge_gap and b - bands[-1][0] <= max_row_px:
             bands[-1] = (bands[-1][0], b)
         else:
             bands.append((a, b))
-    px = Image.open(p).convert("RGB").load()
+    img = Image.open(p).convert("RGB")
+    W_img = img.size[0]                    # 列扫描按截图实际宽度，不再写死 1080
+    px = img.load()
 
     def runs_in(a, b):
         ys = list(range(a + 4, b - 4))
         n = float(len(ys))
-        frac = [sum(1 for y in ys if min(px[x, y]) >= 250) / n for x in range(1080)]
+        frac = [sum(1 for y in ys if min(px[x, y]) >= 250) / n for x in range(W_img)]
         out, x = [], 0
-        while x < 1080:
+        while x < W_img:
             if frac[x] >= min_frac:
                 x2 = x
-                while x2 + 1 < 1080 and frac[x2 + 1] >= min_frac:
+                while x2 + 1 < W_img and frac[x2 + 1] >= min_frac:
                     x2 += 1
                 if x2 - x + 1 >= min_w:
                     out.append((x, x2, (x + x2) // 2))
@@ -267,12 +331,18 @@ def key_map(png=None, frame=None, min_frac=0.4, min_w=28, merge_gap=8):
             m[ch] = (c, yc)
     j3 = row_at[2]
     pitch = (per[j3][-1][2] - per[j3][0][2]) / 6.0
-    m["del"] = (int(round((per[j3][-1][1] + 1080) / 2.0)), (bands[j3][0] + bands[j3][1]) // 2)
+    m["del"] = (int(round((per[j3][-1][1] + W_img) / 2.0)), (bands[j3][0] + bands[j3][1]) // 2)
     m["shift"] = (int(round(per[j3][0][0] - pitch / 2.0)), (bands[j3][0] + bands[j3][1]) // 2)
     diag["del_pitch_px"] = round(pitch, 1)
+    diag["screen_w_px"] = W_img
+    # 空格下限原来写死 200px = 440dpi 下的 72.7dp；换面板必须按现读密度换算，
+    # 否则 520dpi 下 200px 只剩 61.5dp，会把功能键误认成空格。
+    space_min_px = int(round(72.7 * live_den()))
     cands = [(r[1] - r[0] + 1, j, r) for j in range(j3 + 1, len(per)) for r in per[j]]
-    if not cands or max(cands)[0] < 200:
+    if not cands or max(cands)[0] < space_min_px:
         diag["reason"] = "no_space_key"
+        diag["space_min_px"] = space_min_px
+        diag["widest_run_px"] = max(cands)[0] if cands else None
         return {}, diag
     w, j, r = max(cands)
     m[" "] = (r[2], (bands[j][0] + bands[j][1]) // 2)

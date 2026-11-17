@@ -68,7 +68,7 @@ def start_y(top):
 
 def reset():
     """清宿主 → 打 shi（缓冲态，候选条在）→ 回左端。"""
-    st = F.host_ready()
+    st = D.host_ready()
     if not st.get("ok"):
         D.log("HOST", **{k: v for k, v in st.items()})
         return False
@@ -115,9 +115,11 @@ if __name__ == "__main__":
     apk = sys.argv[1]
     rr = subprocess.run([D.ADB, "-s", D.S, "install", "-r", "-d", "-g", apk], capture_output=True, text=True, timeout=900)
     D.log("INSTALL", out=rr.stdout.strip()[-60:], rc=rr.returncode)
-    if not F.ident("start"):
-        sys.exit(2)
-    if not F.ours(F.cur_ime()):
+    if not F.ident_once(apk):
+        D.log("GATE", reason="installed_apk_not_this_build", rc=19, stage="start")
+        sys.exit(19)
+    D.log("IDENT", stage="start", apk=os.path.basename(apk), match=True, head="78343a4")
+    if not F.cur_ime().startswith("com.ispeech.ime/"):
         D.log("SKIP", reason="current_ime_not_ispeech", current=F.cur_ime(), hint="adb shell ime set " + D.IME)
         sys.exit(3)
     subprocess.run([D.ADB, "-s", D.S, "shell", "wm", "density", DENS], capture_output=True)
@@ -166,4 +168,4 @@ if __name__ == "__main__":
             s, e, v = hshift(before, shot(1), band_geom()[0])
             D.log("VSWIPE", case="control_tap_x%d" % X, start_y=top + 60, dy=0, dur=0, x=X,
                   before="'shi'", after=hb, committed=(hb != "'shi'"), h_shift=s, h_err=e, h_verdict=v)
-    F.ident("end")
+    D.log("IDENT", stage="end", match=F.ident_once(apk), head="78343a4")

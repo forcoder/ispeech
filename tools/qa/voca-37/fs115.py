@@ -9,7 +9,7 @@
 候选条从头到尾就是空的。
 
 本版三条硬规矩：
-1. **闸门先于读数，闸门只守规格 `8324b03:525` AC-10 的那三条 Given**：回读宿主文本 == 所敲串、
+1. **闸门先于读数，闸门只守规格 `0e4eeb0:543` AC-10 的那三条 Given**：回读宿主文本 == 所敲串、
    chip 像素盒存在且在候选区左边、候选行在位（不是 chip-only）、池内候选 ≥ 8（用 `=` 键滚动 +
    互相关累计位移去重数出来）。任一不成立 → 只打 `GATE reason= rc=` 并以非零码退出，
    stdout 不出现 RESULT / INK / delta。**「可见候选 ≥ 4」不是闸门**（第六轮解耦，裁决 §9.2）：
@@ -17,7 +17,7 @@
 2. **INK 行带 `cand_count` 与采样起点 `x0`（= chip 右沿 + 1）**，字身墨迹只在 chip 右边量，
    角标圆片按外形剔除（见 `band.py`）。
 3. 键位一律从当场截图反推（`drive.key_map`），不写死像素。
-4. 闸门全过后先打一行 `GATES`，把规格 `8324b03:525` AC-10 的三条 Given 逐条点名
+4. 闸门全过后先打一行 `GATES`，把规格 `0e4eeb0:543` AC-10 的三条 Given 逐条点名
    （① chip==所敲串、② 候选行在位（`cand_count ≥ 1`）、③ 池 ≥8），
    再打 `RESULT`。
 
@@ -36,12 +36,12 @@ import drive as D
 
 LABEL = sys.argv[5] if len(sys.argv) > 5 else "a"
 
-MIN_CAND = 1          # 规格 8324b03:525 AC-10 Given ②「候选行在位（不是 chip-only）」的下界，
+MIN_CAND = 1          # 规格 0e4eeb0:543 AC-10 Given ②「候选行在位（不是 chip-only）」的下界，
                       # 不是 AC-10a 的门限 —— ≥4 只进 AC10 判定行（裁决 §9.2）。
-MIN_POOL = 8          # 规格 8324b03:525 AC-10 Given ③：候选池 ≥ 8 条
+MIN_POOL = 8          # 规格 0e4eeb0:543 AC-10 Given ③：候选池 ≥ 8 条
 NEED_FULL = 4         # spec-AC-10a 硬门限：字身完整可见 ≥ 4
 SCROLL_STEPS = 8      # 池取证用 `=` 键档数（每档 SCROLL_STEP_DP=72）
-SPEC_GIVEN = "8324b03:525"   # AC-10 的三条 Given，闸门只守这三条
+SPEC_GIVEN = "0e4eeb0:543-544"   # AC-10 的三条 Given，闸门只守这三条（原 8324b03:525，第七轮随 PR#17 head 重锚）
 RC = dict(readback_mismatch=10, no_chip_box=11, chip_not_left=12, chip_only=13,
           pool_low=14, not_at_origin=15, key_map_fail=16, ime_not_ours=17, host_not_ready=18)
 
@@ -160,7 +160,7 @@ def measure(dens, fs, code, apk):
         gate("pool_low", pool=pool, need=MIN_POOL, verified_steps=verified, cum_px=cum)
 
     # ===== 闸门全过，才开始出数 =====
-    # 规格 8324b03:525 的三条 Given 逐条落一行：让读证据的人不用自己拼「这几行合起来说明了什么」。
+    # 规格 0e4eeb0:543 的三条 Given 逐条落一行：让读证据的人不用自己拼「这几行合起来说明了什么」。
     # chip==所敲串 的口径 = 组合缓冲回读（`tap_keys` 已断言宿主文本 == 所敲串）：
     # chip 画的就是这份组合串（CandidateView 用 composing 文本绘制），没有独立的 chip 文本可读。
     # 候选行在位 的口径 = `cand_count ≥ 1`：`CandidateView.kt:76-77` 在列表为空时把 scrollView 置
@@ -202,7 +202,7 @@ def measure(dens, fs, code, apk):
     # AC-10a 的 verdict 以规格采样区口径为准，屏宽口径同行并列；两者结论不一致 → boundary=True 交洞察BA。
     D.log("AC10", code=code, dens=dens, fs=fs, given3_pool=pool,
           pool_need=MIN_POOL, kb_h=h1, empty_h=h0, delta=delta, **ac10)
-    # AC-10b 只记录不判（规格 `8324b03:541`）：同一批帧的逐项 x0/x1/字身 top/bot/pitch 由 CAND 行承载，
+    # AC-10b 只记录不判（规格 `0e4eeb0:561`）：同一批帧的逐项 x0/x1/字身 top/bot/pitch 由 CAND 行承载，
     # 这一行给「为什么不足 4 条」的归因，不足 4 条 ≠ 不给数。
     D.log("AC10b", code=code, dens=dens, fs=fs, **ac10b)
     D.shell("input keyevent 111")
@@ -219,6 +219,15 @@ if __name__ == "__main__":
     dens_list = sys.argv[2].split(",")
     fs_list = sys.argv[3].split(",")
     codes = (sys.argv[4].split(",") if len(sys.argv) > 4 else ["shijian", "dashu"])
+    panel = sys.argv[6] if len(sys.argv) > 6 else None   # 第七轮打回项 2：可指定 1260x2720
+    orig = D.orig_state()
+    if panel:
+        D.set_panel(panel)
+    pw, ph = D.panel_size()
+    D.log("PANEL", panel="%dx%d" % (pw, ph), requested=panel or "device_default",
+          logic_w_dp=D.logic_width(), dens_now=D.live_density(),
+          tier="档1" if D.logic_width() >= band.TIER_SPLIT_DP else "档2",
+          orig_size=orig["size"], orig_density=orig["density"], orig_font_scale=orig["font_scale"])
     subprocess.run([D.ADB, "-s", D.S, "install", "-r", "-d", "-g", apk], capture_output=True, timeout=900)
     subprocess.run([D.ADB, "-s", D.S, "shell", "ime", "enable", D.IME], capture_output=True)
     subprocess.run([D.ADB, "-s", D.S, "shell", "settings", "put", "secure", "autofill_service", "null"],
@@ -226,10 +235,14 @@ if __name__ == "__main__":
     if not ident_once(apk):
         D.log("GATE", reason="installed_apk_not_this_build", rc=19)
         raise SystemExit(19)
-    for dens in dens_list:
-        for fs in fs_list:
-            for code in codes:
-                measure(dens, fs, code, apk)
-    subprocess.run([D.ADB, "-s", D.S, "shell", "settings", "put", "system", "font_scale", "1.0"],
-                   capture_output=True)
-    subprocess.run([D.ADB, "-s", D.S, "shell", "wm", "density", "reset"], capture_output=True)
+    try:
+        for dens in dens_list:
+            for fs in fs_list:
+                for code in codes:
+                    measure(dens, fs, code, apk)
+    finally:
+        # 机主原值复原，不硬编码 1.0/440：中途 gate() 抛 SystemExit 也要走到这里
+        D.restore_state(orig)
+        D.log("PANEL", panel="restored", size_now="%dx%d" % D.panel_size(),
+              density_now=D.shell("wm density").strip().replace("\n", " | "),
+              font_scale_now=D.shell("settings get system font_scale").strip())

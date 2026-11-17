@@ -83,6 +83,10 @@ def analyze(png, top, band_px, dpi, thr=45, fill_tol=8, tangent_gap=1):
     full_count（字身完整可见的候选项数）。
     """
     den = dpi / 160.0
+    # 第七轮打回项 2：面板宽度一律取**截图自身宽度**，不再用模块常量 1080。
+    # 目标真机几何（1260×2720@520）下写死 1080 会把采样右界算到屏中间，
+    # full_count 直接少一条 —— 那是工装的错，不是产品的错。
+    W = Image.open(png).size[0]
     badge = max(6, round(BADGE_DP * den))
     margin = round(MARGIN_END_DP * den)
     inner_top = top + round(PARENT_PAD_DP * den)
@@ -113,6 +117,7 @@ def analyze(png, top, band_px, dpi, thr=45, fill_tol=8, tangent_gap=1):
         return dict(ok=False, reason="no_chip_fill", chip=None, first_item_fill=first,
                     inner_top=inner_top, inner_bot=inner_bot, band_inner=inner_bot - inner_top,
                     x_end=x_end, badge_px=badge, cand_count=0, full_count=0,
+                    screen_w=W, dpi=dpi,
                     full_count_screen=0, items=[])
     x0 = chip["right"] + 1
 
@@ -181,7 +186,7 @@ def analyze(png, top, band_px, dpi, thr=45, fill_tol=8, tangent_gap=1):
     for i, it in enumerate(items):
         it["fully_visible"] = (not it["badge_clipped"]) and it["ink_top"] is not None \
             and not it["tangent_top"] and not it["tangent_bot"]
-        # 第二个口径：右界取**屏幕右边**（1080）而不是规格采样区（1080 − paddingEnd）。
+        # 第二个口径：右界取**屏幕右边**（截图自身宽度）而不是规格采样区（屏宽 − paddingEnd）。
         # 只有「角标在位」的项才可能在这个口径下算完整 —— 尾巴项的右沿是屏幕边界不是项边界，
         # 内容仍然被切断。两口径结论不一致的那一档由调用方标 boundary=True 交洞察BA 复核。
         it["complete_screen"] = it["badge"] is not None and it["item_right"] < W \
@@ -195,6 +200,7 @@ def analyze(png, top, band_px, dpi, thr=45, fill_tol=8, tangent_gap=1):
                 chip_gate=(not first) or first["left"] == chip["right"] + 1,
                 first_item_left=x0, x_end=x_end, inner_top=inner_top, inner_bot=inner_bot,
                 band_inner=inner_bot - inner_top, badge_px=badge, margin_px=margin,
+                screen_w=W, dpi=dpi,
                 cand_count=len(items), full_count=sum(1 for it in items if it["fully_visible"]),
                 full_count_screen=sum(1 for it in items if it["complete_screen"]),
                 items=items)
@@ -212,6 +218,19 @@ def pitch_stats(a, den):
 
 NEED_FULL = 4          # spec-AC-10a 硬门限（不是闸门，裁决 §9.2-2）
 GIVEN_POOL = 8         # AC-10 Given ③
+# 第七轮打回项 4(b)：AC-10a 按**面板逻辑宽度**分档（规格 0e4eeb0:549/565-570）。
+# 分档是「判据让步」不是「测量让步」—— 规格 :600 明写 R21 未签字前档2 不得作为 PASS 依据、
+# 重测仍按 ≥4 单值跑。所以这里只**加档位口径的读数**，need 仍是 4：
+# 档2 面板上「≥3 条」那一档单独打 tier_verdict，并强制 carry R21 未签字，绝不顶替 verdict。
+TIER_SPLIT_DP = 371.0  # 0e4eeb0:570：逻辑宽度 ≥371dp = 档1（≥4），<371dp = 档2（≥3 + AC-12）
+TIER_NEED = {1: 4, 2: 3}
+R21_SIGNED = False     # PM 风险登记 R21：☐PM ☐洞察BA ☐UI，agent 不代批
+
+
+def tier_of(screen_w, dpi):
+    """-> (档位 1/2, 逻辑宽 dp)。逻辑宽 = 屏宽 px ÷ (density/160)，与 ac10_budget.py 同式。"""
+    lw = screen_w * 160.0 / dpi
+    return (1 if lw >= TIER_SPLIT_DP else 2), round(lw, 1)
 
 
 def ac10_rows(a, den, need=NEED_FULL):
@@ -220,8 +239,9 @@ def ac10_rows(a, den, need=NEED_FULL):
     放这里而不是写在 fs115.py 里：设备跑与离线复算必须共用同一个判定式，
     否则「同一帧两次跑出不同 verdict」就成了读不出来的分歧。
     两个口径：
-      · `full_count`   —— 右界 = 规格采样区 `x_end = 1080 − paddingEnd`（`:529` 写死），verdict 以它为准；
-      · `full_count_screen` —— 右界 = 屏幕右边 1080。内缩那 6dp 会把落在里面的完整候选判成不完整，
+      · `full_count`   —— 右界 = 规格采样区 `x_end = 屏宽 − paddingEnd`（`:529` 的口径；第七轮起
+        屏宽取**截图自身宽度**，1260 面板上就是 1260，不再写死 1080），verdict 以它为准；
+      · `full_count_screen` —— 右界 = 屏幕右边（同上，动态）。内缩那 6dp 会把落在里面的完整候选判成不完整，
         两口径不一致的那一档打 `boundary=True` 交洞察BA 复核，**不许测试自己挑一个**。
     """
     spec_v = "PASS" if a["full_count"] >= need else "FAIL"
@@ -235,14 +255,24 @@ def ac10_rows(a, den, need=NEED_FULL):
         reason = "long_word_budget"       # 渲染项全完整，但一屏只放得下 cand_count < need 条
     gw = sorted((it["glyph_right"] - it["glyph_left"] + 1) / den
                 for it in a["items"] if it["ink_top"] is not None)
+    scr_w = a.get("screen_w") or W
+    tier, lw = tier_of(scr_w, a.get("dpi") or den * 160.0)
+    t_need = TIER_NEED[tier]
+    t_verdict = "PASS" if a["full_count"] >= t_need else "FAIL"
+    if tier == 2 and t_verdict == "PASS":
+        # 档2 的 PASS 还需要 AC-12 溢出可见性达标（本轮不测），且 R21 未签字
+        t_verdict = "NOT_SIGNED(AC12_unmeasured+R21_open)"
     ac10 = dict(full_count=a["full_count"], verdict=spec_v, need=need,
+                tier=tier, tier_dp=TIER_SPLIT_DP, logic_w_dp=lw, tier_need=t_need,
+                tier_verdict=t_verdict, r21_signed=R21_SIGNED,
                 gauge="spec_sampling_x_end=%d" % a["x_end"],
                 full_count_screen=a["full_count_screen"], verdict_screen=scr_v,
-                gauge_screen="x_end=%d" % W,
+                gauge_screen="x_end=%d" % scr_w,
                 boundary=(spec_v != scr_v), cand_count=a["cand_count"],
                 pitch=pitch_stats(a, den),
                 glyph_w_dp_med=round(gw[len(gw) // 2], 1) if gw else None)
     ac10b = dict(cand_count=a["cand_count"], full_count=a["full_count"], need=need,
+                 tier=tier, logic_w_dp=lw,
                  recorded=True, reason=reason, clipped_idx=clipped,
                  pitch=pitch_stats(a, den))
     return ac10, ac10b

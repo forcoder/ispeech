@@ -1,0 +1,15 @@
+# ev_r7_pushed_shas.txt · 打回项 4(a)：引用一律用「已推送」的 SHA，并说明推送形态与等价提交的关系
+# ts=2026-11-18T02:04:00+0800 · 仓库=本 worktree（/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/worktree）· 当前分支=agent/agent/voca-47-0bdd75320414
+
+PUSHED	pr	local	meaning
+PAIR	commit_6th_evidence	pushed=834acdc	local=9de1345	『第六轮返修的工装与证据入库』
+PAIR	commit_6th_report	pushed=5e8b0f4	local=9081806	『VOCA-37 Stage3 报告第六轮返修』（= PR #25 head，gh pr view 25 --json headRefOid 现算）
+
+DIFF	git diff --stat 9de1345 834acdc	dist/ispeech-release-1.5-20261115-1004.apk | Bin 139171786 -> 0 bytes	(1 file changed, 0 insertions(+), 0 deletions(-))
+DIFF	git diff --stat 9081806 5e8b0f4	dist/ispeech-release-1.5-20261115-1004.apk | Bin 139171786 -> 0 bytes	(1 file changed, 0 insertions(+), 0 deletions(-))
+SIZE	git cat-file -s 9de1345:dist/ispeech-release-1.5-20261115-1004.apk	139171786 bytes（=132.7 MiB，超过 100 MiB，推送前必须摘掉；这就是「等价提交减去那只 apk」的全部差别）
+BLOBS	逐路径比 git rev-parse 834acdc:<p> vs 9de1345:<p>（p ∈ 834acdc 的全部文件）	blob_identical=416	blob_differing=0
+
+CONCLUSION	推送形态 = 等价提交去掉那只 139,171,786 字节的 release apk；其余 416 个 blob 逐字节同（git 对象 ID 相等即内容相等）。
+CONCLUSION	所以报告引用 834acdc/5e8b0f4 时，读到的文件内容与本地 9de1345/9081806 完全一致，第三人按 pushed SHA grep 不会扑空。
+CONCLUSION	apk 本体不在任何 ref 上：需要它的人按 §10 的构建命令自行产出，不靠二进制入库。

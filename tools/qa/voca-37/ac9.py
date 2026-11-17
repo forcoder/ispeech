@@ -66,13 +66,21 @@ def fill(n):
 if __name__ == "__main__":
     st = D.host_ready()
     if not st.get("ok"):
-        gate("host_not_ready", **{k: str(v) for k, v in st.items()})
+        gate("host_not_ready", **{k: str(v) for k, v in st.items() if k != "reason"},
+             host_reason=st.get("reason"))
     ime = D.shell("settings get secure default_input_method").strip()
     if not ime.startswith("com.ispeech.ime/"):
         gate("ime_not_ours", current=ime)
+    apk9 = os.environ.get("QA_APK")
+    if apk9:
+        import fs115 as F9
+        D.log("IDENT", stage="start", apk=os.path.basename(apk9), match=F9.ident_once(apk9),
+              head=os.environ.get("QA_HEAD", "78343a4"), spec=os.environ.get("QA_SPEC", "0e4eeb0"),
+              ime=ime, ts=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     m, diag = D.key_map()
     if not diag.get("ok"):
-        gate("key_map_fail", **{k: str(v) for k, v in diag.items()})
+        gate("key_map_fail", **{k: str(v) for k, v in diag.items() if k != "reason"},
+             map_reason=diag.get("reason"))
     top, bot, h = D.ime_frame()
     D.log("KEYMAP", bands=diag["bands"], runs=diag["runs"], del_xy=m["del"], space_xy=m[" "],
           top=top, h=h)

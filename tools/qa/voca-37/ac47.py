@@ -2,7 +2,7 @@
 """VOCA-37 §3 AC-4~AC-7 取证：硬件键 `-` / `=` 驱动候选条横滚的步长、方向、端点钳制。
 
 键→方向不手工标注，从被测构建的代码里读出来，并逐行署名到每个读数上：
-  IspeechImeService.kt:612-614（行号锚 c524351；main fa57a07 同一段在 :601-603）
+  IspeechImeService.kt:620-622（行号锚被测 head 78343a4；main fa57a07 同一段在 :601-603）
   KEYCODE_MINUS → scrollCandidates(-1)，KEYCODE_EQUALS → scrollCandidates(+1)
   CandidateView.kt:90-92        scrollCandidates(steps) → smoothScrollBy(steps * dp(SCROLL_STEP_DP), 0)
   CandidateView.kt:199          SCROLL_STEP_DP = 72
@@ -93,7 +93,7 @@ def diff_bbox(a, b):
 def scrollable():
     """扫清出数前提，返回 (ok, reason, fields)。reason 必须打进 GATE 行——两种完全不同的前提
     失效退同一个码，第三人就没法把「证伪成立」和「工装根本没跑起来」分开。"""
-    st = F.host_ready()
+    st = D.host_ready()
     D.log("HOST", **{k: v for k, v in st.items()})
     if not st.get("ok"):
         return False, "host_not_ready", {}
@@ -181,16 +181,19 @@ if __name__ == "__main__":
     apk = sys.argv[1]
     rr = subprocess.run([D.ADB, "-s", D.S, "install", "-r", "-d", "-g", apk], capture_output=True, text=True, timeout=900)
     D.log("INSTALL", out=rr.stdout.strip()[-60:], rc=rr.returncode)
-    if not F.ident("start"):
-        sys.exit(2)
-    if not F.ours(F.cur_ime()):
+    if not F.ident_once(apk):
+        D.log("GATE", reason="installed_apk_not_this_build", rc=19, stage="start")
+        sys.exit(19)
+    D.log("IDENT", stage="start", apk=os.path.basename(apk), match=True,
+          head="78343a4", ime=F.cur_ime())
+    if not F.cur_ime().startswith("com.ispeech.ime/"):
         D.log("SKIP", reason="current_ime_not_ispeech", current=F.cur_ime(), hint="adb shell ime set " + D.IME)
         sys.exit(3)
     subprocess.run([D.ADB, "-s", D.S, "shell", "settings", "put", "secure", "autofill_service", "null"], capture_output=True)
     subprocess.run([D.ADB, "-s", D.S, "shell", "wm", "density", DENS], capture_output=True)
     time.sleep(1.0)
     D.log("KEYMAP", fwd=name(FWD), rev=name(REV), step_dp=72, step_px_expect=round(72 * int(DENS) / 160),
-          source="IspeechImeService.kt:612-614 + CandidateView.kt:90-92,199",
+          source="IspeechImeService.kt:620-622 + CandidateView.kt:90-92,199",
           sign_conv="drive.shift(): 正=候选内容左移=视口向右=看后面的候选")
     ok, reason, fields = scrollable()
     if not ok:
@@ -230,4 +233,4 @@ if __name__ == "__main__":
     D.log("SUMMARY", right_end_reached_by=name(FWD), right_end_cum_px=round(cum),
           left_end_reached_by=name(REV), left_clamp_press=lclamp,
           fwd_step_expect=round(72 * int(DENS) / 160), rev_step_expect=-round(72 * int(DENS) / 160))
-    F.ident("end")
+    D.log("IDENT", stage="end", match=F.ident_once(apk), head="78343a4")

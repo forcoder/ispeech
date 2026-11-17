@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """VOCA-37 AC-2 双击空格句号：把「开关态」与「键路径」两个维度拆开取证。
 
-用法：python3 ac2.py <c524351 的 app-debug.apk> [440] [keyevent|soft]
+用法：python3 ac2.py <被测包的 app-debug.apk> [440] [keyevent|soft]
+     第七轮被测面 = PR #18 head 78343a4（旧文档写 c524351 已过期，那个 head 上硬件键路径是阴性的）
 
 为什么要重跑：上一轮只在软键路径拿到正例（ev_ac23c host='。'），硬件/注入键 3 组全是阴性
 （ev_ac23 的 AC2_fast2x / AC2_gap250ms / AC2_triple），但那几行没记 double_space_period 的
@@ -25,7 +26,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import drive as D
 import fs115 as F  # 复用 dex 身份校验 + IME 身份判定；它的 __main__ 不会在 import 时执行
 
-APK = sys.argv[1]
+# 允许被 d1regress.py 复用（它要用同一份 set_switch/switch_state，不该再写一遍面板点击逻辑）。
+# 直接 sys.argv[1] 会让 import 在未带参数的调用方里 IndexError，所以留 env 兜底。
+APK = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("QA_APK", "")
 
 
 def ours(ime):
@@ -40,7 +43,7 @@ PATH_KIND = sys.argv[3] if len(sys.argv) > 3 else "keyevent"
 SPACE_XY = None             # 空格键中心：由 key_map() 当场反推（写死 532,2125 在 VOCA-184
                             # 收紧行内留白后就不成立了，软键路径会点到别处）
 MODE_XY = (165, 2125)       # 底行「拼/英」切换键中心（kb2_grid.png 实测）
-# 几何一律当场读（第四轮写死 1352 是 c524351 单包的 ime top；VOCA-184 把字母键留白从
+# 几何一律当场读（第四轮写死 1352 是老包单包的 ime top；VOCA-184 把字母键留白从
 # 4dp 收到 1dp 之后集成候选是 1388，写死会把「键盘在位」误判成「宿主没起来」）
 GEAR_XY = (1005, 1552)      # 工具栏最后一键 ⚙（kb2_grid.png 实测；点它开输入法内配置面板）
 PANEL_SCROLL = "input swipe 500 1900 500 1450 400"   # 面板列表滚到底

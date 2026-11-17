@@ -19,12 +19,14 @@
 import argparse, hashlib, os, re, subprocess, sys, time, zipfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import drive as D
+import band   # 档位门限只有一份（band.TIER_SPLIT_DP），pp 与 AC-10 不许各写一个 371
 
-W, H = 1080, 2340
 IME_ID = dict(sogou="com.sohu.inputmethod.sogou/.SogouIME", ispeech=D.IME)
 TAG = dict(sogou="SOGOU", ispeech="ISPEECH")
 # 「组合态」的敲码口径：两侧都敲同一串，避免拿搜狗的空闲态比 iSpeech 的组合态
 CODE = "shijian"
+# 机主原值快照 / 复原在 drive.orig_state / drive.restore_state（ppwin 与 fs115 共用一份，
+# 第七轮打回项 2 要求收尾把 font_scale/density/面板复原）。
 
 
 def ts():
@@ -91,7 +93,7 @@ def bring_up(ime_id, dens, fs):
     return dict(ok=False, rounds=4, cur=cur, top=top, h=h)
 
 
-def measure(ime_key, dens, fs, apk):
+def measure(ime_key, dens, fs, apk, panel_tag=""):
     ime_id = IME_ID[ime_key]
     st = bring_up(ime_id, dens, fs)
     if not st.get("ok"):
@@ -105,12 +107,18 @@ def measure(ime_key, dens, fs, apk):
         time.sleep(0.12)
     time.sleep(1.0)
     top_e, bot_e, h_e = D.ime_frame()
-    p = D.shot("shots/r6_%s_%s_fs%s.png" % (TAG[ime_key].lower(), dens, fs))
+    p = D.shot("shots/%s%s_%s_fs%s.png" % (panel_tag, TAG[ime_key].lower(), dens, fs))
     top, bot, h = D.ime_frame()
     cur = D.shell("settings get secure default_input_method").strip()
+    # 分母现读设备当前生效面板，不再写死 2340：目标几何 1260×2720 下写死就是错比例
+    pw, ph = D.panel_size()
+    lw = round(pw * 160.0 / int(dens), 1) if pw else None
+    tier = "档1" if (lw is not None and lw >= band.TIER_SPLIT_DP) else "档2"
     tag = "%s_%s_%s" % (TAG[ime_key], dens, fs)
-    log("FRAME", tag=tag, ime=cur, top=top, h=h, pp=round(h * 100.0 / H, 2),
-        comp_top=top, comp_h=h, ts=ts(), dens=dens, fs=fs, host=repr(host0)[:24], shot=os.path.basename(p))
+    log("FRAME", tag=tag, ime=cur, top=top, h=h, pp=round(h * 100.0 / ph, 2),
+        comp_top=top, comp_h=h, ts=ts(), dens=dens, fs=fs, host=repr(host0)[:24],
+        panel="%dx%d" % (pw, ph), panel_h=ph, logic_w_dp=lw, tier=tier,
+        shot=os.path.basename(p))
     if ime_key == "ispeech":
         log("IDENT", tag=tag, match=ident(apk) if apk else None, apk_sha=apk)
     for ln in raw_ime_lines():
@@ -124,19 +132,32 @@ if __name__ == "__main__":
     ap.add_argument("--ime", required=True, choices=sorted(IME_ID))
     ap.add_argument("--tiers", default="440:1.0,440:1.15,520:1.15")
     ap.add_argument("--apk", default=None)
+    ap.add_argument("--panel", default=None, help="覆盖面板分辨率（如 1260x2720）；不给则用设备当前值")
+    ap.add_argument("--round", default="r7", help="截图文件名前缀一轮一个，防跨轮互相覆盖")
     a = ap.parse_args()
+    orig = D.orig_state()
+    if a.panel:
+        D.set_panel(a.panel)
+    pw, ph = D.panel_size()
+    panel_tag = "%s_%dx%d_" % (a.round, pw, ph)
+    log("PANEL", panel="%dx%d" % (pw, ph), requested=a.panel or "device_default",
+        dens_now=D.live_density(), logic_w_dp=round(pw * 160.0 / D.live_density(), 1),
+        ts=ts(), orig_density=orig["density"], orig_size=orig["size"],
+        orig_font_scale=orig["font_scale"])
     if a.ime == "ispeech":
         if not a.apk:
             raise SystemExit("ispeech 需要 --apk（身份闸门要用）")
         subprocess.run([D.ADB, "-s", D.S, "install", "-r", "-d", "-g", a.apk], capture_output=True, timeout=900)
         subprocess.run([D.ADB, "-s", D.S, "shell", "ime", "enable", D.IME], capture_output=True)
-    log("WINDOW", phase="open", ime=a.ime, ts=ts(), serial=D.S)
+    log("WINDOW", phase="open", ime=a.ime, ts=ts(), serial=D.S, panel="%dx%d" % (pw, ph))
     rc = 0
     for t in a.tiers.split(","):
         dens, fs = t.split(":")
-        rc |= measure(a.ime, dens, fs, a.apk)
-    subprocess.run([D.ADB, "-s", D.S, "shell", "settings", "put", "system", "font_scale", "1.0"],
-                   capture_output=True)
-    subprocess.run([D.ADB, "-s", D.S, "shell", "wm", "density", "reset"], capture_output=True)
-    log("WINDOW", phase="close", ime=a.ime, ts=ts(), rc=rc)
+        rc |= measure(a.ime, dens, fs, a.apk, panel_tag)
+    D.restore_state(orig)
+    w2, h2 = D.panel_size()
+    log("WINDOW", phase="close", ime=a.ime, ts=ts(), rc=rc,
+        panel_now="%dx%d" % (w2, h2), dens_now=D.live_density(),
+        font_scale_now=D.shell("settings get system font_scale").strip(),
+        density_now=D.shell("wm density").strip().replace("\n", " | "))
     raise SystemExit(rc)

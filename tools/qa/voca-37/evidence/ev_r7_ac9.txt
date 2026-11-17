@@ -1,0 +1,7 @@
+# ac9 · 被测=78343a4（PR #18 head）· 规格锚=0e4eeb0（PR #17 head）
+# cmd: python3 ac9.py 60 200,1000,1500,2000
+# ts=2026-11-18T02:33:40+0800  serial=emulator-5554
+# note(入库注记，非当场 stdout)：编排脚本原样写进了未展开的字面量 ${QA_SERIAL:-emulator-5554}。本轮 QA_SERIAL 未设置，drive.py 取默认 emulator-5554；同机 emulator-5556 也装着同一个被测包，所以串口无法只从本文件反证 —— 记入报告 §9 风险（工装缺陷，run_r7_all/b/c/d.sh 已改为盖展开后的 serial + ro.product.model）。
+IDENT	stage=start	apk=app-debug.apk	match=True	head=78343a4	spec=0e4eeb0	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:33:49+0800
+GATE	reason=key_map_fail	rc=16	bands_raw=4	bands=[(1617, 1741), (1764, 1890), (1914, 2036), (2062, 2188)]	runs=[10, 9, 5, 1]	map_reason=no_row_with_7_keys	ts=2026-11-18T02:33:49+0800
+# rc=16

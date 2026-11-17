@@ -1,0 +1,51 @@
+# spec_ux_anchors.py · 规格重锚 8324b03 → 0e4eeb0 · docs/keyboard-ux-spec.md
+# 旧文件 928 行 · 新文件 1025 行 · 新增规格修订记录（VOCA-464 分档 + AC-12）会让 540 以后的行号整体下移
+ANCHOR	label=AC-1	old=8324b03:413	new=0e4eeb0:432	match=True	multi=False	snip=### AC-1 候选条空态高度不变
+ANCHOR	label=AC-2	old=8324b03:427	new=0e4eeb0:446	match=True	multi=False	snip=### AC-2 双击空格出句号
+ANCHOR	label=AC-3	old=8324b03:440	new=0e4eeb0:459	match=True	multi=False	snip=### AC-3 双击空格不与「上屏首选」打架
+ANCHOR	label=AC-4	old=8324b03:453	new=0e4eeb0:472	match=True	multi=False	snip=### AC-4 连续横滚生效（用硬件键步长定标，唯一可复现口径）
+ANCHOR	label=AC-5	old=8324b03:467	new=0e4eeb0:486	match=True	multi=False	snip=### AC-5 左右边界不循环
+ANCHOR	label=AC-6	old=8324b03:480	new=0e4eeb0:499	match=True	multi=False	snip=### AC-6 起手区约束（带外手势不得驱动横滚）
+ANCHOR	label=AC-7	old=8324b03:490	new=0e4eeb0:509	match=True	multi=False	snip=### AC-7 竖向与斜向不误滚、不误上屏
+ANCHOR	label=AC-8	old=8324b03:505	new=0e4eeb0:524	match=True	multi=False	snip=### AC-8 按键音效（本期不采纳，无验收项）
+ANCHOR	label=AC-9	old=8324b03:509	new=0e4eeb0:528	match=True	multi=False	snip=### AC-9 长按连删保留
+ANCHOR	label=AC-10	old=8324b03:519	new=0e4eeb0:538	match=True	multi=False	snip=### AC-10 单行 + 恒高下仍完整显示 ≥4 个候选（2026-11-17 新增，本轮必测）
+ANCHOR	label=AC-10-Given首行	old=8324b03:525	new=0e4eeb0:544	match=True	multi=False	snip=① chip 文本 == 所敲串；② 候选行在位（`scrollView` 可见，不是 chip-only 态）；③ 候
+ANCHOR	label=AC-10-采样区	old=8324b03:529	new=0e4eeb0:548	match=True	multi=False	snip=采样区 x ∈ [chip 右沿 + 1, 1080 − paddingEnd]，y = 候选带内沿（46 dp 内，去
+ANCHOR	label=AC-10a	old=8324b03:540	new=NONE	verdict=MISS	sim=0.670	nearest=0e4eeb0:560
+	old_text=| **AC-10a**（硬门限） | 实际渲染的前 4 条（真实词库，2–3 字常用词为主） | ≥4 条完整可见 = PASS |
+	new_text=| **AC-10a**（硬门限；**2026-11-17 起按逻辑宽度分档**） | 实际渲染的前 4 条（真实词库，2–3 字常用词为主） | 档1：≥4 
+ANCHOR	label=AC-10b	old=8324b03:541	new=NONE	verdict=MISS	sim=0.641	nearest=0e4eeb0:561
+	old_text=| **AC-10b**（只记录，不判） | 混合词长（含 4 字成语 / 长词）下的实际完整条数与逐项 pitch | 达不到 4 条 = §2.1 与实现的
+	new_text=| **AC-10b**（只记录，不判） | 混合词长（含 4 字成语 / 长词）下的实际完整条数与逐项 pitch | 达不到 4 条 = 已裁：长词不进硬门
+ANCHOR	label=AC-11	old=8324b03:547	new=0e4eeb0:606	match=True	multi=False	snip=### AC-11 候选带内近垂直短拖不得上屏（2026-11-17 新增，本轮不测）
+ANCHOR	label=§5-无障碍表头	old=8324b03:583	new=0e4eeb0:663	match=True	multi=False	snip=## 5. 不可访问性检查（无障碍）
+ANCHOR	label=§5-缺口行1	old=8324b03:589	new=0e4eeb0:669	match=True	multi=False	snip=| 连续横滚 vs TalkBack 滑动导航 | **需补按键路径，不阻塞** | 触摸探索（`isTouchExpl
+ANCHOR	label=§5-缺口行2	old=8324b03:590	new=NONE	verdict=MISS	sim=0.485	nearest=0e4eeb0:670
+	old_text=| 候选词可点高度 | **不合规，需补** | `candidate_scroll` 的 `minHeight = 38 dp`（`candidate_vie
+	new_text=| 候选词可点高度 | **不合规，需补；门限订正为 46 dp（VOCA-464）** | `candidate_scroll` 的 `minHeight =
+ANCHOR	label=§5-既有债行	old=8324b03:592	new=NONE	verdict=MISS	sim=0.284	nearest=0e4eeb0:561
+	old_text=| 一屏 ≥4 候选（AC-10）× 命中高度冲突 | **有冲突时以可读性优先，交 UI** | AC-10a FAIL 的两条出路（缩 chip 宽度 / 
+	new_text=| **AC-10b**（只记录，不判） | 混合词长（含 4 字成语 / 长词）下的实际完整条数与逐项 pitch | 达不到 4 条 = 已裁：长词不进硬门
+ANCHOR	label=§5-缺口行3	old=8324b03:593	new=0e4eeb0:673	match=True	multi=False	snip=| 角标数字 vs 实际入口 | **不合规，需补** | 见 §2.3 G7 / F11：第 10–27 项显示数字角
+ANCHOR	label=§5-合规行	old=8324b03:594	new=0e4eeb0:674	match=True	multi=False	snip=| 候选词朗读 | **合规** | 每个候选 `contentDescription = candidate.disp
+ANCHOR	label=§5-缺口行4	old=8324b03:595	new=0e4eeb0:675	match=True	multi=False	snip=| 键盘按键朗读 | **部分合规，需补** | 文字键靠 `TextView.text` 朗读（`SoftKeyboa
+ANCHOR	label=§5-缺口行5	old=8324b03:597	new=0e4eeb0:677	match=True	multi=False	snip=| 对比度 | **不合规（首选高亮）** | `fa57a07` 上高亮色不再是硬编码 `#FF6A00`，而是 `r
+ANCHOR	label=§6.5-pp	old=8324b03:599	new=0e4eeb0:679	match=False	verdict=DRIFT	sim=0.983
+	old_text=**门禁结论**：§2.2 与 §2.3 均**可以**在补齐上表五项（无障碍时间窗放宽、横滚的可访问路径与 scroll action、退格补 `conten
+	new_text=**门禁结论**：§2.2 与 §2.3 均**可以**在补齐上表五项（无障碍时间窗放宽、横滚的可访问路径与 scroll action、退格补 `conten
+NEWONLY	label=AC-12	new=0e4eeb0:640	hits=1	snip=### AC-12 候选溢出可见性（2026-11-17 新增，本轮不测 —— 不进 W5 门槛）
+NEWONLY	label=AC-10a-分档行	new=0e4eeb0:28	hits=22	snip=> ⑥ **AC-10a 由单值硬门限改为按面板逻辑宽度分档**：`≥371 dp` 仍要求完整 4 条（原门限不降），`<371 dp` 
+NEWONLY	label=§2.1-让步顺序	new=0e4eeb0:23	hits=4	snip=> **修订记录（2026-11-17，VOCA-464 · D3「采纳面让步顺序」裁决落纸）**
+NEWONLY	label=§9.14-未取证几何	new=0e4eeb0:1025	hits=1	snip=14. **AC-10 的裁决建立在「未取证的几何」上（2026-11-17，VOCA-464）**：本轮全部 8 帧都是 1080 px 
+SUMMARY	共 24 条 · 内容原样命中 19 · DRIFT 1 · MISS 4
+# ── 四条 MISS/DRIFT 的人工落点（正文被 VOCA-464 改写，不是行号漂移；旧行按作废处理）
+ANCHOR	label=AC-10a	old=8324b03:540	new=0e4eeb0:560	verdict=REPLACED	match=False	note=判据由单值≥4 改为按逻辑宽度分档：档1 ≥4；档2 ≥3 且 AC-12 溢出可见；签字前档2 不得当 PASS
+ANCHOR	label=AC-10b	old=8324b03:541	new=0e4eeb0:561	verdict=REPLACED	match=False	note=旧写的两条出路（缩 chip / 放宽词长）经现算不可达，4 字以上可见性改由 AC-12 承接
+ANCHOR	label=§5-既有债行	old=8324b03:592	new=0e4eeb0:672	verdict=REPLACED	match=False	note=「恒高三角」一行已裁：有一条边是假的，剩下按几何分档
+ANCHOR	label=§6.5-pp	old=8324b03:599	new=0e4eeb0:679	verdict=DRIFT	sim=0.983	note=门禁结论一行仅改措辞，行号 599→679
+# ── 新 head 才有、报告本轮起必须引用的三条
+ANCHOR	label=§2.1-让步顺序	new=0e4eeb0:236	note=空间不足时的让步顺序（VOCA-464 裁）
+ANCHOR	label=AC-12	new=0e4eeb0:640	note=候选溢出可见性：本轮不测、不进 W5 门槛；档2 的耦合条件在 :658
+ANCHOR	label=§9.14-未取证几何	new=0e4eeb0:1025	note=规格自己点名 1080px@520dpi 不是真实屏幕，要求补 1260x2720@520 一档（本轮已补，见 ev_r7_pp_target_geom.txt / ev_r7_ac10_target_geom.txt）
+ANCHOR	label=AC-10-Given(闸门)	new=0e4eeb0:543-544	note=三条工装断言逐字未动（fs115.py/ac10 的 spec_anchor 字段即此）

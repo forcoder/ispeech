@@ -38,32 +38,32 @@ app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|516|keyLabel(effectiveKe
 app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|684|private fun installSpaceGesture(target: View, key: KeyDef) {
 app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|759|view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
 app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|765|private fun startRepeatDelete() {
-app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|956|const val DEFAULT_KEY_HEIGHT_DP = 52
-app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|962|const val TOOLBAR_HEIGHT_DP = 34
-app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|988|const val DOUBLE_TAP_MS = 320L
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|103|private const val CANDIDATE_POOL_FACTOR = 3
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|181|private val candidatePoolLimit: Int
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|182|get() = settings.candidatePageSize * CANDIDATE_POOL_FACTOR
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|447|KeyAction.SPACE -> handleSpace()
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|525|override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|585|if (keyCode == KeyEvent.KEYCODE_SPACE) handleSpace() else handleEnter()
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|590|if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|601|if (keyCode == KeyEvent.KEYCODE_MINUS
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|603|candidateView?.scrollCandidates(if (keyCode == KeyEvent.KEYCODE_MINUS) -1 else 1)
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|707|private fun handleSpace() {
-app/src/main/java/com/ispeech/input/IspeechImeService.kt|728|commitDirect(" ", CommitType.PUNCTUATION)
 app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt|5|COMPACT("紧凑", 46),
-app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt|18|val keyHeightDp: Int = 52,
-app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt|19|val candidatePageSize: Int = 9,
-app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt|21|val chinesePunctuation: Boolean = true,
 app/src/main/java/com/ispeech/input/keyboard/KeyboardLayouts.kt|73|KeyDef.fn(KeyAction.BACKSPACE, "⌫"
-app/src/main/res/layout/candidate_view.xml|8|android:layout_height="wrap_content"
-app/src/main/res/layout/candidate_view.xml|9|android:background="#F4F5F7"
-app/src/main/res/layout/candidate_view.xml|11|android:minHeight="44dp"
-app/src/main/res/layout/candidate_view.xml|33|<HorizontalScrollView
-app/src/main/res/layout/candidate_view.xml|38|android:minHeight="38dp"
-app/src/main/res/layout/candidate_view.xml|39|android:overScrollMode="never"
-app/src/main/res/layout/candidate_view.xml|40|android:scrollbars="none"
 app/src/main/res/values/colors.xml|4|<color name="ispeech_primary">#5B6CFF</color>
+app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|963|const val TOOLBAR_HEIGHT_DP = 34
+app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|989|const val DOUBLE_TAP_MS = 320L
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|105|private const val CANDIDATE_POOL_FACTOR = 3
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|186|private val candidatePoolLimit: Int
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|187|get() = settings.candidatePageSize * CANDIDATE_POOL_FACTOR
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|458|KeyAction.SPACE -> handleSpace()
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|536|override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|604|if (keyCode == KeyEvent.KEYCODE_SPACE) handleSpace() else handleEnter()
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|609|if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|620|if (keyCode == KeyEvent.KEYCODE_MINUS
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|622|candidateView?.scrollCandidates(if (keyCode == KeyEvent.KEYCODE_MINUS) -1 else 1)
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|760|commitDirect(" ", CommitType.PUNCTUATION)
+app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt|20|val candidatePageSize: Int = 9,
+app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt|22|val chinesePunctuation: Boolean = true,
+app/src/main/res/layout/candidate_view.xml|23|android:layout_height="wrap_content"
+app/src/main/res/layout/candidate_view.xml|11|android:background="#F4F5F7"
+app/src/main/res/layout/candidate_view.xml|34|<HorizontalScrollView
+app/src/main/res/layout/candidate_view.xml|39|android:minHeight="38dp"
+app/src/main/res/layout/candidate_view.xml|40|android:overScrollMode="never"
+app/src/main/res/layout/candidate_view.xml|41|android:scrollbars="none"
+app/src/main/java/com/ispeech/input/SoftKeyboardView.kt|957|const val DEFAULT_KEY_HEIGHT_DP = 46
+app/src/main/java/com/ispeech/input/IspeechImeService.kt|735|private fun handleSpace(via: String = "soft") {
+app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt|19|val keyHeightDp: Int = 46,
+app/src/main/res/layout/candidate_view.xml|10|android:layout_height="46dp"
 REFS
 printf '== 共 %d 条，失败 %d 条 ==\n' "$n" "$fail"

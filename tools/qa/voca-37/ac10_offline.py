@@ -31,11 +31,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import band
 import drive as D
 
-SPEC_GIVEN = "8324b03:525"     # AC-10 的三条 Given，与 fs115.py 同锚
+SPEC_GIVEN = "0e4eeb0:543"     # AC-10 的三条 Given，与 fs115.py 同锚
 NEED_POOL = 8
 # 候选带顶边 = 2340 − 键盘总高（各包 kb_h 见对应 evidence 文件的 RESULT/FRAME 行）
 #   A 包 c524351：440→988→1352｜520→1168→1172      B 包 cffc0cd：440→952→1388｜520→1128→1212
-PKG = {"a6": dict(top={"520": 1172}, kb_h={"520": 1168}, apk="c524351",
+PKG = {"a6": dict(top={"520": 1172}, kb_h={"520": 1168}, apk="c524351",  # 帧归属标签：这批交付帧出自 35cdbfa 之前的 head，第七轮起正文口径改用 ev_r7_*（标签保留是为了帧能对上包）
                   src="ev_r6_ac10_decoupled.txt"),
        "r5u": dict(top={"440": 1388, "520": 1212}, kb_h={"440": 952, "520": 1128}, apk="cffc0cd",
                    src="ev_r5u_520.txt / ev_r5u_440.txt")}
