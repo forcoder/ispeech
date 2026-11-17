@@ -8,25 +8,26 @@
 
 | 状态 | 含义 |
 |---|---|
-| `active` | 在生产调用链上，正常维护 |
+| `active` | 正常维护：在生产调用链上，**或已由人类/文档/测试声明“在用”** |
 | `疑似腐化` | 静态检索无调用，但缺运行时观测证据，**只报告、不删除** |
 | `待回收` | 四级证据齐全（静态+产物+调用链+近30天运行时），可提交删除 |
-| `已删除未合并` | 分支上已删除（待回收执行中），**尚未合入 main** |
 | `已回收` | 已删除并合入 main |
 
 证据等级：`确认`=四级齐全；`疑似`=缺运行时观测；`待证`=只有静态检索。
 「最后被调用」取「近 30 天运行时观测」结果；拿不到运行时观测的一律写 `不可得`，不得推断。
 「最后被修改」取 `git log -1 --date=short -- <target>` 的文件粒度提交日期与短哈希。
 
+**硬规则（2026-11-17 人类裁定，长期有效）**：凡文档 / 文案 / 资源 / 测试声称「在用」的能力，**静态零引用不得作为删除依据**。清理必须先证「该项无任何在用声明 + 无装配入口」，再走四证据流程。
+
 ## 模块清单
 
 | 模块 | Owner | 对外入口 | 上下游依赖 | 最后被修改 | 最后被调用 | 状态 | 关联 issue |
 |---|---|---|---|---|---|---|---|
 | `input/IspeechImeService`（2047 行 IME 主服务） | 后端/输入法 | `AndroidManifest` IME 组件 `com.ispeech.ime/com.ispeech.input.IspeechImeService` | engine / data / settings 全链路 | 2026-11-15 fa57a07 | 不可得 | active | VOCA-185 |
-| `input/SoftKeyboardView`（1007 行键盘视图） | 前端 | 由 `IspeechImeService` 持有 | keyboard 布局 / KeyDef | 2026-11-14 f728231 | 不可得 | 疑似腐化（超长文件） | 本轮巡检 #P2 |
+| `input/SoftKeyboardView`（1007 行，结构腐化：超长文件） | 前端 | 由 `IspeechImeService` 持有（字段 `:196` + `findViewById :279`），另有 CandidateView/VoicePanelView/KeyDef/KeyboardLayouts/T9Layouts 共 6 文件引用 | keyboard 布局 / KeyDef | 2026-11-14 f728231 | 不可得 | active（结构腐化待抽取，非无调用） | 本轮巡检 #P2 |
 | `input/VoskSpeechEngine` + `data/VoskModelStore` | 后端 | `IspeechImeService` 按 `AsrEngine.VOSK` 分支接线 | vosk.android / AsrSettings | 2026-11-14 07214d6 | 不可得 | active | VOCA-voice-offline-1114 |
-| `input/FunAsrSpeechEngine`（359 行）+ `data/FunAsrModelStore`（442 行，合计 801） | 后端 | **无入口**（`AsrEngine` 枚举无 FUNASR，`IspeechImeService` 无引用） | sherpa-onnx / commons-compress | 2026-11-09 904a98d / 2026-11-10 3d62d9d | 不可得 | **疑似腐化**（未接线 + 依赖面占用） | 本轮巡检 #P1，见 [[#funasr]] |
-| `agent/AgentDispatcher` | —（死代码，已删除） | （无） | 无 | 2026-11-09 904a98d | 不可得（已删） | **已删除未合并**（分支 `agent/agent/voca-441` 已删，未合入 main） | VOCA-441 |
+| `input/FunAsrSpeechEngine`（359 行）+ `data/FunAsrModelStore`（442 行，合计 801） | 后端 | **在用**（人类 2026-11-17 裁定）；主干未见装配入口，装配口径待查（VOCA-446 架构师核查） | sherpa-onnx / commons-compress | 2026-11-09 904a98d / 2026-11-10 3d62d9d | 不可得 | **active（在用）** | VOCA-446 装配口径核查 |
+| `agent/AgentDispatcher` | 后端 | **在用**（`AgentDispatcherTest` + `.agents/agents.yaml` 声称；生产零引用，装配口径待查） | 无 | 2026-11-17 f6dd415（revert 恢复；内容源自 2026-11-09 904a98d，本轮曾删后 revert） | 不可得 | active（在用声明待核对装配入口） | VOCA-446 一并核查 |
 | `engine/`（Pinyin/Wubi/CellDict/QuickPhrase/Lookup/UserDict） | 后端 | 由 `CompositeEngine` 聚合，`IspeechImeService` 调用 | data 词典 Store | 2026-11-15 fa57a07 | 不可得 | active | VOCA-185 |
 | `data/`（词典/同步/统计/剪贴板/AI/认证） | 后端 | `AppContainer` 统一装配 | remote API / datastore | 2026-11-15 fa57a07 | 不可得 | active | VOCA-185 |
 | `data/remote/`（Auth/Chat/Ai/Sync ApiService + Dtos） | 后端 | `CsBabyClient` / `DirectLlmClient` | retrofit / gson | 2026-11-09 904a98d | 不可得 | active | — |
@@ -38,22 +39,23 @@
 
 ## 重点条目
 
-### <a id="funasr"></a> FunASR 离线语音引擎（疑似腐化）
+### <a id="funasr"></a> FunASR 离线语音引擎（active，在用）
 
-- 文件：`input/FunAsrSpeechEngine.kt`（359 行）、`data/FunAsrModelStore.kt`（442 行，含 `AsrDownloadPolicy`），合计 801 行
-- 证据：
-  - 静态：`IspeechImeService` 无任何 `FunAsrSpeechEngine` 引用；`AsrEngine` 枚举只有 `SYSTEM / CUSTOM / VOSK`，无 `FUNASR`；`AsrSettingsScreen` 引擎选项只渲染这 3 项。
-  - 配置：`app/build.gradle.kts` 的 `ASR_MODEL_URL` 与 `BuildConfig.ASR_MODEL_URL` **唯一消费者是 `FunAsrModelStore`** —— 若删除需连带收敛这条配置与 `docs/model-host-runbook.md` / `docs/asr-model-source-migration-log.md`。
-  - 依赖：`sherpa.onnx` 与 `commons.compress` **仅被 FunASR 链使用**（`VoskSpeechEngine` 走 `org.vosk`，不进 APK 打包面内无他者）。
-  - 构建产物：未验证是否打入 release bundle。
-  - 运行时：**不可得**。
-- 结论：静态证据强（未接线 + 依赖独占），但缺运行时观测与历史意图（VOCA-33/34 曾投入 OSS 换源、失败自愈改造），故判 **疑似**，不删。
-- 建议：需人裁决 —— 是「已被 Vosk 取代的废弃链路」还是「待接线的下一版本语音方案」。若裁决废弃，删除范围要连带 `ASR_MODEL_URL` 配置、strings.xml 的 `asr_engine_funasr*` 两条文案、`FunAsrModelStoreTest`、两个依赖坐标与两份 OSS 文档，属跨契约清理，应单独立 issue。
+- 文件：`input/FunAsrSpeechEngine.kt`（359 行）、`data/FunAsrModelStore.kt`（442 行，含 `AsrDownloadPolicy`），合计 801 行。
+- **人类 2026-11-17 裁定：FunASR 是本项目当前在用的语音识别方案，不是死代码、不是“疑似未使用”。** 上轮报告把它列为“未使用资产（未接线）”的结论作废。
+- 代码层现状（如实记录，不据此删除）：主干未见 `IspeechImeService` 的装配入口，`AsrEngine` 枚举只有 `SYSTEM / CUSTOM / VOSK`，装配口径待 VOCA-446 架构师核查。
+- 本轮起 6 项不得删除、不得降级依赖：`FunAsrSpeechEngine.kt`、`FunAsrModelStore.kt`、`FunAsrModelStoreTest.kt`、`strings.xml` 的 `asr_engine_funasr*` 文案、`docs/voice-input.md`、`docs/model-host-runbook.md` / `docs/asr-model-source-migration-log.md`。
+- 关联：装配口径核查走 VOCA-446；本项不再出现在“需人裁决”清单。
 
 ## 变更日志
 
-- 2026-11-17（VOCA-441 v2，回应质检 FAIL）：
-  - 修正台账事实：`SoftKeyboardView` 最后被修改 → `2026-11-14 f728231`；`FunAsrSpeechEngine` 行数 344 → 359、合计 786 → 801；`SettingsStore` 最后被修改 2026-11-15 → `2026-11-10 2a1883e`；`tools/` 最后被修改 2026-11-14 → `2026-11-15 fa57a07`；FunASR 捆绑行拆分为两份各自日期。
-  - AgentDispatcher 状态由稿内「已回收」更正为 `已删除未合并`（新增该状态定义），对应「已回收=已合入 main」定义。
-  - 同步删除 `README.md.agent-docs:27` 与 `.agents/README.md:24` 中「代码调用 `AgentDispatcher.dispatch(...)`」的误导指引。
-- 2026-11-17（VOCA-441 v1）：初版台账建立；删除 `agent/AgentDispatcher`（死代码，165 行，分支 `agent/agent/voca-441` 未合入 main）；标记 `input/FunAsr*` 为疑似腐化、`SoftKeyboardView` 超长文件为疑似腐化。
+- 2026-11-17（VOCA-441 v3，回应质检第二轮 FAIL + 人类更正）：
+  - `git revert 70f1e4b`（提交 `f6dd415`）：撤回 `agent/AgentDispatcher` 删除，两个文件恢复。
+  - 新增硬规则「测试/文档/文案/资源声称在用的能力，静态零引用不得作删除依据」。
+  - FunASR 由「疑似腐化」改为 `active（在用）`（人类裁定），6 项保护清单落地。
+  - `SoftKeyboardView` 状态由「疑似腐化」改为 `active（结构腐化待抽取）`——它有 6 处真实调用，非无调用。
+  - AgentDispatcher 状态由「已删除未合并」改为 `active（在用声明待核对装配入口）`，随 VOCA-446 核查。
+  - 删除状态定义「已删除未合并」（revert 后无对应项）。
+- 2026-11-17（VOCA-441 v2，回应质检第一轮 FAIL）：
+  - 修正台账事实（SoftKeyboardView 日期、FunASR 行数、SettingsStore/tools 日期、AgentDispatcher 状态），同步删除两处文档误导指引。
+- 2026-11-17（VOCA-441 v1）：初版台账建立。
