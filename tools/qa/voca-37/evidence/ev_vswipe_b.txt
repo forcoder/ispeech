@@ -1,0 +1,18 @@
+# VOCA-37 §8.4 滚动态下的竖滑/斜滑「横滚」位移（返修轮 · 打回项 3c）——stdout 原文
+# --pre 4 = 先按 4 次 =(keyevent70) 把 scrollX 推到 ~792px，再在内容稳定的滚动态里做手势
+$ python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 60,110,150
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=12:42:01	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+GEOM	dens=440	frame=988	band_top=1352	band=[1353,1477]	family=hroll	mode=inband	start_offset=38	x=300	dx=0	dur=120
+VSWIPE	case=hroll_dy60_dx0_dur120_x300_pre4	start_y=1391	end_y=1451	dy=60	dx=0	dur=120	x=300	pre_eq_presses=4	pre_shift_expect=792	band_top=1352	before='shi'	after='世一上'	ime_gone=False	committed=True	h_shift=-842	h_err=8.84	h_verdict=unverifiable(err>5.0)
+VSWIPE	case=hroll_dy110_dx0_dur120_x300_pre4	start_y=1391	end_y=1501	dy=110	dx=0	dur=120	x=300	pre_eq_presses=4	pre_shift_expect=792	band_top=1352	before='shi'	after='shi'	ime_gone=False	committed=False	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=hroll_dy150_dx0_dur120_x300_pre4	start_y=1391	end_y=1541	dy=150	dx=0	dur=120	x=300	pre_eq_presses=4	pre_shift_expect=792	band_top=1352	before='shi'	after='shi'	ime_gone=False	committed=False	h_shift=0	h_err=0.0	h_verdict=ok
+IDENT	name=end	t=12:42:53	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=21379	h=988
+$ python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 110 --dx 160   # 斜滑
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=12:42:54	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+GEOM	dens=440	frame=988	band_top=1352	band=[1353,1477]	family=hroll	mode=inband	start_offset=38	x=300	dx=160	dur=120
+VSWIPE	case=hroll_dy110_dx160_dur120_x300_pre4	start_y=1391	end_y=1501	dy=110	dx=160	dur=120	x=300	pre_eq_presses=4	pre_shift_expect=792	band_top=1352	before='shi'	after='shi'	ime_gone=False	committed=False	h_shift=-264	h_err=4.37	h_verdict=ok
+IDENT	name=end	t=12:43:24	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=22587	h=988

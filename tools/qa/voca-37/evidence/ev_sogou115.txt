@@ -1,0 +1,2 @@
+SOGOU_440_115	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1362	h=978	pp=41.79
+SOGOU_440_115_COMP	top=1362	h=978	pp=41.79

@@ -1,0 +1,16 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=05:09:29	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+HOST_CONTACTS	ok=False
+HOST_SETTINGS	ok=True	attempt=1	secs=8.0	top=1352	h=988
+P1_zero_cand	empty_h=988	comp_h=988	delta=0	cand_ink_cols=174	host='qj'	shot=_ink.png
+P5_panel	name=phrase	kb_h=1885	top=455	band_ink_cols=98	shot=p5_phrase.png
+P5_panel	name=clip	kb_h=727	top=1613	band_ink_cols=77	shot=p5_clip.png
+P5_panel	name=set	kb_h=None	top=None	band_ink_cols=None	shot=p5_set.png
+IDENT	name=end	t=05:10:16	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+HOST_CONTACTS2	ok=True	field=(143, 1464, 926, 1619)	top=1352	h=988
+P4_offset_reset	scroll_after_minus4=0	err=0.0	back_to_base=872	err0=0.0	after_commit_delta=872	err2=0.0	host='<NONE>'
+P3_t9	ok=False	why=grid_not_found	kb_h=988	shot=_t9.png
+REG_double_space	secs=1.57	host='  '	kb_h=988	band_ink=0
+REG_phrase_letters	kb_h=1861	shots=('reg_phr_before.png', 'reg_phr_after.png')	host='  '
+IDENT	name=end	t=05:10:48	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService

@@ -1,0 +1,2 @@
+SKIP	fs=1.0	host='搜索设置'	frame=833
+SKIP	fs=1.15	host='搜索设置'	frame=833

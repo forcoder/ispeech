@@ -1,0 +1,4 @@
+VSWIPE	case=带内竖滑60px	before='shi'	after='使'
+VSWIPE	case=带内竖滑110px	before='shi'	after='shi'
+VSWIPE	case=出窗竖滑215px	before='shi'	after='时'
+VSWIPE	case=真点击候选	before='shi'	after='时'

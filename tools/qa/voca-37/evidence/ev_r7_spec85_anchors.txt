@@ -1,0 +1,64 @@
+# VOCA-47 R7 / 被测面 78343a4（PR #18 head）· §8.5 源码锚点表复跑
+# cmd: bash spec85_anchors.sh 78343a4   (在 build-78343a4 检出里跑 git show)
+# ts=2026-11-18T01:37:20+0800
+# 说明：锚点表从 fa57a07 行号整体重映射到 78343a4；20 条行号漂移，4 条锚点文本随构建变化，逐条列在下面。
+#   DEFAULT_KEY_HEIGHT_DP 52 -> 46 (SoftKeyboardView.kt:957) / KeyboardSettings.keyHeightDp 52 -> 46 (:19)
+#   candidate_view.xml 根节点 minHeight=44dp -> layout_height=46dp（AC-1 恒高钉死，注释在 :5）
+#   handleSpace() -> handleSpace(via: String = "soft")（IspeechImeService.kt:735，D1 的 via 日志）
+#   onKeyDown :525 -> :536；KEYCODE_MINUS 分支 :601 -> :620；scrollCandidates :603 -> :622
+#
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:24
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:67
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:69
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:76
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:77
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:79
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:81
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:90
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:92
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:106
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:116
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:117
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:141
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:139
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:142
+PASS  app/src/main/java/com/ispeech/input/InputMode.kt:5
+PASS  app/src/main/java/com/ispeech/input/InputMode.kt:6
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:179
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:199
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:146
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:264
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:415
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:475
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:516
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:684
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:759
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:765
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:5
+PASS  app/src/main/java/com/ispeech/input/keyboard/KeyboardLayouts.kt:73
+PASS  app/src/main/res/values/colors.xml:4
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:963
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:989
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:105
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:186
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:187
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:458
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:536
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:604
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:609
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:620
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:622
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:760
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:20
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:22
+PASS  app/src/main/res/layout/candidate_view.xml:23
+PASS  app/src/main/res/layout/candidate_view.xml:11
+PASS  app/src/main/res/layout/candidate_view.xml:34
+PASS  app/src/main/res/layout/candidate_view.xml:39
+PASS  app/src/main/res/layout/candidate_view.xml:40
+PASS  app/src/main/res/layout/candidate_view.xml:41
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:957
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:735
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:19
+PASS  app/src/main/res/layout/candidate_view.xml:10
+== 共 54 条，失败 0 条 ==

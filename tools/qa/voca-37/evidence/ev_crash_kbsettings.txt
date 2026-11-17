@@ -1,0 +1,15 @@
+# 缺陷复现：先弹键盘（DataStore 进进程缓存）→ 设置页「键盘与输入」→ 整个 com.ispeech.ime 进程崩溃
+# 被测：c524351（versionCode=5），全新数据态（pm clear 后），440dpi / font_scale 1.0
+$ host_ready → HOST_READY	ok=True	round=1	taps=4	top=1352	h=988
+$ pid(弹键盘后) = 30743
+$ pid(进入该页后) = 30743   ← 崩溃发生在 30743（见下面 FATAL 的 Process/PID），查询时进程尚未重启
+$ adb logcat -d | grep -E 'FATAL|NullPointer|KeyboardViewModel'
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: FATAL EXCEPTION: main
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: Process: com.ispeech.ime, PID: 30743
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: java.lang.NullPointerException: Attempt to invoke interface method 'void kotlinx.coroutines.flow.MutableStateFlow.setValue(java.lang.Object)' on a null object reference
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: 	at com.ispeech.settings.store.SettingsStore$chineseInputMethodFlow$$inlined$map$1$2.emit(Emitters.kt:219)
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: 	at com.ispeech.settings.store.SettingsStore$chineseInputMethodFlow$$inlined$map$1.collect(SafeCollector.common.kt:112)
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2.invokeSuspend(KeyboardViewModel.kt:35)
+11-17 07:41:36.674 30743 30743 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel.<init>(KeyboardViewModel.kt:34)

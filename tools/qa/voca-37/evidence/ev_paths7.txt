@@ -1,0 +1,4 @@
+INSTALL	out=rming Streamed Install
+Success	rc=0
+IDENT	name=start	t=05:16:26	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+GATE	blocked=拿不到「-/= 进 IME」的宿主字段，④③ 无法在本轮取证

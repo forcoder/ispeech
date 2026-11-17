@@ -1,0 +1,27 @@
+# ac2_soft · 被测=78343a4（PR #18 head）· 规格锚=0e4eeb0（PR #17 head）
+# cmd: python3 ac2.py /Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk 440 soft
+# ts=2026-11-18T02:40:21+0800  serial=emulator-5554
+# note(入库注记，非当场 stdout)：编排脚本原样写进了未展开的字面量 ${QA_SERIAL:-emulator-5554}。本轮 QA_SERIAL 未设置，drive.py 取默认 emulator-5554；同机 emulator-5556 也装着同一个被测包，所以串口无法只从本文件反证 —— 记入报告 §9 风险（工装缺陷，run_r7_all/b/c/d.sh 已改为盖展开后的 serial + ro.product.model）。
+INSTALL	out=Performing Streamed Install
+Success	rc=0	ts=2026-11-18T02:40:22+0800
+PKG	path_kind=soft	pkg_ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:40:22+0800
+IDENT	end=start	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:40:22+0800
+HOST	ok=True	round=1	taps=2	top=1352	h=988	ts=2026-11-18T02:40:33+0800
+FRAME	top=1352	h=988	keymap_ok=True	runs=[10, 9, 7, 3]	space_xy=(531, 2125)	gear_xy=(1005, 1552)	ts=2026-11-18T02:40:33+0800
+MODE	path=soft	mode=chinese	host='中国'	attempt=1	ts=2026-11-18T02:40:41+0800
+DS_BEFORE	file=-	bytes=0	ts=2026-11-18T02:40:42+0800
+TOUCH	y=1652	diff={'double_space_period': True}	verdict=hit_target	ts=2026-11-18T02:40:48+0800
+DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True	ts=2026-11-18T02:40:49+0800
+SWITCH	want=ON	state=True	src=datastore	raw_hex=12020801	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period	ts=2026-11-18T02:40:49+0800
+AC2	path=soft	case=2x_single_injection	times=2	wall_between_ms=0(single_shell)	before='搜索设置'	host='。'	switch_state=True	switch_src=datastore	ts=2026-11-18T02:41:03+0800
+AC2	path=soft	case=2x_two_adb_calls	times=2	wall_between_ms=44.3	before='搜索设置'	host='。'	switch_state=True	switch_src=datastore	ts=2026-11-18T02:41:09+0800
+AC2	path=soft	case=2x_gap500ms_control	times=2	wall_between_ms=538.2	before='搜索设置'	host='  '	switch_state=True	switch_src=datastore	ts=2026-11-18T02:41:16+0800
+AC2	path=soft	case=3x_single_injection	times=3	wall_between_ms=0(single_shell)	before='搜索设置'	host='。 '	switch_state=True	switch_src=datastore	ts=2026-11-18T02:41:22+0800
+DS_BEFORE	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True	ts=2026-11-18T02:41:23+0800
+TOUCH	y=1652	diff={'double_space_period': False}	verdict=hit_target	ts=2026-11-18T02:41:28+0800
+DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=False	ts=2026-11-18T02:41:29+0800
+SWITCH	want=OFF	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period	ts=2026-11-18T02:41:29+0800
+AC2	path=soft	case=2x_single_injection	times=2	wall_between_ms=0(single_shell)	before='搜索设置'	host='  '	switch_state=False	switch_src=datastore	ts=2026-11-18T02:41:44+0800
+FINAL_SWITCH	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb	ts=2026-11-18T02:41:44+0800
+IDENT	end=end	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:41:45+0800
+# rc=0

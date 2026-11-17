@@ -1,0 +1,6 @@
+HOST	ok=True	round=1	taps=3	top=1388	h=952
+IME_START	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+HOST2	ok=True	round=1	taps=1	top=1388	h=952
+FRAME_1	top=1388	h=952	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=19562
+CARD	bounds=[193,851][423,917]	tap=308,884
+VERDICT	fatal_count=0	keyboardviewmodel_frames=0	ime_end=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid_after=19562	page=topResumedActivity=ActivityRecord{65730c3 u0 com.ispeech.ime/com.ispeech.settings.MainActivity t287}	d2=FIXED (no FATAL)

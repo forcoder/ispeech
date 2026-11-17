@@ -1,0 +1,21 @@
+# d2_fixed · 被测=78343a4（PR #18 head）· 规格锚=0e4eeb0（PR #17 head）
+# cmd: python3 d2check.py /Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk
+# ts=2026-11-18T02:33:49+0800  serial=emulator-5554
+# note(入库注记，非当场 stdout)：编排脚本原样写进了未展开的字面量 ${QA_SERIAL:-emulator-5554}。本轮 QA_SERIAL 未设置，drive.py 取默认 emulator-5554；同机 emulator-5556 也装着同一个被测包，所以串口无法只从本文件反证 —— 记入报告 §9 风险（工装缺陷，run_r7_all/b/c/d.sh 已改为盖展开后的 serial + ro.product.model）。
+HOST	ok=True	round=1	taps=1	top=1352	h=988	ts=2026-11-18T02:33:58+0800
+IME_START	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:33:58+0800
+HOST2	ok=True	round=1	taps=1	top=1352	h=988	ts=2026-11-18T02:34:08+0800
+FRAME_1	top=1352	h=988	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=20007	ts=2026-11-18T02:34:10+0800
+CARD	bounds=[193,851][423,917]	tap=308,884	ts=2026-11-18T02:34:16+0800
+VERDICT	fatal_count=2	keyboardviewmodel_frames=8	ime_end=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid_after=20332	page=topResumedActivity=ActivityRecord{756411d u0 com.google.android.settings.intelligence/.modules.search.SearchActivity t27	d2=STILL_CRASHING	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: FATAL EXCEPTION: main	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: Process: com.ispeech.ime, PID: 20007	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: 	at com.ispeech.settings.store.SettingsStore$chineseInputMethodFlow$$inlined$map$1$2.emit(Emitters.kt:219)	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: FATAL EXCEPTION: main	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: Process: com.ispeech.ime, PID: 20007	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)	ts=2026-11-18T02:34:21+0800
+STACK	line=11-18 02:34:16.583 20007 20007 E AndroidRuntime: 	at com.ispeech.settings.store.SettingsStore$chineseInputMethodFlow$$inlined$map$1$2.emit(Emitters.kt:219)	ts=2026-11-18T02:34:21+0800
+# rc=1

@@ -1,0 +1,53 @@
+# VOCA-47 第六轮 · 打回项 1：pp 对照物「同窗重测」（不复用首测窗口的值）
+# 裁决出处：docs/requirements/VOCA-47-acceptance-ruling.md §9.4 打回项 1 —— 每个 pp 输入标「取数窗口 + 文件名」，真机值到位前一律「未定稿」。
+# 取数窗口：2026-11-17 22:02:17 +0800 → 22:04:39 +0800 —— 一个连续窗口内先测搜狗三档、再测 iSpeech 三档；
+#   两侧都在敲入 shijian 的**组合态**下取值（不再混用空态/上屏态），中间不重启设备、不改其它设置。
+# 设备：emulator-5554（API 34；面板 1080x2400，可用高 2340）；pp = 键盘 ime inset 高 ÷ (2340/56)。
+# 命令：python3 ppwin.py --ime sogou   --tiers 440:1.0,440:1.15,520:1.15 → 下面 SOGOU_* 段（rc=0）
+#       python3 ppwin.py --ime ispeech --tiers 440:1.0,440:1.15,520:1.15 --apk $WS/voca47-c524351-build/app/build/outputs/apk/debug/app-debug.apk → 下面 ISPEECH_* 段（rc=0）
+#   （$WS = 本 workspace 根；原日志的绝对前缀统一替换成 $WS，其余逐字节未改）
+# 身份校验：IDENT 行 = 设备上已装包 vs 构建产物逐条目比 classes*.dex + resources.arsc 的 sha256 → match=True，被测就是 c524351。
+# 帧：shots/r6_{sogou,ispeech}_{440_fs1.0,440_fs1.15,520_fs1.15}.png
+# 读数口径（避免误读，三条写死）：
+#   · 取数点 = 敲完 shijian 之后再读 `type=ime` inset（ppwin.py measure() 里 keyevent 循环 → ime_frame()），
+#     所以 h= / pp= 是组合态值；本脚本**不**做 fs115.py 那条宿主回读闸门（Given ①），它只量高度、不出判据。
+#   · FRAME 行的 host= 是**敲码前**的宿主读数（D.focused_text() 在 keyevent 循环之前取），
+#     这里显示 `搜索设置` = Settings 搜索框的占位文案，证明的是「宿主起来了且为空」，
+#     不能读成「没敲码」。组合态由上面那条取数点保证。
+#   · comp_top=/comp_h= 就是同一行 top=/h= 的重复字段（ppwin.py 里赋的是同一份读数），
+#     **不是**又量了一次空态，也不构成「空态 vs 组合态」的第二个数据点。
+# 汇总（同 §5 算法）：
+#   440/fs1.0   搜狗 978px 41.79pp | iSpeech 988px 42.22pp | Δ +0.43pp → ≤1pp PASS
+#   440/fs1.15  搜狗 978px 41.79pp | iSpeech 988px 42.22pp | Δ +0.43pp → PASS
+#   520/fs1.15  搜狗 1002px 42.82pp | iSpeech 1168px 49.91pp | Δ +7.09pp → FAIL
+#   与首测窗口入库值（ev_sogou440.txt=978 / ev_sogou520.txt=1002）逐位一致 → 跨 run 复用不翻转拦路项方向（裁决 §9.4 敏感性算术同结论）
+#   残留：这是模拟器口径；真机 pp 未定稿 = 附加缺口，不是主因（裁决 §9.3）。
+
+===== 搜狗（对照物）=====
+WINDOW	phase=open	ime=sogou	ts=2026-11-17T22:02:17+0800	serial=emulator-5554
+FRAME	tag=SOGOU_440_1.0	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1362	h=978	pp=41.79	comp_top=1362	comp_h=978	ts=2026-11-17T22:02:37+0800	dens=440	fs=1.0	host='搜索设置'	shot=r6_sogou_440_fs1.0.png
+RAW	tag=SOGOU_440_1.0	line=InsetsSource id=3 type=ime frame=[0,1362][1080,2340] visibleFrame=[0,1362][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+RAW	tag=SOGOU_440_1.0	line=mSource=InsetsSource id=3 type=ime frame=[0,1362][1080,2340] visibleFrame=[0,1362][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+FRAME	tag=SOGOU_440_1.15	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1362	h=978	pp=41.79	comp_top=1362	comp_h=978	ts=2026-11-17T22:03:09+0800	dens=440	fs=1.15	host='搜索设置'	shot=r6_sogou_440_fs1.15.png
+RAW	tag=SOGOU_440_1.15	line=InsetsSource id=3 type=ime frame=[0,1362][1080,2340] visibleFrame=[0,1362][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+RAW	tag=SOGOU_440_1.15	line=mSource=InsetsSource id=3 type=ime frame=[0,1362][1080,2340] visibleFrame=[0,1362][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+FRAME	tag=SOGOU_520_1.15	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1338	h=1002	pp=42.82	comp_top=1338	comp_h=1002	ts=2026-11-17T22:03:29+0800	dens=520	fs=1.15	host='搜索设置'	shot=r6_sogou_520_fs1.15.png
+RAW	tag=SOGOU_520_1.15	line=InsetsSource id=3 type=ime frame=[0,1338][1080,2340] visibleFrame=[0,1338][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+RAW	tag=SOGOU_520_1.15	line=mSource=InsetsSource id=3 type=ime frame=[0,1338][1080,2340] visibleFrame=[0,1338][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+WINDOW	phase=close	ime=sogou	ts=2026-11-17T22:03:30+0800	rc=0
+
+===== iSpeech A 包 c524351（被测）=====
+WINDOW	phase=open	ime=ispeech	ts=2026-11-17T22:03:47+0800	serial=emulator-5554
+FRAME	tag=ISPEECH_440_1.0	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	top=1352	h=988	pp=42.22	comp_top=1352	comp_h=988	ts=2026-11-17T22:04:04+0800	dens=440	fs=1.0	host='搜索设置'	shot=r6_ispeech_440_fs1.0.png
+IDENT	tag=ISPEECH_440_1.0	match=True	apk_sha=$WS/voca47-c524351-build/app/build/outputs/apk/debug/app-debug.apk
+RAW	tag=ISPEECH_440_1.0	line=InsetsSource id=3 type=ime frame=[0,1352][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+RAW	tag=ISPEECH_440_1.0	line=mSource=InsetsSource id=3 type=ime frame=[0,1352][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+FRAME	tag=ISPEECH_440_1.15	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	top=1352	h=988	pp=42.22	comp_top=1352	comp_h=988	ts=2026-11-17T22:04:21+0800	dens=440	fs=1.15	host='搜索设置'	shot=r6_ispeech_440_fs1.15.png
+IDENT	tag=ISPEECH_440_1.15	match=True	apk_sha=$WS/voca47-c524351-build/app/build/outputs/apk/debug/app-debug.apk
+RAW	tag=ISPEECH_440_1.15	line=InsetsSource id=3 type=ime frame=[0,1352][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+RAW	tag=ISPEECH_440_1.15	line=mSource=InsetsSource id=3 type=ime frame=[0,1352][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+FRAME	tag=ISPEECH_520_1.15	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	top=1172	h=1168	pp=49.91	comp_top=1172	comp_h=1168	ts=2026-11-17T22:04:38+0800	dens=520	fs=1.15	host='搜索设置'	shot=r6_ispeech_520_fs1.15.png
+IDENT	tag=ISPEECH_520_1.15	match=True	apk_sha=$WS/voca47-c524351-build/app/build/outputs/apk/debug/app-debug.apk
+RAW	tag=ISPEECH_520_1.15	line=InsetsSource id=3 type=ime frame=[0,1172][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+RAW	tag=ISPEECH_520_1.15	line=mSource=InsetsSource id=3 type=ime frame=[0,1172][1080,2340] visible=true flags= insetsRoundedCornerFrame=false
+WINDOW	phase=close	ime=ispeech	ts=2026-11-17T22:04:39+0800	rc=0

@@ -1,0 +1,29 @@
+# VOCA-37 §8.4 起点在带外/工具栏区的竖滑 + 110px 阈值复现性（返修轮 · 打回项 3b）——stdout 原文
+$ python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode above --start 215 --dy 215 --dur 120   # 起点 1137（键盘上沿外 215px，落在宿主区）
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=12:39:23	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+GEOM	dens=440	frame=988	band_top=1352	band=[1353,1477]	family=commit	mode=above	start_offset=215	x=300	dx=0	dur=120
+VSWIPE	case=commit_dy215_dx0_dur120_x300_above215	start_y=1137	end_y=1352	dy=215	dx=0	dur=120	x=300	band_top=None	band_h=None	before='shi'	after='<NONE>'	ime_gone=True	committed=False	reading=键盘被这一下手势收掉了，宿主焦点也没了 → 不能读成上屏	h_shift=None	h_err=None	h_verdict=no_ime_frame(键盘这次手势后不在位)
+VSWIPE	case=control_tap_x300	start_y=1412	dy=0	dur=0	x=300	before='shi'	after='是'	committed=True	h_shift=-832	h_err=12.04	h_verdict=unverifiable(err>5.0)
+IDENT	name=end	t=12:40:10	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=17774	h=988
+$ python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode abs --start 1500 --dy 60 --dur 120     # 起点 1500（候选带下沿外的工具栏区）
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=12:38:31	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+GEOM	dens=440	frame=988	band_top=1352	band=[1353,1477]	family=commit	mode=abs	start_offset=1500	x=300	dx=0	dur=120
+VSWIPE	case=commit_dy60_dx0_dur120_x300_abs1500	start_y=1500	end_y=1560	dy=60	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	committed=False	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=control_tap_x300	start_y=1412	dy=0	dur=0	x=300	before='shi'	after='是'	committed=True	h_shift=-832	h_err=12.04	h_verdict=unverifiable(err>5.0)
+IDENT	name=end	t=12:39:03	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=16780	h=988
+$ python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode abs --start 1390 --dy 90,100,110,110,110 --dur 120   # 阈值附近 + 同参数三连复跑
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=12:43:56	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+GEOM	dens=440	frame=988	band_top=1352	band=[1353,1477]	family=commit	mode=abs	start_offset=1390	x=300	dx=0	dur=120
+VSWIPE	case=commit_dy90_dx0_dur120_x300_abs1390	start_y=1390	end_y=1480	dy=90	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='是'	ime_gone=False	committed=True	reading=以宿主文本差判定	h_shift=-832	h_err=12.04	h_verdict=unverifiable(err>5.0)
+VSWIPE	case=commit_dy100_dx0_dur120_x300_abs1390	start_y=1390	end_y=1490	dy=100	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=commit_dy110_dx0_dur120_x300_abs1390	start_y=1390	end_y=1500	dy=110	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=commit_dy110_dx0_dur120_x300_abs1390	start_y=1390	end_y=1500	dy=110	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=commit_dy110_dx0_dur120_x300_abs1390	start_y=1390	end_y=1500	dy=110	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=control_tap_x300	start_y=1412	dy=0	dur=0	x=300	before='shi'	after='是'	committed=True	h_shift=-832	h_err=12.04	h_verdict=unverifiable(err>5.0)
+IDENT	name=end	t=12:45:05	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=23361	h=988

@@ -1,0 +1,17 @@
+# VOCA-47 第六轮 · 打回项 5（续）：B 包（集成候选 cffc0cd）JVM 单测原文读数
+# 被测：B 包 = 本地分支 qa/merge-window-candidate-r5 的 head `cffc0cd`
+#   = main fa57a07 + PR#18(c524351) + PR#9 的 VOCA-170 修复(d3b6f84) + VOCA-184(d283706) + VOCA-207/203(4d6363c…)
+#   该分支**有意不推 origin**（项目规则一/二/五：合并只能走统一合并窗口、需人类确认）；
+#   裁决 §9.4 打回项 5 明确：「不许为了让证据入库去 push B 包分支」→ 读数以本文件的 <testsuite> 原文入库。
+# 取数窗口：2026-11-17 16:55:59 +0800（XML timestamp 属性为 UTC 08:55:59）；命令：
+$ ./gradlew --offline :app:testDebugUnitTest --tests com.ispeech.input.SpaceKeyPolicyTest \
+      --tests com.ispeech.input.InputModePolicyTest --tests com.ispeech.input.KeyHitTesterTest \
+      --tests com.ispeech.settings.keyboard.KeyboardViewModelInitOrderTest
+BUILD SUCCESSFUL（rc=0）
+<testsuite name="com.ispeech.input.InputModePolicyTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-17T08:55:59"
+<testsuite name="com.ispeech.input.KeyHitTesterTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-17T08:55:59"
+<testsuite name="com.ispeech.input.SpaceKeyPolicyTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-17T08:55:59"
+<testsuite name="com.ispeech.settings.keyboard.KeyboardViewModelInitOrderTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-17T08:55:59"
+# → 5 + 6 + 9 + 2 = 22 条、0 失败。四类分别锁：中英/简繁态、VOCA-184 零死区命中、
+#   AC-2 双击空格判定链、VOCA-170「ViewModel 后置属性必须在 init 之前」的不变量（PR #9 新增）。
+# 原文 XML 一并入库：evidence/ev_r6_gradle_b_*.xml（四份，逐 testcase 可查）

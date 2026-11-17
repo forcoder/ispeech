@@ -1,0 +1,21 @@
+# paths · 被测=78343a4（PR #18 head）· 规格锚=0e4eeb0（PR #17 head）
+# cmd: python3 paths.py /Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk
+# ts=2026-11-18T02:39:14+0800  serial=emulator-5554
+# note(入库注记，非当场 stdout)：编排脚本原样写进了未展开的字面量 ${QA_SERIAL:-emulator-5554}。本轮 QA_SERIAL 未设置，drive.py 取默认 emulator-5554；同机 emulator-5556 也装着同一个被测包，所以串口无法只从本文件反证 —— 记入报告 §9 风险（工装缺陷，run_r7_all/b/c/d.sh 已改为盖展开后的 serial + ro.product.model）。
+INSTALL	out=Performing Streamed Install
+Success	rc=0	ts=2026-11-18T02:39:15+0800
+IDENT	name=start	t=02:39:15	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:39:15+0800
+HOST_CONTACTS	ok=True	field=(143, 728, 926, 883)	top=1352	h=988	ts=2026-11-18T02:39:30+0800
+P1_zero_cand	empty_h=988	comp_h=988	delta=0	cand_ink_cols=38	host='电话'	shot=_ink.png	ts=2026-11-18T02:39:39+0800
+P5_panel	name=phrase	kb_h=1885	top=455	band_ink_cols=98	shot=p5_phrase.png	ts=2026-11-18T02:39:41+0800
+P5_panel	name=clip	kb_h=727	top=1613	band_ink_cols=77	shot=p5_clip.png	ts=2026-11-18T02:39:44+0800
+P5_panel	name=set	kb_h=727	top=1613	band_ink_cols=77	shot=p5_set.png	ts=2026-11-18T02:39:46+0800
+IDENT	name=end	t=02:39:47	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:39:47+0800
+HOST_CONTACTS2	ok=True	field=(143, 312, 926, 467)	top=1613	h=727	ts=2026-11-18T02:39:53+0800
+P4_offset_reset	scroll_after_eq4=0	err=0.0	back_to_base=0	err0=0.0	after_commit_delta=0	err2=0.0	host='++++'	ts=2026-11-18T02:40:02+0800
+P3_t9	ok=True	kb_h=1056	rows=[1638, 1680, 1721, 1827]	cols=[304, 468, 557]	ts=2026-11-18T02:40:04+0800
+P3_t9_scroll	step2=872	err=0.0	kb_h=1056	code='+++332323323332332++'	ts=2026-11-18T02:40:11+0800
+REG_double_space	secs=1.26	host='323-32'	kb_h=1204	band_ink=110	ts=2026-11-18T02:40:15+0800
+REG_phrase_letters	kb_h=1204	shots=('reg_phr_before.png', 'reg_phr_after.png')	host='323-32'	ts=2026-11-18T02:40:20+0800
+IDENT	name=end	t=02:40:21	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:40:21+0800
+# rc=0

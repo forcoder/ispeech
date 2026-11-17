@@ -1,0 +1,13 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=05:12:49	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+HOST	ok=True	field=(143, 474, 926, 629)	top=1352	h=988
+Q4_state	top=1352	kb_h=988	band_ink=54	host='电话'
+Q4_reset	minus4_shift=0	err1=0.0	commit_shift=872	err2=0.0	base_vs_after=872	err3=0.0	host='----'	kb_h=988
+Q4_assoc_scroll	shift2=872	err=0.0	ink=0
+Q3_numrow	bands=[((2062, 2188), 2125, [502, 767])]
+Q3_t9	kb_h=988	rows=[(1531, 2), (1574, 4), (1679, 3), (1827, 12), (1975, 7), (2125, 2)]
+Q3_t9_cand	kb_h=1885	top=455	ink=98	host='------ 7'
+Q3_t9_scroll	shift2=0	err=0.0
+Q_DOUBLE	wall_secs=0.26	host='------ 7++'	kb_h=988
+IDENT	name=end	t=05:13:46	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService

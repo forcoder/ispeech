@@ -1,0 +1,37 @@
+# VOCA-47 第六轮 · 打回项 5：JVM 单测「N 条 / 0 失败」读数的原文
+# 裁决出处：docs/requirements/VOCA-47-acceptance-ruling.md §9.4 打回项 5 —— 「报告里任何『N 条 / 0 失败』类读数，
+#   必须能在 evidence/ 里 grep 到原文行，否则该行降级为『未入库，不作证据』」。
+# 被测构建：A 包 = PR #18 head `c524351`，检出在 worktree 外的独立构建目录（`git worktree add --detach`），不污染交付分支工作区。
+# 取数窗口：2026-11-17 22:20:31 → 22:20:39 +0800，两次都带 `--rerun` 强制重跑。
+#   （第一轮复跑没带 --rerun，gradle 命中缓存 → XML 的 timestamp 还是上一次的，读起来会误认为本轮执行；已重跑并留这一条披露。）
+
+## ① 本 issue 判据直接相关的两个类：过滤跑 rc=0
+$ ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ./gradlew --offline :app:testDebugUnitTest --rerun \
+      --tests com.ispeech.input.SpaceKeyPolicyTest --tests com.ispeech.input.InputModePolicyTest
+> Task :app:testDebugUnitTest\nBUILD SUCCESSFUL in 1s\n24 actionable tasks: 2 executed, 22 up-to-date   （22:20:31 → 22:20:33 +0800）
+<testsuite name="com.ispeech.input.InputModePolicyTest" tests="5" skipped="0" failures="0" errors="0"
+<testsuite name="com.ispeech.input.SpaceKeyPolicyTest" tests="9" skipped="0" failures="0" errors="0"
+#  ↑ 这两行的 XML 产物随后被 ②的全量运行覆盖（同目录同名），故上面引的是过滤运行时的 tests/failures；
+#    两次的 testsuite 行除 timestamp 属性外逐字节相同，可用 ②段对应两行核对（tests=5/9、failures=0/0）。
+# → 5 + 9 = 14 条、0 失败。SpaceKeyPolicyTest = AC-2 双击空格判据的契约锁（VOCA-46 新增 195 行）；InputModePolicyTest = 中英/简繁态。
+
+## ② 全量 :app:testDebugUnitTest：56 条 / 1 失败 rc≠0（BUILD FAILED）
+$ ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ./gradlew --offline :app:testDebugUnitTest --rerun
+> Task :app:testDebugUnitTest FAILED\n56 tests completed, 1 failed\nBUILD FAILED in 1s   （22:20:38 → 22:20:39 +0800）
+<testsuite name="com.ispeech.agent.AgentDispatcherTest" tests="1" skipped="0" failures="1" errors="0" timestamp="2026-11-17T14:20:39"
+<testsuite name="com.ispeech.data.FunAsrModelStoreTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-11-17T14:20:39"
+<testsuite name="com.ispeech.data.PhraseCsvImportTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-11-17T14:20:39"
+<testsuite name="com.ispeech.engine.QuickPhraseDtwslTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-17T14:20:39"
+<testsuite name="com.ispeech.engine.QuickPhrasePinyinModeTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-17T14:20:39"
+<testsuite name="com.ispeech.input.InputModePolicyTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-17T14:20:39"
+<testsuite name="com.ispeech.input.SpaceKeyPolicyTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-17T14:20:39"
+
+<testcase name="initializationError" classname="com.ispeech.agent.AgentDispatcherTest" time="0.004">
+<failure message="java.lang.RuntimeException: Delegate runner androidx.test.internal.runner.junit4.AndroidJUnit4ClassRunner for AndroidJUnit4 could not be found.&#10;" type="java.lang.RuntimeException"
+
+## ③ 唯一失败项归因：与本 PR 无关的既有基线噪音（不是本变更面回归）
+$ git diff --stat fa57a07 c524351 -- app/src/test
+   → PR #18 对 test 源集只**新增** SpaceKeyPolicyTest.kt，没碰 AgentDispatcherTest.kt；后者在 main(fa57a07) 上同样存在：
+   → 失败原因是它 `@RunWith(AndroidJUnit4::class)` 放在**本地 JVM 单测**源集里，而单测 classpath 没有 androidx.test runner：
+     AndroidJUnit4.throwInitializationError(AndroidJUnit4.java:129) → 整类以 initializationError 收口，tests=1 是合成的那条，4 个 @Test 方法一条都没跑。
+   → 定性：main 既有缺陷（建议单开 issue，交后端/架构），**不计入 PR #18 变更面**；本报告 §7 按「56 条 / 1 失败（既有）」写，不写成 0 失败。

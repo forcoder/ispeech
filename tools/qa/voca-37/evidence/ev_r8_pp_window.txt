@@ -1,0 +1,37 @@
+# round=r8  file=_r8_pp_window  采集于 2026-11-18T04:20:47+0800  （第八轮打回项 3：这四份是把 ev_r7_* 的同一批读数在补上逐行 ts= / IDENT 之后重跑的）
+# 口径：被测=78343a4（PR #18 head）· 规格读数口径=0e4eeb0 · PR #17 head 本轮现算=ef14209（对账见报告 §0/§5/§5.5）
+# 逐行 ts= 由本轮起的 drive.log()/fs115.log()/g1g3.log()/ppwin.log() 输出；INSTALL 类透传行不在这些文件里（见报告 §11.1 逐文件点名）
+# pp_window_sogou · 被测=78343a4（PR #18 head）· 规格读数口径=0e4eeb0（PR #17 head 第八轮现算已前进到 ef14209，差异对账见报告 §0/§5）
+# cmd: python3 ppwin.py --ime sogou --panel 1080x2340 --tiers 440:1.0,440:1.15,520:1.15 --round r8
+# ts=2026-11-18T04:10:16+0800  serial=emulator-5554  device=sdk_gphone64_arm64
+PANEL	panel=1080x2340	requested=1080x2340	dens_now=440	logic_w_dp=392.7	ts=2026-11-18T04:10:19+0800	orig_density=Physical density: 440	orig_size=Physical size: 1080x2340	orig_font_scale=1.0
+WINDOW	phase=open	ime=sogou	ts=2026-11-18T04:10:19+0800	serial=emulator-5554	panel=1080x2340
+FRAME	tag=SOGOU_440_1.0	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1362	h=978	pp=41.79	comp_top=1362	comp_h=978	ts=2026-11-18T04:10:35+0800	dens=440	fs=1.0	host='搜索设置'	panel=1080x2340	panel_h=2340	logic_w_dp=392.7	tier=档1	shot=r8_1080x2340_sogou_440_fs1.0.png
+RAW	tag=SOGOU_440_1.0	line=InsetsSource id=3 type=ime frame=[0,1362][1080,2340] visibleFrame=[0,1362][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:10:35+0800
+RAW	tag=SOGOU_440_1.0	line=mSource=InsetsSource id=3 type=ime frame=[0,1362][1080,2340] visibleFrame=[0,1362][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:10:35+0800
+FRAME	tag=SOGOU_440_1.15	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1362	h=978	pp=41.79	comp_top=1362	comp_h=978	ts=2026-11-18T04:11:09+0800	dens=440	fs=1.15	host='搜索设置'	panel=1080x2340	panel_h=2340	logic_w_dp=392.7	tier=档1	shot=r8_1080x2340_sogou_440_fs1.15.png
+RAW	tag=SOGOU_440_1.15	line=InsetsSource id=3 type=ime frame=[0,1362][1080,2340] visibleFrame=[0,1362][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:11:09+0800
+RAW	tag=SOGOU_440_1.15	line=mSource=InsetsSource id=3 type=ime frame=[0,1362][1080,2340] visibleFrame=[0,1362][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:11:09+0800
+FRAME	tag=SOGOU_520_1.15	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1338	h=1002	pp=42.82	comp_top=1338	comp_h=1002	ts=2026-11-18T04:11:53+0800	dens=520	fs=1.15	host='搜索设置'	panel=1080x2340	panel_h=2340	logic_w_dp=332.3	tier=档2	shot=r8_1080x2340_sogou_520_fs1.15.png
+RAW	tag=SOGOU_520_1.15	line=InsetsSource id=3 type=ime frame=[0,1338][1080,2340] visibleFrame=[0,1338][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:11:53+0800
+RAW	tag=SOGOU_520_1.15	line=mSource=InsetsSource id=3 type=ime frame=[0,1338][1080,2340] visibleFrame=[0,1338][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:11:53+0800
+WINDOW	phase=close	ime=sogou	ts=2026-11-18T04:11:55+0800	rc=0	panel_now=1080x2340	dens_now=440	font_scale_now=1.0	density_now=Physical density: 440
+# sogou_rc=0  ts=2026-11-18T04:11:55+0800
+# cmd: python3 ppwin.py --ime ispeech --panel 1080x2340 --tiers 440:1.0,440:1.15,520:1.15 --round r8 --apk /Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk
+PANEL	panel=1080x2340	requested=1080x2340	dens_now=440	logic_w_dp=392.7	ts=2026-11-18T04:11:59+0800	orig_density=Physical density: 440	orig_size=Physical size: 1080x2340	orig_font_scale=1.0
+WINDOW	phase=open	ime=ispeech	ts=2026-11-18T04:12:04+0800	serial=emulator-5554	panel=1080x2340
+FRAME	tag=ISPEECH_440_1.0	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	top=1352	h=988	pp=42.22	comp_top=1352	comp_h=988	ts=2026-11-18T04:12:50+0800	dens=440	fs=1.0	host='搜索设置'	panel=1080x2340	panel_h=2340	logic_w_dp=392.7	tier=档1	shot=r8_1080x2340_ispeech_440_fs1.0.png
+IDENT	tag=ISPEECH_440_1.0	match=True	apk_sha=/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk	ts=2026-11-18T04:12:53+0800
+RAW	tag=ISPEECH_440_1.0	line=InsetsSource id=3 type=ime frame=[0,1352][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:12:53+0800
+RAW	tag=ISPEECH_440_1.0	line=mSource=InsetsSource id=3 type=ime frame=[0,1352][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:12:53+0800
+FRAME	tag=ISPEECH_440_1.15	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	top=1352	h=988	pp=42.22	comp_top=1352	comp_h=988	ts=2026-11-18T04:13:26+0800	dens=440	fs=1.15	host='搜索设置'	panel=1080x2340	panel_h=2340	logic_w_dp=392.7	tier=档1	shot=r8_1080x2340_ispeech_440_fs1.15.png
+IDENT	tag=ISPEECH_440_1.15	match=True	apk_sha=/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk	ts=2026-11-18T04:13:31+0800
+RAW	tag=ISPEECH_440_1.15	line=InsetsSource id=3 type=ime frame=[0,1352][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:13:31+0800
+RAW	tag=ISPEECH_440_1.15	line=mSource=InsetsSource id=3 type=ime frame=[0,1352][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:13:31+0800
+FRAME	tag=ISPEECH_520_1.15	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	top=1172	h=1168	pp=49.91	comp_top=1172	comp_h=1168	ts=2026-11-18T04:13:47+0800	dens=520	fs=1.15	host='搜索设置'	panel=1080x2340	panel_h=2340	logic_w_dp=332.3	tier=档2	shot=r8_1080x2340_ispeech_520_fs1.15.png
+IDENT	tag=ISPEECH_520_1.15	match=True	apk_sha=/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk	ts=2026-11-18T04:13:51+0800
+RAW	tag=ISPEECH_520_1.15	line=InsetsSource id=3 type=ime frame=[0,1172][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:13:51+0800
+RAW	tag=ISPEECH_520_1.15	line=mSource=InsetsSource id=3 type=ime frame=[0,1172][1080,2340] visible=true flags= insetsRoundedCornerFrame=false	ts=2026-11-18T04:13:51+0800
+WINDOW	phase=close	ime=ispeech	ts=2026-11-18T04:13:53+0800	rc=0	panel_now=1080x2340	dens_now=440	font_scale_now=1.0	density_now=Physical density: 440
+# ispeech_rc=0
+# rc=0  ts=2026-11-18T04:13:53+0800

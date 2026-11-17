@@ -1,0 +1,2 @@
+AC9_PURE_HOLD	hold_s=2.0	before=80	after=63	deleted=17	rate_ms=101.2
+AC9_PURE_HOLD	hold_s=4.0	before=80	after=40	deleted=40	rate_ms=92.8

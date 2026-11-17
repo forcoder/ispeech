@@ -1,0 +1,65 @@
+# VOCA-47 第六轮 · 打回项 2（闸门与判据解耦）：解耦后的设备当场出数，520dpi / font_scale 1.15
+# 裁决出处：docs/requirements/VOCA-47-acceptance-ruling.md §9.2 —— 闸门只守规格 8324b03:525 的三条 Given；
+#   「可见候选 ≥4」退出闸门，只进 AC10 判定行。修前 MIN_CAND=4（与 NEED_FULL 同值），修后 MIN_CAND=1（= Given ② 的下界）。
+# 被测：A 包 c524351（PR #18 head），IDENT match=True（dex + resources.arsc 逐条目 sha256）；设备 emulator-5554。
+# 命令：python3 fs115.py $WS/voca47-c524351-build/app/build/outputs/apk/debug/app-debug.apk 520 1.15 shijian,dashu a6
+#   → 第一段：shijian 全量出数；同一次调用里 dashu 停在 GATE reason=readback_mismatch rc=10（宿主回读 got=<NONE>，共享 AVD 掉了焦点）；
+#     第二段：单独重跑 dashu（python3 fs115.py … 520 1.15 dashu a6）→ 回读通过、全量出数。两次尝试都留痕，不粉饰。
+# 打回项 2 要的那两行（dashu@520·fs1.15）：
+#   AC10  … cand_count=3 full_count=3 verdict=FAIL … verdict_screen=FAIL boundary=False
+#   AC10b … recorded=True reason=long_word_budget clipped_idx=[]
+#   同帧 Given ③ 在**同密度当场**量到 pool=13（≥8）→「词库不足」的解释被当场排除，FAIL 只能归横向空间/词长预算。
+# 披露：Given ① 的证据 = 宿主回读断言（drive.tap_keys → focused_text）；chip 文本在帧里是像素，没有独立可读通道。
+# 帧：shots/r5_a6_520_fs1.15_{shijian,dashu}_{comp,empty}.png（本轮起 label 与包绑定，A 包帧不再被 B 包同名覆盖）
+
+===== 第一次调用（shijian 出数 + dashu 停在闸门）=====
+HOST	dens=520	fs=1.15	code=shijian	ok=True	round=1	taps=2	top=1172	h=1168
+KEYMAP	dens=520	fs=1.15	bands=[(1486, 1631), (1660, 1807), (1839, 1978), (2019, 2152)]	runs=[10, 9, 7, 3]	del_xy=(993, 1908)	space_xy=(531, 2085)	o_x=910	z_x=212
+IDENT	dens=520	fs=1.15	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	h=1168
+SCROLL	step=0	shift=234	err=0.0	cum=234
+SCROLL	step=1	shift=234	err=0.0	cum=468
+SCROLL	step=2	shift=234	err=0.0	cum=702
+SCROLL	step=3	shift=234	err=0.0	cum=936
+SCROLL	step=4	shift=234	err=0.0	cum=1170
+SCROLL	step=5	shift=234	err=0.0	cum=1404
+SCROLL	step=6	shift=234	err=0.0	cum=1638
+SCROLL	step=7	shift=234	err=0.0	cum=1872
+ORIGIN	shift_back=0	err=0.0	tol=6
+POOL	code=shijian	dens=520	fs=1.15	pool=17	need=8	verified_steps=8	offsets_sampled=9	cum_px=1872
+GATES	dens=520	fs=1.15	code=shijian	spec_anchor=8324b03:525	given1_chip_equals_code=True	given1_readback=True	given2_candidate_row_present=True	cand_count=4	given3_pool_at_least=17	need_pool=8	chip_box={'left': 26, 'right': 240, 'top': 1200, 'bot': 1292, 'n': 15674}	chip_right=240	x0=241
+RESULT	fs=1.15	dens=520	code=shijian	empty=1168	comp=1168	delta=0	band_px=150	band_inner=124	top1=1172	x0=241	chip_right=240	cand_count=4	full_count=3	pool_lower_bound=17	badge_px=46	ime_before=com.ispeech.ime/com.ispeech.input.IspeechImeService	ime_after=com.ispeech.ime/com.ispeech.input.IspeechImeService
+INK	fs=1.15	dens=520	code=shijian	kind=empty	cand_count=0	x0=None	detail=no_chip_fill
+INK	fs=1.15	dens=520	code=shijian	kind=comp	cand_count=4	x0=241	x_end=1060	ink_top=1223	ink_bot=1284	inner_top=1185	inner_bot=1309	band_inner=124	top_pad=38	bot_pad=24	tangent_items=0
+CAND	code=shijian	dens=520	fs=1.15	idx=0	x0=241	x1=510	glyph=[282, 465]	glyph_w_dp=56.6	ink_top=1223	ink_bot=1284	ink_h=62	pitch=None	badge=[466, 510]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=520	fs=1.15	idx=1	x0=511	x1=735	glyph=[574, 690]	glyph_w_dp=36.0	ink_top=1224	ink_bot=1284	ink_h=61	pitch=225	badge=[691, 735]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=520	fs=1.15	idx=2	x0=736	x1=960	glyph=[797, 915]	glyph_w_dp=36.6	ink_top=1224	ink_bot=1284	ink_h=61	pitch=225	badge=[916, 960]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=520	fs=1.15	idx=3	x0=961	x1=1059	glyph=[1023, 1059]	glyph_w_dp=11.4	ink_top=1224	ink_bot=1284	ink_h=61	pitch=None	badge=None	badge_clipped=True	tangent_top=False	tangent_bot=False	fully_visible=False
+AC10	code=shijian	dens=520	fs=1.15	given3_pool=17	pool_need=8	kb_h=1168	empty_h=1168	delta=0	full_count=3	verdict=FAIL	need=4	gauge=spec_sampling_x_end=1060	full_count_screen=3	verdict_screen=FAIL	gauge_screen=x_end=1080	boundary=False	cand_count=4	pitch={'n': 2, 'min': 225, 'med': 225, 'max': 225, 'med_dp': 69.2}	glyph_w_dp_med=36.6
+AC10b	code=shijian	dens=520	fs=1.15	cand_count=4	full_count=3	need=4	recorded=True	reason=viewport_clip	clipped_idx=[3]	pitch={'n': 2, 'min': 225, 'med': 225, 'max': 225, 'med_dp': 69.2}
+HOST	dens=520	fs=1.15	code=dashu	ok=True	round=1	taps=1	top=1172	h=1168
+KEYMAP	dens=520	fs=1.15	bands=[(1486, 1631), (1660, 1807), (1839, 1978), (2019, 2152)]	runs=[10, 9, 7, 3]	del_xy=(993, 1908)	space_xy=(531, 2085)	o_x=910	z_x=212
+GATE	reason=readback_mismatch	rc=10	want=dashu	got=<NONE>
+
+===== 第二次调用（dashu 重跑，出数）=====
+HOST	dens=520	fs=1.15	code=dashu	ok=True	round=1	taps=2	top=1172	h=1168
+KEYMAP	dens=520	fs=1.15	bands=[(1486, 1631), (1660, 1807), (1839, 1978), (2019, 2152)]	runs=[10, 9, 7, 3]	del_xy=(993, 1908)	space_xy=(531, 2085)	o_x=910	z_x=212
+IDENT	dens=520	fs=1.15	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	h=1168
+SCROLL	step=0	shift=234	err=0.0	cum=234
+SCROLL	step=1	shift=234	err=0.0	cum=468
+SCROLL	step=2	shift=234	err=0.0	cum=702
+SCROLL	step=3	shift=234	err=0.0	cum=936
+SCROLL	step=4	shift=234	err=0.0	cum=1170
+SCROLL	step=5	shift=234	err=0.0	cum=1404
+SCROLL	step=6	shift=234	err=0.0	cum=1638
+SCROLL	step=7	shift=234	err=0.0	cum=1872
+ORIGIN	shift_back=0	err=0.0	tol=6
+POOL	code=dashu	dens=520	fs=1.15	pool=13	need=8	verified_steps=8	offsets_sampled=9	cum_px=1872
+GATES	dens=520	fs=1.15	code=dashu	spec_anchor=8324b03:525	given1_chip_equals_code=True	given1_readback=True	given2_candidate_row_present=True	cand_count=3	given3_pool_at_least=13	need_pool=8	chip_box={'left': 26, 'right': 226, 'top': 1200, 'bot': 1292, 'n': 14677}	chip_right=226	x0=227
+RESULT	fs=1.15	dens=520	code=dashu	empty=1168	comp=1168	delta=0	band_px=150	band_inner=124	top1=1172	x0=227	chip_right=226	cand_count=3	full_count=3	pool_lower_bound=13	badge_px=46	ime_before=com.ispeech.ime/com.ispeech.input.IspeechImeService	ime_after=com.ispeech.ime/com.ispeech.input.IspeechImeService
+INK	fs=1.15	dens=520	code=dashu	kind=empty	cand_count=0	x0=None	detail=no_chip_fill
+INK	fs=1.15	dens=520	code=dashu	kind=comp	cand_count=3	x0=227	x_end=1060	ink_top=1224	ink_bot=1284	inner_top=1185	inner_bot=1309	band_inner=124	top_pad=39	bot_pad=24	tangent_items=0
+CAND	code=dashu	dens=520	fs=1.15	idx=0	x0=227	x1=432	glyph=[269, 387]	glyph_w_dp=36.6	ink_top=1224	ink_bot=1284	ink_h=61	pitch=None	badge=[388, 432]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=520	fs=1.15	idx=1	x0=433	x1=785	glyph=[494, 740]	glyph_w_dp=76.0	ink_top=1224	ink_bot=1284	ink_h=61	pitch=353	badge=[741, 785]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=520	fs=1.15	idx=2	x0=786	x1=1010	glyph=[847, 965]	glyph_w_dp=36.6	ink_top=1224	ink_bot=1284	ink_h=61	pitch=225	badge=[966, 1010]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+AC10	code=dashu	dens=520	fs=1.15	given3_pool=13	pool_need=8	kb_h=1168	empty_h=1168	delta=0	full_count=3	verdict=FAIL	need=4	gauge=spec_sampling_x_end=1060	full_count_screen=3	verdict_screen=FAIL	gauge_screen=x_end=1080	boundary=False	cand_count=3	pitch={'n': 2, 'min': 225, 'med': 353, 'max': 353, 'med_dp': 108.6}	glyph_w_dp_med=36.6
+AC10b	code=dashu	dens=520	fs=1.15	cand_count=3	full_count=3	need=4	recorded=True	reason=long_word_budget	clipped_idx=[]	pitch={'n': 2, 'min': 225, 'med': 353, 'max': 353, 'med_dp': 108.6}

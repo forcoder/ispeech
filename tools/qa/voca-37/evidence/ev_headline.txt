@@ -1,0 +1,11 @@
+IDENT_AT_START	match_c524351=True	t=04:51:56
+HOST	ok=True	attempt=1	secs=5.8	top=1352	h=988
+AC1_440_fs100	rep=1	empty=988	comp=988	delta=0	host='shou'
+AC1_440_fs100	rep=2	empty=988	comp=988	delta=0	host='shou'
+AC1_440_fs100	rep=3	empty=988	comp=988	delta=0	host='shou'
+PP_ISPEECH_440_100	h=988	pp=42.22
+AC1_440_fs115	rep=1	empty=833	comp=833	delta=0	host='搜索设置'
+AC1_440_fs115	rep=2	empty=833	comp=833	delta=0	host='搜索设置'
+AC1_440_fs115	rep=3	empty=833	comp=833	delta=0	host='搜索设置'
+PP_ISPEECH_440_115	h=833
+IDENT_AT_END	match_c524351=True	t=04:53:13

@@ -1,0 +1,4 @@
+AC9_EN	hold_ms=300	before=40	after=39	deleted=1
+AC9_EN	hold_ms=1000	before=40	after=33	deleted=7
+AC9_EN	hold_ms=2000	before=40	after=22	deleted=18
+AC9_EN	hold_ms=3000	before=40	after=9	deleted=31

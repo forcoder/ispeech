@@ -1,0 +1,12 @@
+# ev_r7_pushed_shas_r7.txt · 第七轮「推送形态 ↔ 本地提交」等价性（打回项 4(a)）
+# cmd: git ls-tree -r --format='%(objectmode) %(objectname) %(path)' <推送SHA> -- tools/qa/voca-37 docs/qa/voca-37-stage3-regression.md  逐路径比 blob
+# ts=2026-11-18T02:54:12+0800
+PUSHED_HEAD=e5c4a5baba881cef9f0fb269d02ea3fc532c0cf2
+LOCAL_HEAD=e5635d1556165cf8d66c18b1d7947171a73aa8d6
+PAIR tool=db5b171b0b0e<->aaa07f600322  doc=e5c4a5baba88<->e5635d155616
+PARENT_CHAIN=e5c4a5baba88 -> db5b171b0b0e -> 5e8b0f4（第六轮 PR#25 head，推送形态的基线）
+BLOBS scope=tools/qa/voca-37+docs/qa/report blob_identical=210 blob_differing=0 missing_in_local=0
+DIFFER=none
+OUT_OF_SCOPE_DELTA=dist/ispeech-release-1.5-20261115-1004.apk,tools/verify/__pycache__/check_crosscut.cpython-315.pyc
+LARGEST_PUSHED_BLOB=22795894 dist/ispeech-debug.apk
+NOTE=推送形态的基线树（5e8b0f4）里没有本地那枚 139,171,786B 的 dist/ispeech-release-1.5-20261115-1004.apk；本轮两笔提交只动 tools/qa/voca-37 与 docs/qa，所以两侧在这些路径上逐 blob 全等，第三方 grep 到的行号与本地一致。

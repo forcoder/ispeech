@@ -1,0 +1,9 @@
+CLEAN	top=1290	h=1050
+P1_zero	host='qei'	frame=1050	ink_rows=9
+P1_space	host='qei'
+P2_POOL	valid_steps=0	cum_px=0	est_items=7
+P5_PANEL	panel=快捷短语	top=1290	h=1050	cand_ink_rows=10
+Traceback (most recent call last):
+  File "<stdin>", line 29, in <module>
+  File "<stdin>", line 7, in inkrows
+TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'

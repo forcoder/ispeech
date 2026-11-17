@@ -1,0 +1,16 @@
+# VOCA-37 §8.4 候选带内竖滑「上屏」阈值扫描（返修轮 · 打回项 3a/3b）——stdout 原文
+# 同一包/同一设备口径见 ev_ac47b.txt 头四行
+$ python3 tools/qa/voca-37/vswipe.py <apk> 440        # 默认 --dy 20,40,60,80,110,150,200 --dur 120 --x 300 --start 38(inband) + 纯 tap 对照
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=12:40:23	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+GEOM	dens=440	frame=988	band_top=1352	band=[1353,1477]	family=commit	mode=inband	start_offset=38	x=300	dx=0	dur=120
+VSWIPE	case=commit_dy20_dx0_dur120_x300_inband38	start_y=1391	end_y=1411	dy=20	dx=0	dur=120	x=300	band_top=None	band_h=None	before='shi'	after='<NONE>'	ime_gone=True	committed=False	reading=键盘被这一下手势收掉了，宿主焦点也没了 → 不能读成上屏	h_shift=None	h_err=None	h_verdict=no_ime_frame(键盘这次手势后不在位)
+VSWIPE	case=commit_dy40_dx0_dur120_x300_inband38	start_y=1391	end_y=1431	dy=40	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='是'	ime_gone=False	committed=True	reading=以宿主文本差判定	h_shift=-832	h_err=12.04	h_verdict=unverifiable(err>5.0)
+VSWIPE	case=commit_dy60_dx0_dur120_x300_inband38	start_y=1391	end_y=1451	dy=60	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='是'	ime_gone=False	committed=True	reading=以宿主文本差判定	h_shift=-832	h_err=12.04	h_verdict=unverifiable(err>5.0)
+VSWIPE	case=commit_dy80_dx0_dur120_x300_inband38	start_y=1391	end_y=1471	dy=80	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='是'	ime_gone=False	committed=True	reading=以宿主文本差判定	h_shift=-832	h_err=12.04	h_verdict=unverifiable(err>5.0)
+VSWIPE	case=commit_dy110_dx0_dur120_x300_inband38	start_y=1391	end_y=1501	dy=110	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=commit_dy150_dx0_dur120_x300_inband38	start_y=1391	end_y=1541	dy=150	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=commit_dy200_dx0_dur120_x300_inband38	start_y=1391	end_y=1591	dy=200	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok
+VSWIPE	case=control_tap_x300	start_y=1412	dy=0	dur=0	x=300	before='shi'	after='是'	committed=True	h_shift=-832	h_err=12.04	h_verdict=unverifiable(err>5.0)
+IDENT	name=end	t=12:42:00	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=18965	h=988

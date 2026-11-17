@@ -1,0 +1,8 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=14:05:16	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+KEYMAP	fwd=keyevent69(MINUS→scrollCandidates(-1))	rev=keyevent70(EQUALS→scrollCandidates(+1))	step_dp=72	step_px_expect=198	source=IspeechImeService.kt:612-614 + CandidateView.kt:90-92,199	sign_conv=drive.shift(): 正=候选内容左移=视口向右=看后面的候选
+HOST	ok=True	round=1	taps=3	top=1352	h=988
+PREP	host='shi'	frame=988	band_top=1352	bg_match_pct=98.3	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+PRE_PROBE	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	verdict=ok	note=左端起步按 fwd 必须动一档；0 且可判 = 前提不成立，不出数
+GATE	reason=probe_zero	rc=4	blocked=左端按 fwd 方向无位移：键↔方向对调，或候选池 ≤1 条（IspeechImeService.kt:613 的 size<=1 直接 return false）	action=预期行为：参数对调就该拒绝出数	host='shi'	probe_shift=0	probe_err=0.0	bg_match_pct=98.3	frame=988

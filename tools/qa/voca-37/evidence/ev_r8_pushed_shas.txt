@@ -1,0 +1,19 @@
+# ev_r8_pushed_shas.txt · 第八轮「本地形态 ↔ 推送形态」成对自证（打回项 4(a)：报告与评论只准引推送后的 SHA）· 被测=78343a4
+# pushform.py · 「本地形态 ↔ 推送形态」逐路径 blob 比对（推送形态刻意排除 2 个路径）
+# 生成命令: python3 pushform.py --pushed refs/qa/push-r8 --max-blob
+# 远端分支 head（git ls-remote origin refs/heads/test/voca-37-stage3-regression 现算）=76ef3fbdde68c8e484d451d00ce423a9a597d1fa
+#   排除: dist/ispeech-release-1.5-20261115-1004.apk
+#   排除: tools/verify/__pycache__/check_crosscut.cpython-315.pyc
+# 固有界限：本文件所在的提交无法自证自己，核对比照下面「现算核对命令」由第三人自己跑。
+PUSHFORM	local=b4ce5d0	pushed=76ef3fb	parent_of_pushed=8d334ae	blobs_compared=550	blob_identical=550	differing=0	path_mismatch=0	excluded_paths=2	ts=2026-11-18T05:09:09+0800
+CUMULATIVE	local_range=1a2727a..b4ce5d0	pushed_range=8d334ae..76ef3fb	local_files=53	pushed_files=53	name_lists_equal=True	ts=2026-11-18T05:09:09+0800
+REMOTE_HEAD	branch=voca-37-stage3-regression	sha=76ef3fbdde68c8e484d451d00ce423a9a597d1fa	matches_pushed=True	ts=2026-11-18T05:09:09+0800
+MAX_BLOB	pushed_bytes=22795894	path=dist/ispeech-debug.apk	ts=2026-11-18T05:09:14+0800
+SUMMARY	pairs=1	blobs_identical=550	differing=0	missing=0	pr=25	rc=0	ts=2026-11-18T05:09:14+0800
+# 现算核对命令（逐字复制，第三方自己跑；不要求信上面任何一行）：
+#   git ls-remote origin refs/heads/test/voca-37-stage3-regression
+#   diff <(git ls-tree -r b4ce5d06af5917318eb50744f2352032f7a2aa58 | grep -vE 'dist/ispeech-release-1.5-20261115-1004.apk|tools/verify/__pycache__') \\
+#        <(git ls-tree -r 76ef3fbdde68c8e484d451d00ce423a9a597d1fa | grep -vE 'dist/ispeech-release-1.5-20261115-1004.apk|tools/verify/__pycache__')   # 必须空输出
+#   diff <(git diff --name-only 1a2727a b4ce5d06af5917318eb50744f2352032f7a2aa58 | grep -vE '^dist/|__pycache__') \\
+#        <(git diff --name-only 8d334ae 76ef3fbdde68c8e484d451d00ce423a9a597d1fa | grep -vE '^dist/|__pycache__')   # 两份清单必须逐行相同
+# rc=0

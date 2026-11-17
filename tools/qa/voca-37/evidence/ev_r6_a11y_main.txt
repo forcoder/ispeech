@@ -1,0 +1,55 @@
+# VOCA-47 第六轮 · 打回项 6：§12 无障碍缺口按派工 §四-1 的「4+1」重列，代码行号全部现算（不手抄）
+# 出处：派工 §四-1 的四项 = 横滚 scroll action / 候选命中高度 ≥48dp / 退格 contentDescription / 角标只 1–9，＋对比度。
+#   规格行号取 8324b03 §5：:589 / :590 / :593 / :595 / :597。「候选条朗读」在规格 :594 标的是**合规**，本轮不再当缺口写（第五轮 §12 那五行对不上派工）。
+# BASE = fa57a07（main）。每条命令原样打在下面，输出逐字未改。
+# 本文件引用的 54 条清单与 spec85_anchors.sh 都在本目录，可整份重跑；设备侧原始 stdout 已并入对应 ev_r6_*.txt，不另存副本。
+
+## A. 规格 §8.5 的 main 锚清单（54 条）当场跑在 fa57a07 → 原文见 ev_r6_spec85_main.txt
+$ bash spec85_anchors.sh fa57a07 | tail -1
+== 共 54 条，失败 0 条 ==
+
+## B. :590 候选项命中高度 ≥48dp —— 不合规（现状 38dp）
+$ git show fa57a07:app/src/main/res/layout/candidate_view.xml | sed -n 38p
+        android:minHeight="38dp"
+$ git show fa57a07:app/src/main/res/layout/candidate_view.xml | sed -n 33,34p
+    <HorizontalScrollView
+        android:id="@+id/candidate_scroll"
+
+## C. :589 横滚的可访问路径与 scroll action 挂载层
+$ git show fa57a07:app/src/main/java/com/ispeech/input/CandidateView.kt | grep -n [scroll]View..=findViewById
+53:        scrollView = findViewById(R.id.candidate_scroll)
+$ git grep -l -E [ACTION_SCROLL_FORWARD / ACTION_SCROLL_BACKWARD] fa57a07 -- app/src/main/java  →  命中文件数
+0
+$ git grep -l [isTouchExplorationEnabled] fa57a07 -- app/src/main/java  →  命中文件数
+0
+   两个都是 0：全仓没有显式 scroll action 代码、也没有触摸探索分支。平台 HorizontalScrollView 的无障碍节点是否挂在 candidate_scroll 这层（规格 :589 要求「确认可无障碍节点确实挂在这层而不是外层 LinearLayout」）**本轮未实测** → 记进未取证清单。
+
+## D. :593 角标只 1–9 —— 不合规（无上限，第 10 项起照样出数字）
+$ git show fa57a07:app/src/main/java/com/ispeech/input/CandidateView.kt | sed -n 116,117p
+        val badge = TextView(context).apply {
+            text = (index + 1).toString()
+
+## E. :595 退格键 contentDescription —— 不合规（键面是符号）
+$ git show fa57a07:app/src/main/java/com/ispeech/input/keyboard/KeyboardLayouts.kt | sed -n 73p
+        KeyDef.fn(KeyAction.BACKSPACE, "⌫", weight, KeyStyle.SPECIAL)
+$ git show fa57a07:app/src/main/java/com/ispeech/input/SoftKeyboardView.kt | sed -n 475,478p
+                contentDescription = if (effectiveKey.action == KeyAction.SHIFT) {
+                    "大写"
+                } else {
+                    keyLabel(effectiveKey)
+$ git show fa57a07:app/src/main/java/com/ispeech/input/SoftKeyboardView.kt | sed -n 516p
+                keyLabel(effectiveKey)
+   → 非 SHIFT 的图标键 contentDescription = keyLabel(effectiveKey)，而退格的 label 就是那个符号，读屏念不出「删除」语义。
+
+## F. :597 对比度 —— 不合规（首选高亮 3.82:1 < 4.5:1；正文 14.58:1 合规）
+$ git show fa57a07:app/src/main/java/com/ispeech/input/CandidateView.kt | sed -n 106p\;179p
+            setTextColor(if (highlighted) primaryColor else TEXT_PRIMARY)
+    private fun resolvePrimaryColor(): Int {
+$ git show fa57a07:app/src/main/res/values/colors.xml | sed -n 4p
+    <color name="ispeech_primary">#5B6CFF</color>
+$ git show fa57a07:app/src/main/res/layout/candidate_view.xml | sed -n 9p
+    android:background="#F4F5F7"
+
+## G. :594 候选词朗读 —— 合规（本轮从缺口清单撤掉）
+$ git show fa57a07:app/src/main/java/com/ispeech/input/CandidateView.kt | sed -n 141p
+            contentDescription = candidate.display

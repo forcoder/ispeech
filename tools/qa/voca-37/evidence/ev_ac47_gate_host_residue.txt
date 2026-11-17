@@ -1,0 +1,7 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=14:08:59	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+KEYMAP	fwd=keyevent70(EQUALS→scrollCandidates(+1))	rev=keyevent69(MINUS→scrollCandidates(-1))	step_dp=72	step_px_expect=198	source=IspeechImeService.kt:612-614 + CandidateView.kt:90-92,199	sign_conv=drive.shift(): 正=候选内容左移=视口向右=看后面的候选
+HOST	ok=True	round=1	taps=3	top=1352	h=988
+PREP	host='szzzhzzzizzzzzzzzzzzzzzzz'	frame=988	band_top=1352	bg_match_pct=78.7	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+GATE	reason=host_buffer	rc=5	blocked=宿主文本不等于预热串：上一次 run 的残留没清掉，或键根本没进 IME —— 按 §10-4b 复位后重跑	action=按 §10-4b 复位设备状态后重跑	host='szzzhzzzizzzzzzzzzzzzzzzz'	expect=shi	frame=988	bg_match_pct=78.7
