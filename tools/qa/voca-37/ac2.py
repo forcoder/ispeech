@@ -19,15 +19,29 @@
 """
 import os, re, subprocess, sys, time
 
+KEYS = {"ok": False}
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import drive as D
 import fs115 as F  # 复用 dex 身份校验 + IME 身份判定；它的 __main__ 不会在 import 时执行
 
 APK = sys.argv[1]
+
+
+def ours(ime):
+    return str(ime).startswith("com.ispeech.ime/")
+
+
+def ident(tag):
+    ok = F.ident_once(APK)
+    D.log("IDENT", end=tag, match=ok, ime=D.shell("settings get secure default_input_method").strip())
+    return ok
 PATH_KIND = sys.argv[3] if len(sys.argv) > 3 else "keyevent"
-SPACE_XY = (532, 2125)      # 440dpi QWERTY 空格键中心（drive.ROW/YROW 同一套坐标）
+SPACE_XY = None             # 空格键中心：由 key_map() 当场反推（写死 532,2125 在 VOCA-184
+                            # 收紧行内留白后就不成立了，软键路径会点到别处）
 MODE_XY = (165, 2125)       # 底行「拼/英」切换键中心（kb2_grid.png 实测）
-EXPECT_TOP = 1352           # 440dpi QWERTY + 候选条在位时的 ime top
+# 几何一律当场读（第四轮写死 1352 是 c524351 单包的 ime top；VOCA-184 把字母键留白从
+# 4dp 收到 1dp 之后集成候选是 1388，写死会把「键盘在位」误判成「宿主没起来」）
 GEAR_XY = (1005, 1552)      # 工具栏最后一键 ⚙（kb2_grid.png 实测；点它开输入法内配置面板）
 PANEL_SCROLL = "input swipe 500 1900 500 1450 400"   # 面板列表滚到底
 DS_SWITCH_XY = (955, 1855)  # 滚到底后「双击空格句号」那一行的 Switch 中心（panel2_grid.png 实测）
@@ -186,17 +200,17 @@ def clear_host(n=25):
 def group(case, times, gap=0.0, single=False):
     """single=True 且 keyevent 路径：一次 adb 调用注入 times 个空格（两次注入几乎 0 间隔）。
     否则逐次调用/逐次软键点击，wall_between_ms = 相邻两次注入的墙钟间隔。"""
-    if not F.ours(F.cur_ime()):
+    if not ours(F.cur_ime()):
         D.log("SKIP", path=PATH_KIND, case=case, reason="ime_not_ours", current=F.cur_ime())
         return
     top, bot, h = D.ime_frame()
-    if top != EXPECT_TOP or not h:
+    if not h:
         st = host_ready()
         D.log("HOST", case=case, **{k: v for k, v in st.items()})
         top, bot, h = D.ime_frame()
-    if top != EXPECT_TOP:
-        # 键盘几何不对 = 空格键坐标不成立，这组数据不能要
-        D.log("SKIP", path=PATH_KIND, case=case, reason="keyboard_not_qwerty_at_440dpi", top=top, h=h)
+    if SPACE_XY is None or not KEYS.get("ok"):
+        # 键盘几何没标定成功 = 空格键坐标不成立，这组数据不能要
+        D.log("SKIP", path=PATH_KIND, case=case, reason="key_map_not_calibrated", top=top, h=h)
         return
     clear_host()
     before = D.focused_text()
@@ -227,7 +241,7 @@ if __name__ == "__main__":
     r = subprocess.run([D.ADB, "-s", D.S, "install", "-r", "-d", "-g", APK], capture_output=True, text=True, timeout=900)
     D.log("INSTALL", out=r.stdout.strip()[-60:], rc=r.returncode)
     D.log("PKG", path_kind=PATH_KIND, pkg_ime=D.shell("settings get secure default_input_method").strip())
-    if not F.ident("start"):
+    if not ident("start"):
         sys.exit(2)
     st = host_ready()
     D.log("HOST", **{k: v for k, v in st.items()})
@@ -235,10 +249,14 @@ if __name__ == "__main__":
         D.log("SKIP", path=PATH_KIND, reason="host_not_ready")
         sys.exit(3)
     top, bot, h = D.ime_frame()
-    D.log("FRAME", top=top, h=h, expect_top_at_440dpi=EXPECT_TOP, space_xy=SPACE_XY,
-          gear_xy=GEAR_XY, layout_ok=(top == EXPECT_TOP))
-    if top != EXPECT_TOP:
-        D.log("SKIP", path=PATH_KIND, reason="keyboard_layout_not_qwerty440", top=top)
+    m, diag = D.key_map()
+    KEYS["ok"] = bool(diag.get("ok"))
+    if KEYS["ok"]:
+        SPACE_XY = m[" "]
+    D.log("FRAME", top=top, h=h, keymap_ok=KEYS["ok"], runs=diag.get("runs"),
+          space_xy=SPACE_XY, gear_xy=GEAR_XY)
+    if not KEYS["ok"]:
+        D.log("SKIP", path=PATH_KIND, reason="key_map_fail", diag=str(diag)[:120])
         sys.exit(3)
     if not ensure_chinese_mode():
         D.log("SKIP", path=PATH_KIND, reason="not_chinese_mode")
@@ -266,4 +284,4 @@ if __name__ == "__main__":
         else:
             group("2x_single_injection", 2, single=True)
     D.log("FINAL_SWITCH", **{k: v for k, v in switch_state().items()})
-    F.ident("end")
+    ident("end")

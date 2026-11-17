@@ -144,16 +144,16 @@ def rows(path, y0=1352, y1=2340):
     return out
 
 
-def prof(path, y0, y1, step=2):
+def prof(path, y0, y1, step=2, x0=4, x1=1076):
     px = Image.open(path).convert("RGB").load()
-    band = [[sum(sum(px[x, y]) / 3.0 for y in range(y0, y1)) / (y1 - y0)
-             for x in range(4, 1076, step)] for _ in (0,)]
-    return band[0]
+    return [sum(sum(px[x, y]) / 3.0 for y in range(y0, y1)) / (y1 - y0)
+            for x in range(x0, x1, step)]
 
 
-def shift(a, b, y0, y1, step=2):
-    """候选带列剖面互相关：返回 (位移px, 残差)。正 = 内容左移 = 向右翻页。"""
-    pa, pb = prof(a, y0, y1), prof(b, y0, y1)
+def shift(a, b, y0, y1, step=2, x0=4, x1=1076):
+    """候选带列剖面互相关：返回 (位移px, 残差)。正 = 内容左移 = 向右翻页。
+    x0/x1 只取候选区（chip 右沿+1 起）时，静态 chip 不会把相关拉平。"""
+    pa, pb = prof(a, y0, y1, step, x0, x1), prof(b, y0, y1, step, x0, x1)
     n = len(pa)
     best = (None, None)
     for s in range(-600, 601):
@@ -200,21 +200,110 @@ if __name__ == "__main__":
         s, e = shift(sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]))
         log("SHIFT", a=sys.argv[2], b=sys.argv[3], shift=s, err=round(e, 2))
 
-ROW1 = {c: 54 + i*108 for i, c in enumerate("qwertyuiop")}
-ROW2 = {c: 60 + i*120 for i, c in enumerate("asdfghjkl")}
-ROW3 = {c: 162 + i*108 for i, c in enumerate("zxcvbnm")}
-YROW = {"q": 1679, "a": 1827, "z": 1975, " ": 2125}
+# 键位坐标一律**从当场截图反推**，不写死像素。
+# 历史教训：本工装曾写死 440dpi 的一排像素（ROW1/ROW2/ROW3/YROW），那套数既没按密度换算
+# （520dpi 下整行错位），中心本身也和真实布局对不上（'o' 写成 918，实测键心 804）——
+# 结果第四轮把 zhongguo 打成 hogguo / khk，候选条直接空掉，量到的「组合态」其实是 chip-only。
+# 现在 key_map() 按白底键帽列段取键心，tap_keys() 敲完必须回读宿主文本校验，不一致就出不了数。
+ROW_LETTERS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
 
-def tap_key(ch):
-    if ch == " ":
-        shell("input tap 532 2125"); return
-    for table, y in ((ROW1, YROW["q"]), (ROW2, YROW["a"]), (ROW3, YROW["z"])):
-        if ch in table:
-            shell("input tap %d %d" % (table[ch], y)); return
 
-def tap_keys(s, gap=0.12):
+def key_map(png=None, frame=None, min_frac=0.4, min_w=28, merge_gap=8):
+    """从截图反推键位 → ({ch:(x,y)}, 诊断 dict)。
+
+    键帽 = 白底（min 通道 ≥250）在键带里占比 ≥min_frac 的连续列段；字母行按「段数 =
+    10/9/7」认领（不靠行序：520dpi 下 `rows()` 会把一行拆成两段，段数才是稳定特征），
+    退格取第三行最后一段右沿到屏幕右边的中点，空格取第三行之后最宽的白段（≥200px，
+    灰色功能键不产生白段）。
+    """
+    top, bot, h = frame or ime_frame()
+    if not h:
+        return {}, dict(reason="no_ime_frame")
+    p = png or shot("_kbd_map.png")
+    raw = rows(p, top, bot)
+    # 合并「同一行被笔画切断」的小间隙，但**不许把相邻两行并成一行**：VOCA-184 把字母键
+    # 行内留白从 4dp 收到 1dp（d283706），行间隙只剩 ~5px，老的 merge_gap=8 会把 qwerty 行
+    # 和 asdf 行粘成一个带，列段数就不再是 10/9/7，整套键位反推直接失效。
+    max_row_px = int(52 * DEN)            # 单行键高上限 52dp（MAX_KEY_HEIGHT_DP 同口径）
+    bands = []
+    for a, b in raw:
+        if bands and a - bands[-1][1] <= merge_gap and b - bands[-1][0] <= max_row_px:
+            bands[-1] = (bands[-1][0], b)
+        else:
+            bands.append((a, b))
+    px = Image.open(p).convert("RGB").load()
+
+    def runs_in(a, b):
+        ys = list(range(a + 4, b - 4))
+        n = float(len(ys))
+        frac = [sum(1 for y in ys if min(px[x, y]) >= 250) / n for x in range(1080)]
+        out, x = [], 0
+        while x < 1080:
+            if frac[x] >= min_frac:
+                x2 = x
+                while x2 + 1 < 1080 and frac[x2 + 1] >= min_frac:
+                    x2 += 1
+                if x2 - x + 1 >= min_w:
+                    out.append((x, x2, (x + x2) // 2))
+                x = x2 + 1
+            else:
+                x += 1
+        return out
+
+    per = [runs_in(a, b) for a, b in bands]
+    diag = dict(bands_raw=len(raw), bands=[(a, b) for a, b in bands], runs=[len(r) for r in per])
+    row_at = {}
+    for i, letters in enumerate(ROW_LETTERS):
+        hit = [j for j, r in enumerate(per) if len(r) == len(letters) and (not row_at or j > max(row_at.values()))]
+        if not hit:
+            diag["reason"] = "no_row_with_%d_keys" % len(letters)
+            return {}, diag
+        row_at[i] = hit[0]
+    m = {}
+    for i, letters in enumerate(ROW_LETTERS):
+        j = row_at[i]
+        yc = (bands[j][0] + bands[j][1]) // 2
+        for ch, (l, r, c) in zip(letters, per[j]):
+            m[ch] = (c, yc)
+    j3 = row_at[2]
+    pitch = (per[j3][-1][2] - per[j3][0][2]) / 6.0
+    m["del"] = (int(round((per[j3][-1][1] + 1080) / 2.0)), (bands[j3][0] + bands[j3][1]) // 2)
+    m["shift"] = (int(round(per[j3][0][0] - pitch / 2.0)), (bands[j3][0] + bands[j3][1]) // 2)
+    diag["del_pitch_px"] = round(pitch, 1)
+    cands = [(r[1] - r[0] + 1, j, r) for j in range(j3 + 1, len(per)) for r in per[j]]
+    if not cands or max(cands)[0] < 200:
+        diag["reason"] = "no_space_key"
+        return {}, diag
+    w, j, r = max(cands)
+    m[" "] = (r[2], (bands[j][0] + bands[j][1]) // 2)
+    diag["space_band"] = (j, bands[j], w)
+    diag["ok"] = True
+    return m, diag
+
+
+def tap_keys(s, gap=0.12, settle=0.45, m=None):
+    """逐键点按 + 宿主回读校验：回读 ≠ 所敲串就返回 ok=False，调用方走闸门拒绝出数。"""
+    m = m if m is not None else key_map()[0]
+    miss = [c for c in s if c not in m]
+    if miss:
+        return dict(ok=False, want=s, got=None, reason="no_key_xy", missing="".join(miss))
     for ch in s:
-        tap_key(ch); time.sleep(gap)
+        shell("input tap %d %d" % m[ch])
+        time.sleep(gap)
+    time.sleep(settle)
+    got = focused_text()
+    return dict(ok=got == s, want=s, got=got)
+
+
+def hold_key(ms, ch="del", m=None):
+    """长按某个软键 ms 毫秒：同点 swipe（down…hold…up），一次手势。"""
+    m = m if m is not None else key_map()[0]
+    if ch not in m:
+        return None
+    x, y = m[ch]
+    shell("input swipe %d %d %d %d %d" % (x, y, x, y, int(ms)))
+    return (x, y)
+
 
 def setup_contacts(retries=3):
     import re as _re
