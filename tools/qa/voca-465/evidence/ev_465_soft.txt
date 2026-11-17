@@ -1,0 +1,22 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+PKG	path_kind=soft	pkg_ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+IDENT	name=start	t=23:34:29	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+HOST	ok=True	round=1	taps=2	top=1352	h=988
+FRAME	top=1352	h=988	expect_top_at_440dpi=1352	space_xy=(532, 2125)	gear_xy=(1005, 1552)	layout_ok=True
+MODE	path=soft	mode=chinese	host='中国'	attempt=1
+DS_BEFORE	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=False
+TOUCH	y=1652	diff={'double_space_period': True}	verdict=hit_target
+DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True
+SWITCH	want=ON	state=True	src=datastore	raw_hex=12020801	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period
+AC2	path=soft	case=2x_single_injection	times=2	wall_between_ms=0(single_shell)	before='搜索设置'	host='。'	switch_state=True	switch_src=datastore
+AC2	path=soft	case=2x_two_adb_calls	times=2	wall_between_ms=40.2	before='搜索设置'	host='。'	switch_state=True	switch_src=datastore
+AC2	path=soft	case=2x_gap500ms_control	times=2	wall_between_ms=542.0	before='搜索设置'	host='  '	switch_state=True	switch_src=datastore
+AC2	path=soft	case=3x_single_injection	times=3	wall_between_ms=0(single_shell)	before='搜索设置'	host='。 '	switch_state=True	switch_src=datastore
+DS_BEFORE	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True
+TOUCH	y=1652	diff={'double_space_period': False}	verdict=hit_target
+DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=False
+SWITCH	want=OFF	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period
+AC2	path=soft	case=2x_single_injection	times=2	wall_between_ms=0(single_shell)	before='搜索设置'	host='  '	switch_state=False	switch_src=datastore
+FINAL_SWITCH	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb
+IDENT	name=end	t=23:35:51	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=13004	h=988

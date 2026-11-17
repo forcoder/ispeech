@@ -953,7 +953,8 @@ class SoftKeyboardView @JvmOverloads constructor(
     }
 
     private companion object {
-        const val DEFAULT_KEY_HEIGHT_DP = 52
+        /** 键高兜底值，与 KeyboardSettings.keyHeightDp 默认值同口径（规格 §6.2 方案 B1：46dp）。 */
+        const val DEFAULT_KEY_HEIGHT_DP = 46
 
         /** 空格长按进入语音的默认阈值（毫秒）；实际值由服务侧按设置推入 [spaceLongPressMs]。 */
         const val DEFAULT_SPACE_LONG_PRESS_MS = 500L

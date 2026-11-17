@@ -1,0 +1,3 @@
+SWITCH True
+LONGPRESS soft space: voice_markers=[]
+  focused='搜索设置'

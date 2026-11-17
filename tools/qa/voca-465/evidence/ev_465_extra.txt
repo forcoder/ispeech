@@ -1,0 +1,30 @@
+TOUCH	y=1652	diff={'double_space_period': True}	verdict=hit_target
+SWITCH want=ON state=True src=datastore raw=12020801 route=ime_panel@1652
+AC3 keyevent composing: host='中国国之利刃'
+LONGPRESS keyevent: host='  ' len=2 hasPeriod=False
+  host='  '
+    1794929808.707 13004 13004 D IspeechIme: space via=key action=SPACE doubleSpace=true
+PROBE 2x_single_injection
+  host='。'
+    1794929813.647 13004 13004 D IspeechIme: spaceProbe agoMs=4940 roundTripMs=0 matched=false
+    1794929813.647 13004 13004 D IspeechIme: space via=key action=SPACE doubleSpace=true
+    1794929813.656 13004 13004 D IspeechIme: spaceProbe agoMs=2 roundTripMs=7 matched=true
+    1794929813.656 13004 13004 D IspeechIme: space via=key action=DOUBLE_SPACE_PERIOD doubleSpace=true
+PROBE 2x_two_adb_calls
+  host='。'
+    1794929818.261 13004 13004 D IspeechIme: space via=key action=SPACE doubleSpace=true
+    1794929818.284 13004 13004 D IspeechIme: spaceProbe agoMs=23 roundTripMs=0 matched=true
+    1794929818.284 13004 13004 D IspeechIme: space via=key action=DOUBLE_SPACE_PERIOD doubleSpace=true
+PROBE 3x_single_injection
+  host='。 '
+    1794929822.900 13004 13004 D IspeechIme: space via=key action=SPACE doubleSpace=true
+    1794929822.906 13004 13004 D IspeechIme: spaceProbe agoMs=2 roundTripMs=4 matched=true
+    1794929822.906 13004 13004 D IspeechIme: space via=key action=DOUBLE_SPACE_PERIOD doubleSpace=true
+    1794929822.907 13004 13004 D IspeechIme: space via=key action=SPACE doubleSpace=true
+PROBE 2x_gap500ms
+  host='  '
+    1794929828.018 13004 13004 D IspeechIme: spaceProbe agoMs=5110 roundTripMs=1 matched=false
+    1794929828.018 13004 13004 D IspeechIme: space via=key action=SPACE doubleSpace=true
+    1794929828.549 13004 13004 D IspeechIme: spaceProbe agoMs=532 roundTripMs=0 matched=true
+    1794929828.549 13004 13004 D IspeechIme: space via=key action=SPACE doubleSpace=true
+DONE

@@ -224,6 +224,11 @@ class SettingsPanel @JvmOverloads constructor(
         ToggleSpec("fuzzyPinyin", R.string.panel_toggle_fuzzy_pinyin, keyboard.fuzzyPinyin),
         ToggleSpec("traditionalOutput", R.string.panel_toggle_traditional, keyboard.traditionalOutput),
         ToggleSpec("vibrate", R.string.panel_toggle_vibrate, keyboard.vibrate),
+        ToggleSpec(
+            "doubleSpacePeriod",
+            R.string.panel_toggle_double_space_period,
+            keyboard.doubleSpacePeriod,
+        ),
     )
 
     private fun buildToggleRow(spec: ToggleSpec): View {

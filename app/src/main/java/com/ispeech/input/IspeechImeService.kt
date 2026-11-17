@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.graphics.Paint
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.SpannableString
 import android.text.Spanned
@@ -16,6 +17,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.accessibility.AccessibilityManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
@@ -102,6 +104,9 @@ class IspeechImeService : InputMethodService() {
          */
         private const val CANDIDATE_POOL_FACTOR = 3
 
+        /** 双击空格出句号上屏的字符（规格 §2.2 R1，中文全角句号） */
+        private const val DOUBLE_SPACE_PERIOD_TEXT = "。"
+
         /** AI 生成时从输入框读取的最大字符数 */
         private const val AI_MAX_MESSAGE_CHARS = 1000
 
@@ -186,6 +191,12 @@ class IspeechImeService : InputMethodService() {
 
     /** 最近一次上屏文本，用于撤销上屏 */
     private var lastCommit: String = ""
+
+    /**
+     * 最近一次「空格上屏」的时刻（elapsedRealtime），双击空格出句号的判定基准。
+     * 非空格上屏、退格、切面板、切中英、换输入框都会清零（规格 §2.2 R3 / R4）。
+     */
+    private var lastSpaceCommitAt: Long? = null
 
     /** 快捷短语面板的筛选关键词（硬件键盘输入） */
     private var panelKeyword: String = ""
@@ -581,7 +592,15 @@ class IspeechImeService : InputMethodService() {
         if (keyCode == KeyEvent.KEYCODE_SPACE || keyCode == KeyEvent.KEYCODE_ENTER ||
             keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
         ) {
-            if (buffer.isEmpty() && !aiReplyActive && !associationActive) return false
+            val idle = buffer.isEmpty() && !aiReplyActive && !associationActive
+            // VOCA-465 D1：空缓冲时这里原本一律放行给宿主，KeyEvent 根本进不了 handleSpace()，
+            // 双击空格句号在外接 / 物理 / 注入键上全阴性。只在「出句号还有可能成立」时接管，
+            // 其余（含开关关闭、自动重复、英文态）维持放行，行为与修复前一致。
+            if (idle && keyCode == KeyEvent.KEYCODE_SPACE && takesHardwareSpace(event)) {
+                handleSpace(via = "key")
+                return true
+            }
+            if (idle) return false
             if (keyCode == KeyEvent.KEYCODE_SPACE) handleSpace() else handleEnter()
             return true
         }
@@ -671,6 +690,7 @@ class IspeechImeService : InputMethodService() {
 
     /** 退格：缓冲有内容时删码，否则删应用侧光标前字符 */
     private fun handleBackspace() {
+        lastSpaceCommitAt = null // R4：退格打断双击窗口
         if (t9Digits.isNotEmpty()) {
             t9Digits = t9Digits.substring(0, t9Digits.length - 1)
             refreshT9Candidates()
@@ -703,30 +723,113 @@ class IspeechImeService : InputMethodService() {
         if (hasSelection) sendKey(KeyEvent.KEYCODE_DEL) else ic.deleteSurroundingText(1, 0)
     }
 
-    /** 空格：缓冲有内容时上屏首选，否则输出空格 */
-    private fun handleSpace() {
-        if (t9Digits.isNotEmpty()) {
-            commitT9()
-            return
+    /**
+     * 空格：上屏链条与双击判定见 [SpaceKeyPolicy]（缓冲有内容时上屏首选，走到底才轮到双击判定）。
+     *
+     * 判定必须在服务侧做（R8）：空格键已经绑了 `SoftKeyboardView.installSpaceGesture`
+     * 的长按进语音，View 层再加一个双击手势会和它抢事件。
+     *
+     * @param via 按键入口，只进日志：`soft` = 软键盘点击，`key` = 硬件 / 蓝牙 / 注入键。
+     *            D1 就是因为两条入口走不到同一个判定，日志必须能把它们分开。
+     */
+    private fun handleSpace(via: String = "soft") {
+        val now = SystemClock.elapsedRealtime()
+        val action = SpaceKeyPolicy.decide(
+            state = SpaceKeyPolicy.State(
+                t9Pending = t9Digits.isNotEmpty(),
+                composing = buffer.isNotEmpty(),
+                aiReplyPending = aiReplyActive,
+                voicePending = voiceActive,
+                associationPending = associationActive,
+                englishMode = mode == InputMode.ENGLISH,
+                accessibilityEnabled = isAccessibilityEnabled(),
+                precedingIsSpace = lastSpaceStillBeforeCursor(),
+                lastSpaceCommitAt = lastSpaceCommitAt,
+            ),
+            settings = settings,
+            now = now,
+        )
+        Log.d(TAG, "space via=$via action=$action doubleSpace=${settings.doubleSpacePeriod}")
+        when (action) {
+            SpaceKeyPolicy.Action.COMMIT_T9 -> commitT9()
+            SpaceKeyPolicy.Action.COMMIT_TOP -> commitTop()
+            SpaceKeyPolicy.Action.COMMIT_AI_REPLY -> commitAiReply()
+            SpaceKeyPolicy.Action.COMMIT_VOICE -> commitVoice()
+            SpaceKeyPolicy.Action.PICK_FIRST_CANDIDATE -> pickCandidate(0)
+            SpaceKeyPolicy.Action.SPACE -> {
+                commitDirect(" ", CommitType.PUNCTUATION)
+                lastSpaceCommitAt = now
+            }
+            SpaceKeyPolicy.Action.DOUBLE_SPACE_PERIOD -> commitDoubleSpacePeriod()
         }
-        if (buffer.isNotEmpty()) {
-            commitTop()
-            return
-        }
-        if (aiReplyActive) {
-            commitAiReply()
-            return
-        }
-        if (voiceActive) {
-            commitVoice()
-            return
-        }
-        if (associationActive) {
-            pickCandidate(0)
-            return
-        }
-        commitDirect(" ", CommitType.PUNCTUATION)
     }
+
+    /**
+     * 双击空格出句号（R1）：净效果是「两个空格变成一个句号」——先删掉刚上屏的那一个空格，
+     * 再上屏「。」，两步放在同一次 InputConnection 编辑批次里，中间态不会被宿主看到。
+     * 上屏后清零时间戳，所以三连击不会连着出两个句号。
+     */
+    private fun commitDoubleSpacePeriod() {
+        val ic = currentInputConnection ?: return
+        val out = convertHan(DOUBLE_SPACE_PERIOD_TEXT)
+        ic.beginBatchEdit()
+        try {
+            ic.deleteSurroundingText(1, 0)
+            ic.commitText(out, 1)
+        } finally {
+            ic.endBatchEdit()
+        }
+        lastCommit = out
+        lastSpaceCommitAt = null
+        recordCommit(CommitType.PUNCTUATION, out)
+        renderCandidateView()
+    }
+
+    /** 无障碍服务是否启用：双击判定窗口 300 → 600 ms 的依据（规格 §5）。 */
+    private fun isAccessibilityEnabled(): Boolean =
+        getSystemService(AccessibilityManager::class.java)?.isEnabled == true
+
+    /**
+     * 光标前那一个字符是不是刚上屏的那个空格 —— 双击出句号要删字符，删之前先确认目标。
+     *
+     * [lastSpaceCommitAt] 只证明「刚刚有一次空格上屏」，证明不了那个空格还在原地：宿主可以自己吞掉它，
+     * 用户也可以移动光标，而 R4 说的「移动光标」在输入法侧没有观测点（挂 `onUpdateSelection` 会被自家
+     * commitText 打回）。这一次读取就是那个缺失的观测点：读不到当不成立，宁可出两个空格也不误删别人的字。
+     * `getTextBeforeCursor` 是到宿主的跨进程调用，所以只在时间窗状态成立时才读；
+     * 真读了就打一行 `spaceProbe`（logcat 时刻给间隔、`roundTripMs` 给单次成本）——
+     * 硬件键接管后它会多起来，这条是父单要的 INP 观测点（VOCA-465 / VOCA-37 §五）。
+     */
+    private fun lastSpaceStillBeforeCursor(): Boolean {
+        val previous = lastSpaceCommitAt ?: return false
+        val startedAt = SystemClock.elapsedRealtime()
+        val matched = currentInputConnection?.getTextBeforeCursor(1, 0)?.toString() == " "
+        Log.d(
+            TAG,
+            "spaceProbe agoMs=${startedAt - previous} " +
+                "roundTripMs=${SystemClock.elapsedRealtime() - startedAt} matched=$matched",
+        )
+        return matched
+    }
+
+    /**
+     * 空缓冲时，这一发硬件 / 注入键空格要不要由输入法吃掉（VOCA-465 D1）。
+     *
+     * 判定本身在 [SpaceKeyPolicy.takesHardwareSpace]；这里只喂它用得上的状态，
+     * 刻意不读 `precedingIsSpace` 也不查无障碍服务 —— 接管判断用不到，多读一次就是多一次跨进程往返。
+     */
+    private fun takesHardwareSpace(event: KeyEvent): Boolean =
+        SpaceKeyPolicy.takesHardwareSpace(
+            state = SpaceKeyPolicy.State(
+                t9Pending = t9Digits.isNotEmpty(),
+                composing = buffer.isNotEmpty(),
+                aiReplyPending = aiReplyActive,
+                voicePending = voiceActive,
+                associationPending = associationActive,
+                englishMode = mode == InputMode.ENGLISH,
+                keyRepeat = event.repeatCount > 0,
+            ),
+            settings = settings,
+        )
 
     /** 回车：缓冲有内容时上屏首选，否则输出换行 */
     private fun handleEnter() {
@@ -750,6 +853,7 @@ class IspeechImeService : InputMethodService() {
     /** 落到指定输入态：落定未完成的组合，刷新键面 / 面板 / 状态。 */
     private fun enterMode(target: InputMode) {
         if (buffer.isNotEmpty()) commitTop()
+        lastSpaceCommitAt = null // R4：切中英打断双击窗口
         mode = target
         softKeyboard?.resetShift()
         softKeyboard?.setEnglishMode(mode == InputMode.ENGLISH)
@@ -922,6 +1026,7 @@ class IspeechImeService : InputMethodService() {
         voiceActive = false
         codeOverride = null
         statusText = null
+        lastSpaceCommitAt = null
         recordCommit(CommitType.CANDIDATE, out)
         if (allowAssociation) startAssociation(out) else renderCandidateView()
     }
@@ -932,6 +1037,8 @@ class IspeechImeService : InputMethodService() {
         val out = convertHan(text)
         currentInputConnection?.commitText(out, 1)
         lastCommit = out
+        // R3：非空格上屏清零双击窗口；空格分支由 handleSpace 在调用之后重新计时
+        lastSpaceCommitAt = null
         recordCommit(type, out)
         renderCandidateView()
     }
@@ -1160,6 +1267,7 @@ class IspeechImeService : InputMethodService() {
         }
         commitPending()
         clearAssociation()
+        lastSpaceCommitAt = null // R4：切面板打断双击窗口
         panel = target
         panelKeyword = ""
         updatePanelVisibility()
@@ -1198,6 +1306,7 @@ class IspeechImeService : InputMethodService() {
     private fun closePanel() {
         if (panel == Panel.NONE) return
         panel = Panel.NONE
+        lastSpaceCommitAt = null // R4：切面板打断双击窗口
         panelKeyword = ""
         quickPhrasePanel?.setKeyword("")
         statusText = null
@@ -1861,6 +1970,7 @@ class IspeechImeService : InputMethodService() {
         }
         ic?.commitText(candidate.insertText, 1)
         lastCommit = candidate.insertText
+        lastSpaceCommitAt = null // R3：AI 回复上屏走的是这里，不是 commit()/commitDirect()
         // 用户采纳了模型建议：本地记一条「输入 → 采纳的回复」，下次作为 few-shot
         if (aiReplyFromModel) {
             val source = aiSourceText
@@ -1977,6 +2087,7 @@ class IspeechImeService : InputMethodService() {
         candidates = emptyList()
         associationActive = false
         lastCommit = ""
+        lastSpaceCommitAt = null // R4：换输入框 / 切输入法打断双击窗口
         panelKeyword = ""
         panel = Panel.NONE
         softKeyboard?.resetShift()
@@ -2028,6 +2139,7 @@ class IspeechImeService : InputMethodService() {
                 "fuzzyPinyin" -> SettingsStore.setFuzzyPinyin(this@IspeechImeService, value)
                 "traditionalOutput" -> SettingsStore.setTraditionalOutput(this@IspeechImeService, value)
                 "vibrate" -> SettingsStore.setVibrate(this@IspeechImeService, value)
+                "doubleSpacePeriod" -> SettingsStore.setDoubleSpacePeriod(this@IspeechImeService, value)
             }
             if (key == "pinyinMixed" || key == "fuzzyPinyin") {
                 AppContainer.invalidateEngine()

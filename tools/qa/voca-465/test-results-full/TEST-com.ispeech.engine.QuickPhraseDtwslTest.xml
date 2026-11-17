@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ispeech.engine.QuickPhraseDtwslTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-17T15:40:54" hostname="MStudio" time="0.006">
+  <properties/>
+  <testcase name="内置规则表里 dtwsl 只有一条" classname="com.ispeech.engine.QuickPhraseDtwslTest" time="0.002"/>
+  <testcase name="转义与反转义往返一致" classname="com.ispeech.engine.QuickPhraseDtwslTest" time="0.001"/>
+  <testcase name="exact 模式下少一位不命中" classname="com.ispeech.engine.QuickPhraseDtwslTest" time="0.0"/>
+  <testcase name="上屏正文与源文件逐字一致" classname="com.ispeech.engine.QuickPhraseDtwslTest" time="0.001"/>
+  <testcase name="精确命中压过同码高权重词库候选" classname="com.ispeech.engine.QuickPhraseDtwslTest" time="0.001"/>
+  <testcase name="输入 dtwsl 精确命中泡池须知并排在首位" classname="com.ispeech.engine.QuickPhraseDtwslTest" time="0.0"/>
+  <testcase name="其它内置规则照常命中" classname="com.ispeech.engine.QuickPhraseDtwslTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,7 +1,11 @@
 package com.ispeech.input
 
 import com.ispeech.settings.store.ChineseInputMethod
+import com.ispeech.settings.store.KeyboardSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -61,4 +65,37 @@ class InputModePolicyTest {
         assertEquals(ChineseInputMethod.PINYIN, ChineseInputMethod.parse(null))
         assertEquals(ChineseInputMethod.PINYIN, ChineseInputMethod.parse("UNKNOWN"))
     }
+
+    /**
+     * VOCA-465 D1：中英切换落到的输入态，就是硬件键入口判「空格归谁」时读的那个 `mode`。
+     *
+     * 规格 AC-2 的 Given 是「中文输入态（拼音或五笔任一）」—— 两态都要接管，英文态一律放行。
+     */
+    @Test
+    fun `中英切换后的输入态与硬件键空格接管口径一致`() {
+        val enabled = KeyboardSettings(doubleSpacePeriod = true)
+        for (method in listOf(ChineseInputMethod.WUBI, ChineseInputMethod.PINYIN)) {
+            val chinese = InputModePolicy.toggle(InputMode.ENGLISH, method)
+            assertNotEquals(InputMode.ENGLISH, chinese)
+            assertTrue("中文态（$method）硬件键空格要进判定链", takesSpaceIn(chinese, enabled))
+
+            val english = InputModePolicy.toggle(chinese, method)
+            assertEquals(InputMode.ENGLISH, english)
+            assertFalse("英文态空格交回宿主（R6）", takesSpaceIn(english, enabled))
+        }
+    }
+
+    @Test
+    fun `开关关闭时任何输入态都不接管硬件键空格`() {
+        val off = KeyboardSettings()
+        for (mode in InputMode.entries) {
+            assertFalse(takesSpaceIn(mode, off))
+        }
+    }
+
+    private fun takesSpaceIn(mode: InputMode, settings: KeyboardSettings): Boolean =
+        SpaceKeyPolicy.takesHardwareSpace(
+            state = SpaceKeyPolicy.State(englishMode = mode == InputMode.ENGLISH),
+            settings = settings,
+        )
 }

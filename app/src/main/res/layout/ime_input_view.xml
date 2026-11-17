@@ -21,10 +21,11 @@
     android:orientation="vertical"
     android:layout_gravity="bottom">
 
+    <!-- include 上的 layout_height 会覆盖被引入布局根节点的取值，所以候选条的恒高 46dp 两处都要写 -->
     <include
         layout="@layout/candidate_view"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_height="46dp" />
 
     <LinearLayout
         android:id="@+id/ime_content"

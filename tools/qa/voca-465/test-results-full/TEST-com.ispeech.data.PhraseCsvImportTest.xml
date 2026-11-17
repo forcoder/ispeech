@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ispeech.data.PhraseCsvImportTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-11-17T15:40:54" hostname="MStudio" time="0.024">
+  <properties/>
+  <testcase name="短名按码点截断到二十位" classname="com.ispeech.data.PhraseCsvImportTest" time="0.014"/>
+  <testcase name="引号包裹的多行内容按一条记录解析并规范化换行" classname="com.ispeech.data.PhraseCsvImportTest" time="0.0"/>
+  <testcase name="多行内容经 QuickPhraseCodec 落盘后能原样读回" classname="com.ispeech.data.PhraseCsvImportTest" time="0.002"/>
+  <testcase name="无快捷字母或非法快捷字母的行被跳过" classname="com.ispeech.data.PhraseCsvImportTest" time="0.0"/>
+  <testcase name="一位字母用精确匹配_超过四位仍导入并计数" classname="com.ispeech.data.PhraseCsvImportTest" time="0.0"/>
+  <testcase name="GBK 字节解码后中文完整" classname="com.ispeech.data.PhraseCsvImportTest" time="0.005"/>
+  <testcase name="同码只保留首条并计数" classname="com.ispeech.data.PhraseCsvImportTest" time="0.0"/>
+  <testcase name="IS_DELETE 非零的行被跳过" classname="com.ispeech.data.PhraseCsvImportTest" time="0.0"/>
+  <testcase name="短名取首行并在重名时追加序号" classname="com.ispeech.data.PhraseCsvImportTest" time="0.002"/>
+  <testcase name="缺少快捷字母或内容列时返回格式错误" classname="com.ispeech.data.PhraseCsvImportTest" time="0.0"/>
+  <testcase name="字段里的双引号转义与逗号不影响分列" classname="com.ispeech.data.PhraseCsvImportTest" time="0.0"/>
+  <testcase name="带 BOM 的 UTF-8 也能识别表头" classname="com.ispeech.data.PhraseCsvImportTest" time="0.001"/>
+  <testcase name="表头顺序不敏感并支持别名" classname="com.ispeech.data.PhraseCsvImportTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ispeech.input.SpaceKeyPolicyTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-11-17T15:40:54" hostname="MStudio" time="0.001">
+  <properties/>
+  <testcase name="超过窗口的两连发只出两个空格" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="组合中有候选时第一次空格上屏首选 不出句号" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.001"/>
+  <testcase name="链条被接管时双击一律不参与" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="链条优先级按规格顺序 前面的状态压住后面的" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="链条上有别的接管项时保持既有放行口径 本单不扩大键路径行为面" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="两连发在窗口内出句号" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="硬件键长按的自动重复不算双击" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="英文态连按两次空格出两个空格" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="无障碍模式下判定窗口放宽到 600ms" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="空缓冲的硬件键空格由输入法接管 判定链才收得到第二下" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="开关关闭 连按两次都只出空格" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="开关关闭时硬件键空格交回宿主 行为与修复前一致" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="中文标点关闭时不转换句号" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="三连发出句号加一个空格 第三下不吞也不多出句号" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="时间窗成立但光标前不是空格 不做破坏性删除" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <testcase name="开关开启 窗口内的第二次空格出句号" classname="com.ispeech.input.SpaceKeyPolicyTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

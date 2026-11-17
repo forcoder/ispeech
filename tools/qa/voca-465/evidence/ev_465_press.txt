@@ -1,0 +1,11 @@
+== switch=True (state=True raw=12020801) ==
+single keyevent 62           host=' ' len=1 spaces=1
+longpress 62                 host='  ' len=2 spaces=2
+duration 700 62              host=' ' len=1 spaces=1
+2x single injection          host='。' len=1 spaces=0
+TOUCH	y=1652	diff={'double_space_period': False}	verdict=hit_target
+== switch=False (state=False raw=12020800) ==
+single keyevent 62           host=' ' len=1 spaces=1
+longpress 62                 host='  ' len=2 spaces=2
+duration 700 62              host=' ' len=1 spaces=1
+2x single injection          host='  ' len=2 spaces=2
