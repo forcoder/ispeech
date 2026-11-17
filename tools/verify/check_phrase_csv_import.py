@@ -673,12 +673,13 @@ def quick_trigger_limits() -> tuple[int, int]:
 #    ② 定长截断 `take(<字面量>)` / `drop(<字面量>)` / `substring(<字面量>…)`，它不写长度 token，
 #       锚点 ① 天生看不见（VOCA-454 质检打回项 1 实测：`fields[0].take(4)` 在 ① 下报绿）。
 #  豁免只有一条，按构造划：返回值类型为 QuickMatchMode 的判定函数只能改匹配方式，改不了条目去留。
-#  承认抓不到的两种间接写法（兜它的是 C1-5 的行为单测，不是本脚本）：把长度判定抽成独立布尔
-#  函数再 `if (helper(t)) continue`；把阈值先存进小写局部变量再 `take(n)` —— 阈值是变量时，
-#  锚点 ② 与候选条数上限 `out.take(limit)` 无法区分，硬判会误伤。
+#  承认抓不到的间接写法（兜它的是 C1-5 的行为单测，不是本脚本）：把长度判定抽成独立布尔
+#  函数再 `if (helper(t)) continue`；把截断长度写成非字面量实参再 `take(n)` / `take(CUT)` ——
+#  实参是变量或具名常量时，锚点 ② 与候选条数上限 `out.take(limit)` 无法区分，硬判会误伤。
+#  锚点 ② 作用域是这三处文件全体：与长度无关的字面量 `out.take(8)` 也会红，规定出口是收敛成具名常量。
 # ──────────────────────────────────────────────────────────────
 
-MODE_GUARD_DEF_RE = re.compile(r"\bfun\s+\w+\s*\([^)]*\)\s*:\s*QuickMatchMode\b")
+MODE_GUARD_DEF_RE = re.compile(r"\bfun\s+(\w+)\s*\([^)]*\)\s*:\s*QuickMatchMode\b")
 LENGTH_TEST_RE = re.compile(r"\.length\b|\b[A-Z][A-Z_]*LENGTH\b")
 # 锚点 ②：把字段裁到字面量长度。参数是变量（`out.take(limit)` = 候选条数上限）不判，避免误伤。
 LITERAL_TRUNCATE_RE = re.compile(
@@ -740,8 +741,8 @@ def length_drops_entries(name: str, src: str) -> list[str]:
 
     两条锚点见本节段首注释：①「长度判据 + 同一缩进块里的丢弃语句」，②「定长截断字面量」。
     判到语句层：换写法（`fields[0].length`、`fields[0].take(4)`）躲不掉；把长度判定提取成
-    `if (helper(t)) continue`、或把阈值存进小写变量再 `take(n)` 则躲得掉 —— 这两种间接写法
-    留给 C1-5 的行为单测兜，脚本不假装会做跨函数污点分析。
+    `if (helper(t)) continue`、或把截断长度写成非字面量实参（局部变量 / 具名常量）再 `take(n)`
+    则躲得掉 —— 这几种间接写法留给 C1-5 的行为单测兜，脚本不假装会做跨函数污点分析。
     """
     lines = src.splitlines()
     exempt = mode_guard_lines(lines)
@@ -808,26 +809,38 @@ def function_body(src: str, signature: str) -> str:
     return "\n".join(body)
 
 
+def mode_guard_names(src: str) -> set[str]:
+    """本文件内返回 QuickMatchMode 的判定函数名 —— 接线断言按返回类型认守卫，不按名字面锁。"""
+    names: set[str] = set()
+    for line in src.splitlines():
+        m = MODE_GUARD_DEF_RE.search(strip_kotlin_comment(line))
+        if m:
+            names.add(m.group(1))
+    return names
+
+
 def remote_read_wiring(engine_src: str, locator_src: str) -> list[str]:
     """C1-6b 的接线断言：守卫必须被云端读取链路调用，否则它只是个没人用的正确函数。
 
-    锁的是「接线」两段（REMOTE → fromRemoteText → parse 用上 guardedRemoteMode），不锁函数体里的
-    判定效果 —— 把 `guardedRemoteMode` 的函数体掏空、改阈值、删 mode 判据都还是绿的，
+    锁的是「接线」两段（REMOTE → fromRemoteText → parse 用上返回 QuickMatchMode 的守卫函数），
+    不锁函数体里的判定效果 —— 把守卫函数体掏空、改阈值、删 mode 判据都还是绿的，
     那三层由 `QuickPhraseLegacyRemoteRowTest` 兜（VOCA-454 质检实测，别把它说成静态门禁的能力）。
     """
     bad: list[str] = []
+    # 守卫改名（语义不变）不该让门禁变红：按返回类型取名字集合，parse 调其中任一即算接上。
+    guard_calls = {n + "(" for n in mode_guard_names(engine_src)}
     remote_body = function_body(engine_src, "fun fromRemoteText(")
     if not remote_body:
         bad.append("QuickPhraseEngine.kt 没有 fromRemoteText —— C1-6b 守卫的入口被删")
-    elif "applyTriggerLengthGuard = true" not in remote_body and "guardedRemoteMode(" not in remote_body:
+    elif "applyTriggerLengthGuard = true" not in remote_body and not any(g in remote_body for g in guard_calls):
         bad.append("fromRemoteText 函数体内没有启用长度守卫 —— 退化成 fromText 的别名")
     if "QuickPhraseEngine.fromRemoteText(" not in locator_src:
         bad.append("QuickLocator.kt 里没有任何 fromRemoteText 调用 —— 云端读取链路不走守卫")
-    # 守卫的调用点有两段：fromRemoteText 把开关传下去，parse 真的拿它去问 guardedRemoteMode。
+    # 守卫的调用点有两段：fromRemoteText 把开关传下去，parse 真的拿它去问守卫函数。
     # 只查前一段的话，`val mode = declaredMode`（收下开关却不用）会让守卫变成无人调用的正确函数还报绿。
     parse_body = function_body(engine_src, "private fun parse(")
-    if "applyTriggerLengthGuard" in parse_body and "guardedRemoteMode(" not in parse_body:
-        bad.append("parse(...) 收了 applyTriggerLengthGuard 却没调用 guardedRemoteMode —— "
+    if "applyTriggerLengthGuard" in parse_body and not any(g in parse_body for g in guard_calls):
+        bad.append("parse(...) 收了 applyTriggerLengthGuard 却没调用本文件内任一返回 QuickMatchMode 的守卫函数 —— "
                    "开关是死的，守卫退化成无人调用的正确函数")
     if REMOTE_THEN_BRANCH_UNGUARDED_RE.search(locator_src):
         bad.append("QuickLocator.kt 的 REMOTE 分支走的是 fromText —— 存量 >4 位行的 DEF-3 静默复发")
@@ -892,7 +905,7 @@ def check_existing_contract_unchanged() -> None:
     wiring = remote_read_wiring(engine_src, locator_src)
     check(
         not wiring,
-        "云端读取链路接在 fromRemoteText 上、parse 真的调用 guardedRemoteMode（C1-6b 接线，REMOTE 分支 / openRemote 两种形态都认）",
+        "云端读取链路接在 fromRemoteText 上、parse 真的调用返回 QuickMatchMode 的守卫函数（C1-6b 接线，REMOTE 分支 / openRemote 两种形态都认，守卫改名不红）",
         "C1-6b 的读盘守卫失去调用点，升级前落盘的 >4 位 CONTAINS / PREFIX 行按原样生效，DEF-3 静默复发："
         + "；".join(wiring),
     )
