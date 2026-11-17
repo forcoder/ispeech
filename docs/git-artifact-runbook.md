@@ -98,12 +98,12 @@ done
 
 ### P0-B：捞出困在污染分支上的真实改动（需人类确认后执行）
 
-被平台基线提交卡住的未推送工作（截至 E4/E5 实测）：
+在途分支的未推送工作（截至 E4/E5 实测；**前两条经本轮复核属「已发布」，不困在本地**，判定命令见下表之后）：
 
 | 分支 | 远端已有 | 未推送提交 | 其中有实际内容的 | 是否与远端分叉 |
 | --- | --- | --- | --- | --- |
-| `agent/agent/voca-231` | 是 | 8 | 7（`fix(voice)`/`fix(packaging)`/`docs(voice)`） | **是，远端多 7 个提交 → 只能走下面模板，直推本地分支会被拒** |
-| `agent/agent/voca-207` | 是 | 5 | 4（`fix(sync)`/`docs(adr)`/`docs(quick)`/`chore(verify)`） | **是，远端多 4 个提交 → 只能走下面模板，不可直推** |
+| `agent/agent/voca-231` | 是 | 8（本地领先） | **0** — 7 个真实提交（`feat(voice)`/`fix(voice)`/`fix(packaging)`/`docs(voice)`）`git cherry` 全为 `-`，本地独有的只有基线提交 `64a9d88` | **已发布，勿再 cherry-pick**：等价工作已在远端 tip `00fddfa`，交付走 **PR #12**（OPEN / base main / MERGEABLE）→ **本行不需 rescue** |
+| `agent/agent/voca-207` | 是 | 5（本地领先） | **0** — 4 个真实提交（`fix(sync)`/`docs(adr)`/`docs(quick)`/`chore(verify)`）`git cherry` 全为 `-`，本地独有的只有基线提交 `0753c13` | **已发布，勿再 cherry-pick**：等价工作已在远端 tip `4d6363c`，交付走 **PR #11**（OPEN / MERGEABLE）→ **本行不需 rescue** |
 | `agent/agent/voca-37` | 是 | 7 | 5（`docs(pm)` 含风险册记录；`7d4b51e` 摘包提交**不要**带） | 否 |
 | `agent/ui/voca-69` | 是 | 5 | 4（`fix(ui)`/`docs(ui)` 质检整改） | 否 |
 | `agent/ux/voca-45` | 是 | 5 | 3（`docs(ux)` 质检整改；`898dbea` 摘包提交**不要**带） | 否 |
@@ -111,26 +111,55 @@ done
 | `agent/agent/voca-121` / `-33` / `-56` / `agent/mika/voca-30` | 是 | 1–2 | 0（只有平台基线提交，无实际工作） | 否 |
 | 其余 40 个被污染的本地分支（E4 当场口径） | 否 | — | 远端无对应分支，按 P0-A 合并后重建即可 | — |
 
-分叉判定用 `git rev-list --count origin/$B..$B`（本地领先）与 `git rev-list --count $B..origin/$B`
-（远端领先），两个都不为 0 即已分叉。**FF 性由模板结构保证，而不是由本地分支保证**：
-必须从 `origin/$B` 开 rescue 分支再 cherry-pick 真实提交，这样远端 tip 才是新历史的祖先；
-把已分叉的**本地**分支直接推回原名不是 fast-forward，会被拒（也不能靠 force push 绕过）。
-
-单分支重建模板（**fast-forward，不需要 force push**，因为远端 tip 是新历史的祖先）：
+**要不要 rescue 以补丁等价性判定，不以本地领先提交数判定**（本单第一轮就是按 `git rev-list --count` 的本地领先数把已发布的 231/207 误列进待救回清单）：
 
 ```bash
-B=agent/agent/voca-231
+for B in agent/agent/voca-231 agent/agent/voca-207 agent/agent/voca-37 agent/ui/voca-69 agent/ux/voca-45 agent/ba/voca-122; do
+  echo "--- $B ---"
+  git cherry -v "origin/$B" "$B" | grep '^+' | grep -vE 'chore\(agent\)|multica:|local directory'
+done
+# 期望：231 / 207 两行为空（真实提交已等价在远端，只需合各自 PR）；其余四条列出自己的真实提交
+```
+
+过滤条件要挡住**两种**平台基线提交标题——`chore(agent): baseline — …local directory` 与
+`chore(agent): uncommitted work from the local directory since the previous turn`；
+只 grep 掉 `baseline` 会把后一种放过，导致 `voca-207` 输出一行基线提交、看起来像「还有未救回的工作」（本单实测就是这样）。
+
+`git cherry` 的 `-` 表示远端已有**等价补丁**（同一改动以另一组 SHA 落在远端 tip 上：231 的 7 个同名提交在 `00fddfa`、207 的 4 个在 `4d6363c`），
+这类分支只等自己的 PR 被合进 main，**不能再 cherry-pick 一遍**（那会把同一份改动提交两次）；`+` 才是真困在本地的工作。
+
+分叉判定用 `git rev-list --count origin/$B..$B`（本地领先）与 `git rev-list --count $B..origin/$B`
+（远端领先），两个都不为 0 即已分叉。**FF 性由模板结构保证，而不是由本地分支保证**：
+必须从 `origin/$B` 开 rescue 分支再 cherry-pick 真实提交，这样远端 tip 才是新历史的祖先。
+上表 4 条待 rescue 的分支都**未分叉**，但「未分叉」不等于可以直推本地分支：本地历史里带着平台基线提交的那个 139,171,786 B blob
+（`git rev-list --objects $B | … >104857600` 对本单点名的 4 条全部命中），pre-receive 按体积拒收的是**整条历史**，不是 tip 的树。
+
+单分支重建模板，**只适用上表 `git cherry` 出 `+` 的 4 条**（`voca-231` / `voca-207` 已发布，不走本模板）；
+fast-forward，不需要 force push，因为远端 tip 是新历史的祖先：
+
+```bash
+B=agent/agent/voca-37
 git fetch origin "$B"
 git switch -c "rescue/${B#*/}" "origin/$B"
-# 只挑真实提交，跳过 chore(agent)/multica: 平台基线提交（用 E5 的 log 对照 SHA）
-git cherry-pick 6fe7308 bc63610 4839c1c 79d521c e88302f 72370d0 811fe72
+# 只挑真实提交，跳过 chore(agent)/multica: 平台基线提交，也跳过摘包提交（用 E5 的 log 对照 SHA）
+git cherry-pick a293b64 a039964 c443f73 7ace621 3a010fe
 # 推送前自检：新历史必须为空输出
 git rev-list --objects HEAD | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' \
   | awk '$1=="blob" && $3>104857600'
 git push origin HEAD:"$B"     # fast-forward
 ```
 
+4 条分支各自的 `cherry-pick` 清单（按 `git log --reverse` 的旧→新顺序，已剔除平台基线提交与摘包提交）：
+
+| 分支 | 要挑的真实提交 | 明确**不**挑 |
+| --- | --- | --- |
+| `agent/agent/voca-37` | `a293b64` `a039964` `c443f73` `7ace621` `3a010fe` | `92e2680`（基线）、`7d4b51e`（摘包） |
+| `agent/ui/voca-69` | `e8d3f6c` `5a091e3` `37ee140` `2ece128` | `a9b5a94`（基线） |
+| `agent/ux/voca-45` | `e3cd1c8` `c62f77c` `4a6a4a1` | `e0f4d96`（基线）、`898dbea`（摘包） |
+| `agent/ba/voca-122` | `6105cd7` `b8e8d40` | `212de54`（基线） |
+
 逐分支跑完后，由项目经理在统一合并窗口按 issue 顺序 squash 合并；**合并目标仍是 main，不改 main 的历史**。
+`voca-231` / `voca-207` 不进这个循环——它们没有待救回的工作，合并窗口直接收 PR #12 / PR #11 的现有 head。
 
 ### P0-C：清理本地对象库（需人类确认，共享仓库动作）
 
@@ -138,7 +167,7 @@ git push origin HEAD:"$B"     # fast-forward
 # 1. 先确认没有 worktree 还挂在待删分支上
 git worktree list
 # 2. 删掉已重建/无价值的污染分支（逐个点名，不用通配）
-git branch -D agent/agent/voca-231
+git branch -D agent/agent/voca-231   # 231/207 的本地分支独有部分只剩平台基线提交，工作已在 PR #12/#11 → 正是「无价值」那一类
 # 3. 全部清完再回收（这一步会让本地旧对象不可恢复，务必在 P0-B 推送成功之后）
 git -c gc.reflogExpire=now reflog expire --expire=now --all
 git gc --prune=now
@@ -159,12 +188,12 @@ du -sh "$(git rev-parse --git-common-dir)"
 | 变更 | 触发回滚的条件 | 回滚动作 | 预计时长 | 数据可逆 |
 | --- | --- | --- | --- | --- |
 | `.gitignore` 白名单（P0-A / P0-A′） | 有人发现该提交的交付包被静默忽略 / `dist/README.md` 流程跑不通 | `git revert <sha>` 即可；无历史改动 | < 5 min | 是 |
-| 单分支重建（P0-B） | cherry-pick 漏提交或引入冲突，救回分支内容不对 | 远端 `<B>` 的 tip 从未被移动过，删掉 rescue 分支重来即可；先记下旧 tip `git rev-parse <B>` 备查 | < 10 min | 是（远端未被写过） |
+| 单分支重建（P0-B，**只适用 4 条需 rescue 的分支** voca-37 / voca-69 / voca-45 / voca-122） | cherry-pick 漏提交或引入冲突，救回分支内容不对 | 这 4 条远端 `<B>` 的 tip 未被本单写过，删掉 rescue 分支重来即可；先记下旧 tip `git rev-parse "origin/$B"` 备查。**⚠️「远端 tip 从未被移动过」对 `voca-231` / `voca-207` 不成立**：它们的真实提交 11-16 就已推到远端（`git reflog show origin/agent/agent/voca-231` 末条 `update by push` @ 11-16 21:57:49 CST → 现 tip `00fddfa`；207 为 11-16 11:05:57 CST → `4d6363c`，两条即 PR #12 / #11 的 head），对它们做备查或回退**必须以远端现状为基线**，不能拿本地旧 tip 当回滚点；本单也不对它们执行本行 | < 10 min | 是（4 条远端未被本单写过）；231/207 的工作已在远端，走各自 PR 的正常流程 |
 | 本地 GC（P0-C） | 事后发现有未推送工作被 prune 掉了 | **不可逆**，只能从 `git fsck --lost-found` 捞悬空提交，不保证成功 | — | 否 |
 
 正因为 P0-C 不可逆，它必须排在 P0-B 全部推送成功、且人类逐分支确认之后。
 
-灰度顺序（变更三重门）：先只合 `.gitignore` 一个提交 → 用第六节口径验证新分支可推 → 再按上表从「0 个实际工作」的分支开始清 → 最后做 P0-C。
+灰度顺序（变更三重门）：先只合改 `.gitignore` 的那几个提交（当场以 `git log --oneline origin/main..origin/<交付分支> -- .gitignore` 数，本单为 P0-A + P0-A′ 两条）→ 用第六节口径验证新分支可推 → 再按上表从「0 个实际工作」的分支开始清 → 最后做 P0-C。
 
 ## 六、验证口径（治理完成的判定）
 
@@ -191,10 +220,18 @@ du -sh "$(git rev-parse --git-common-dir)"
    `git add -A --dry-run` 不收入任何 `dist/` 产物；对危险名 `git add <file>` 必须被拒并提示 `-f`。
 2. **新分支可推**（本单已实测）：从 `origin/main` 出发、只带本改动的分支
    `chore/voca-445-dist-artifact-guard` 推送成功、PR #27 可建 → 证明阻断点已消失。
-   该分支提交数为 3（`f6547c2` / `0fab0e6` / `b587d18`），打回项 1 整改后为 4。
+   提交数**不写死**——写死的数字每轮整改都会被下一轮自身推翻（本条前两轮分别写的是 3 与 4）。
+   当场口径：`git rev-list --count origin/main..origin/chore/voca-445-dist-artifact-guard`。
+   取物一律按 `origin/…` 或显式 SHA：本机的**同名本地分支**可能停在整改前的旧点（本轮实测本地停在 `b587d18`、落后远端），
+   按本地分支名 `git clone -b` 会拿到旧版本并当场复现 E11 的 2 条 LEAK。
+   执行前先 `git fetch --prune` 再比对 `git rev-parse <name> "origin/<name>"`，不一致就以远端为准。
 3. **历史无巨型对象**：第二节审计脚本对 `refs/heads` 与 `refs/remotes/origin` 均输出为空。
-4. **困住的工作已救回**：上表 6 个有实际内容的分支，其 rescue 结果在远端可见，
-   且 `git log origin/<B> --oneline | head` 包含对应的 `fix(...)` / `docs(...)` 提交。
+4. **困住的工作已救回**：分两类，口径不同——
+   - **4 个需 rescue 的分支**（`voca-37` / `ui/voca-69` / `ux/voca-45` / `ba/voca-122`）：rescue 结果在远端可见，
+     且 `git log origin/<B> --oneline | head` 包含对应的 `fix(...)` / `docs(...)` 提交；
+   - **2 个已发布的分支**（`agent/agent/voca-231` → PR #12、`agent/agent/voca-207` → PR #11）：
+     工作早已等价在远端（`git cherry` 全 `-`），这一类**验收看 PR 是否被合进 main**，不产 rescue 分支；
+     拿它们做 cherry-pick 会把同一份改动提交两遍。
 5. **CI 能正常拉取**：⚠️ **本仓库当前没有 CI**（E9：无 `.github/workflows`）。这条验收项现在没有对象，
    不能填「已通过」。要么把 P1-1 的体积门禁接到 CI 上再验，要么把该条改为「构建机
    （`cookie@43.136.44.72:10010`）能 `git fetch` 到 main 并完成一次 `assembleRelease`」，请项目经理定口径。
