@@ -1,24 +1,28 @@
-# ev_r7_ac2_key.txt · 被测=78343a4 · AC-2 双击空格 × 键路径/开关态（D1 复验）
-# 生成 2026-11-17T16:44:39Z
+# ev_r7_ac2_key.txt · 打回项 1「读数必须能追到当场时刻」重跑：AC-2 双击空格句号 · 注入键（keyevent）路径 × 开关开/关
+# 被测=78343a4（PR #18 head）· 规格锚=0e4eeb0（PR #17 head）· 工装=ac2.py <apk> 440 keyevent · 串口=emulator-5554（共享 AVD，5556 上同构建会串台）
+# 本文件替换 00:44 那一版（drive.log 逐行打 ts= 之前跑的，只有文件头一个时刻）。
+# ts 覆盖：22 条数据行里 21 条带 ts；唯一例外 INSTALL out=Performing Streamed Install 是 adb 安装的原样 stdout 转写，不是读数。
+# 判据同行自证：DS_* 行给 DataStore 原始字节（12020801=true / 12020800=false / 文件不存在=代码默认 false），开关态与结论在同一份 stdout 内。
+
 INSTALL	out=Performing Streamed Install
-Success	rc=0
-PKG	path_kind=keyevent	pkg_ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
-IDENT	end=start	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
-HOST	ok=True	round=1	taps=2	top=1352	h=988
-FRAME	top=1352	h=988	keymap_ok=True	runs=[10, 9, 7, 3]	space_xy=(531, 2125)	gear_xy=(1005, 1552)
-MODE	path=keyevent	mode=chinese	host='中国'	attempt=1
-DS_BEFORE	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True
-DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True
-SWITCH	want=ON	state=True	src=datastore	raw_hex=12020801	file=files/datastore/ispeech_settings.preferences_pb	route=already	default_when_absent=false	key=double_space_period
-AC2	path=keyevent	case=2x_single_injection	times=2	wall_between_ms=0(single_injection)	before='搜索设置'	host='。'	switch_state=True	switch_src=datastore
-AC2	path=keyevent	case=2x_two_adb_calls	times=2	wall_between_ms=26.0	before='搜索设置'	host='。'	switch_state=True	switch_src=datastore
-AC2	path=keyevent	case=2x_gap500ms_control	times=2	wall_between_ms=537.4	before='搜索设置'	host='  '	switch_state=True	switch_src=datastore
-AC2	path=keyevent	case=3x_single_injection	times=3	wall_between_ms=0(single_injection)	before='搜索设置'	host='。 '	switch_state=True	switch_src=datastore
-DS_BEFORE	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True
-TOUCH	y=1652	diff={'double_space_period': False}	verdict=hit_target
-DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=False
-SWITCH	want=OFF	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period
-AC2	path=keyevent	case=2x_single_injection	times=2	wall_between_ms=0(single_injection)	before='搜索设置'	host='  '	switch_state=False	switch_src=datastore
-FINAL_SWITCH	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb
-IDENT	end=end	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
-ac2_rc=0
+Success	rc=0	ts=2026-11-18T02:57:01+0800
+PKG	path_kind=keyevent	pkg_ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:57:01+0800
+IDENT	end=start	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:57:02+0800
+HOST	ok=True	round=1	taps=2	top=1352	h=988	ts=2026-11-18T02:57:13+0800
+FRAME	top=1352	h=988	keymap_ok=True	runs=[10, 9, 7, 3]	space_xy=(531, 2125)	gear_xy=(1005, 1552)	ts=2026-11-18T02:57:13+0800
+MODE	path=keyevent	mode=chinese	host='中国'	attempt=1	ts=2026-11-18T02:57:20+0800
+DS_BEFORE	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=False	ts=2026-11-18T02:57:22+0800
+TOUCH	y=1652	diff={'double_space_period': True}	verdict=hit_target	ts=2026-11-18T02:57:27+0800
+DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True	ts=2026-11-18T02:57:28+0800
+SWITCH	want=ON	state=True	src=datastore	raw_hex=12020801	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period	ts=2026-11-18T02:57:28+0800
+AC2	path=keyevent	case=2x_single_injection	times=2	wall_between_ms=0(single_injection)	before='搜索设置'	host='。'	switch_state=True	switch_src=datastore	ts=2026-11-18T02:57:42+0800
+AC2	path=keyevent	case=2x_two_adb_calls	times=2	wall_between_ms=22.5	before='搜索设置'	host='。'	switch_state=True	switch_src=datastore	ts=2026-11-18T02:57:49+0800
+AC2	path=keyevent	case=2x_gap500ms_control	times=2	wall_between_ms=527.3	before='搜索设置'	host='  '	switch_state=True	switch_src=datastore	ts=2026-11-18T02:57:56+0800
+AC2	path=keyevent	case=3x_single_injection	times=3	wall_between_ms=0(single_injection)	before='搜索设置'	host='。 '	switch_state=True	switch_src=datastore	ts=2026-11-18T02:58:02+0800
+DS_BEFORE	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True	ts=2026-11-18T02:58:02+0800
+TOUCH	y=1652	diff={'double_space_period': False}	verdict=hit_target	ts=2026-11-18T02:58:07+0800
+DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=False	ts=2026-11-18T02:58:08+0800
+SWITCH	want=OFF	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period	ts=2026-11-18T02:58:08+0800
+AC2	path=keyevent	case=2x_single_injection	times=2	wall_between_ms=0(single_injection)	before='搜索设置'	host='  '	switch_state=False	switch_src=datastore	ts=2026-11-18T02:58:22+0800
+FINAL_SWITCH	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb	ts=2026-11-18T02:58:22+0800
+IDENT	end=end	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:58:23+0800

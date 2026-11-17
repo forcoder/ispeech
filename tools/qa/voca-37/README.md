@@ -20,6 +20,7 @@
 | `ppwin.py` | 键盘占比 pp 的**同窗对照**：一个连续窗口内先把搜狗各档量完、再量 iSpeech（两侧都在敲完 `shijian` 的组合态读 `type=ime` inset）。`--panel 1260x2720` 覆盖面板几何（**打回项 2 的目标真机形状**）、`--tiers 520:1.0,520:1.15` 选档、`--round` 防跨轮覆盖帧名、`--apk` 触发身份校验；退出时把 `font_scale` / `wm size` / `wm density` 还原成**入口读到的原值**，`TAIL` 行给 `font_scale_now` / `panel_now` 供复核 |
 | `spec85_anchors.sh` | 规格 §8.5 那份「文档断言 → 代码行」清单（54 条）跑在任意 BASE 上：`bash spec85_anchors.sh fa57a07`。§12 引用的每一个代码行号都必须由它现算，不许手抄（裁决 §9.4 打回项 6） |
 
+| `ppsum.py` | **pp 判据离线计算器**（第七轮打回项 2 补）：读 `ppwin.py` 那份 stdout，按**当档 dpi** 现算逻辑宽与档位，出 `PPSUM … delta_pp verdict=` ＋ `PPSUM_SENSITIVITY … 25/H`；缺任一侧读数 `GATE reason=one_side_missing rc=40`。为什么要它：`SUMMARY` 原来是人在文件头写的加法，那不算工具输出。`logic_w_dp` 不能用 `PANEL` 行那个值（它在 `wm density` 切换**之前**打，1260×2720 上会读成 458.2dp 而不是 387.7dp） |
 | `band.py` | 候选带像素取证底座：底色/chip/item/主题色四组常量 + 连通块切候选项 + **角标圆片按外形剔除** + `first_item_left = chip 右沿 + 1`（字身只在它右边量）。为什么必须这样：`CandidateView.kt:76-77` 在候选列表为空时把 `scrollView` 置 `GONE`，整带宽里就只剩 chip 的墨迹——旧口径把「量 chip」当成了「量候选」 |
 | `voidcheck.py` | 作废自查（裁决 §6-3 的自证）：用旧报告的窗口重扫交付帧，先逐位复现旧墨迹行，再用新口径数候选 → `x>240` 命中列=0 就证明旧数据确实还在量 chip。rc=0 = 三帧全部低于闸门（作废成立） |
 | `ac9.py` | spec-AC-9 退格长按阶梯（200/1000/**1500**/2000ms）。两条硬规矩：退格键位从截图反推（不写死像素）；先做一次 200ms 短按**必须恰好删 1 字**，删不动说明点到的不是退格键 → `GATE reason=del_key_miss rc=20`，后面所有档位都是废数。长度一律 `hold()` 连读稳定值（批量敲键后紧接着 `uiautomator dump` 拿到的是旧文本，会把「删掉了」量成「没删」）。宿主文本一律用**已上屏中文**——组合缓冲里的退格走删 composing 的另一条路径，不是 AC-9 说的「删除字符」 |
@@ -35,7 +36,7 @@
 | `qa_kb.py` | 早期手工探针集合（frame/host/text/bands/shift/ink） |
 | `d1regress.py` | **接管空格键（`35cdbfa`）的 6 档回归面**：档① 开关关=与修复前逐字节同（`--diff` 比两份 stdout 的宿主文本）、档② 英文态/T9 数字态、档③ 需要自己吃空格的宿主、档④ 长按语音（截图带差分，无日志可用）、档⑤ `repeatCount`、档⑥ `spaceProbe` 跨进程读成本。装错包 `rc=19`；基线包无开关键时 `SWITCH route=absent_means_default_off`，**不走设置页试点**（会误伤别的开关） |
 | `spec_ux_anchors.py` | 规格行号重锚：报告引用的每条锚点在 `git show OLD` / `git show NEW` 两侧逐行比内容，出 `match=True` / `DRIFT` / `MISS`（MISS 由人工给 `verdict=REPLACED` 落点）→ `evidence/ev_r7_spec_ux_anchors.txt` |
-| `run_r7_all.sh` / `run_r7b.sh` / `run_r7c.sh` / `run_r7d.sh` | 第七轮的分串编排：每档单独 stdout + `# rc=`，一档跑挂不拦后面。`r7c` 是「`drive.log` 打上逐行 `ts=`」之后的重跑串，正文 AC-4~7 / AC-9 / AC-1 / D2 的数字以它为准 |
+| `run_r7_all.sh` / `run_r7b.sh` / `run_r7c.sh` / `run_r7d.sh` / `run_r7e.sh` | 第七轮的分串编排：每档单独 stdout + `# rc=`，一档跑挂不拦后面。`r7c` 是「`drive.log` 打上逐行 `ts=`」之后的重跑串，正文 AC-4~7 / AC-9 / AC-1 / D2 的数字以它为准 |
 
 ## fs115 / ac9 / d2check 的退出码（拒绝出数时看这个，别看有没有数字）
 
@@ -53,6 +54,7 @@
 | `ac9.py` | `del_key_miss` / `fill_short` | 20 / 21 | 200ms 探针删不掉 1 字（点错键）/ 填字没填满目标长度 |
 | `dsdump.py` | `run_as_unavailable` | 21 | `run-as` 或路径真的不对（与「文件不存在=默认值」严格区分） |
 | `voidcheck.py` | — | 22 | 有帧未低于旧口径闸门 → 作废结论需复核（0 = 作废成立） |
+| `ppsum.py` | `one_side_missing` | 40 | 那份 ppwin stdout 里 sogou 或 iSpeech 一侧的 `FRAME` 读数缺失 → 不出 Δpp 判据（0 = 两侧齐、`PPSUM` 已出） |
 | `d2check.py` | `card_not_found` / `ime_not_ours` / `keyboard_not_shown` | 2 / 17 / 19 | 卡片没找到 / IME 被抢 / 键盘没弹出（后两条 = 不许报 FIXED） |
 | `d2check.py` | — | 0 / 1 | 0 = 未崩（修复成立）；1 = 崩了并附 `STACK` 行 |
 | `d1regress.py` | `installed_apk_not_this_build` | 19 | 装着的包不是 `QA_APK` 那一个（逐条目 dex/arsc sha256 不等）→ 整档作废 |
@@ -186,7 +188,7 @@ B 包 `cffc0cd` = 旧 head + `d3b6f84`(VOCA-170) + `d283706`(VOCA-184) + `4d6363
 
 ## evidence/ 与 shots/
 
-`ev_*.txt` 为当场 stdout 原文（第七轮的每行都带 `ts=`，文件头还带 `# 被测=` / `# cmd:` / `# rc=`），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模：`tools/qa/voca-37/` 下 19 个 `.py` + 7 个 `.sh`，`evidence/` 101 份（96 `.txt` + 4 `.xml` + 1 `.log`，其中 23 份 `ev_r7_*.txt`），`shots/` 82 张**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
+`ev_*.txt` 为当场 stdout 原文（第七轮的每行都带 `ts=`，文件头还带 `# 被测=` / `# cmd:` / `# rc=`），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模：`tools/qa/voca-37/` 下 20 个 `.py` + 8 个 `.sh`，`evidence/` 101 份（96 `.txt` + 4 `.xml` + 1 `.log`，其中 23 份 `ev_r7_*.txt`），`shots/` 86 张**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
 
 ```bash
 python3 tools/qa/voca-37/ac2.py <apk> 440 keyevent   # 硬件/注入键路径 + 开关开/关反例
@@ -210,7 +212,9 @@ bash    tools/qa/voca-37/spec85_anchors.sh fa57a07                              
 export QA_HEAD=78343a4 QA_SPEC=0e4eeb0 QA_SERIAL=emulator-5554 QA_APK=<PR#18 构建产物 app-debug.apk>
 bash    tools/qa/voca-37/run_r7c.sh                                    # AC-4~7 / vswipe / paths3 / paths2 / AC-9 / D2 / fs115 重跑（逐行 ts=）
 bash    tools/qa/voca-37/run_r7d.sh                                    # paths.py + ac2 soft 路径
+bash    tools/qa/voca-37/run_r7e.sh                                    # 补漏：ac2 keyevent + 目标几何 pp + 6 档（RAW/PER 行也要 ts=）
 python3 tools/qa/voca-37/ppwin.py --panel 1260x2720 --tiers 520:1.0,520:1.15 --round r7t --apk "$QA_APK"   # 目标几何的 pp
+python3 tools/qa/voca-37/ppsum.py /tmp/r7e_pp_target_geom.txt                          # 目标几何 pp 的判据由它算 → 落进 ev_r7_pp_target_geom.txt 的 B 段
 python3 tools/qa/voca-37/d1regress.py "$QA_APK" --base "$QA_BASE_APK" --diff                # 接管空格的 6 档
 python3 tools/qa/voca-37/spec_ux_anchors.py 8324b03 0e4eeb0            # 规格行号两侧逐行比 → ev_r7_spec_ux_anchors.txt
 python3 tools/verify/check_crosscut.py                                 # 第 13 组（空格键回归面）rc=0

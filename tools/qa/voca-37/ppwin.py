@@ -34,6 +34,8 @@ def ts():
 
 
 def log(kind, **kw):
+    # 第七轮打回项 1：pp 的 RAW/FRAME 行也要带当场时刻，不然只有文件头一个 ts
+    kw.setdefault("ts", ts())
     print(kind + "\t" + "\t".join("%s=%s" % (k, v) for k, v in kw.items()), flush=True)
 
 
