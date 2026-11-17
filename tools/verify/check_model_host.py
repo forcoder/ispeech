@@ -9,6 +9,18 @@
     python3 tools/verify/check_model_host.py <url> --sha256   # 额外整包下载并校验 sha256（约 78MB）
     python3 tools/verify/check_model_host.py --self-test      # 离线自测：本地伪造各类故障，不联网
     python3 tools/verify/check_model_host.py <url> --quiet    # 只输出 SUMMARY 与 RESULT
+    python3 tools/verify/check_model_host.py --samples 3       # 采样 3 次取多数（定时探测用）
+
+采样纪律（VOCA-475 定死，接定时任务时必须带上）：
+
+    判断源可用性**必须多次采样取多数**，不能拿单次结果下结论。旧默认源
+    `cvm.agentai0.com` 在被拦截期间有约 10~17% 的请求返回 502（间歇噪声）。这个数字的出处是
+    VOCA-33 项目经理 2026-11-09 的评论：「单次采样就误判成『故障已变成 502』，复测 12 次才确认
+    原形态没变」；`docs/asr-model-source-migration-log.md` §2 记的是另一组样本（4 次采样：
+    302→拦截页 ×3、502 ×1），只能证明 502 是间歇的，不是这个百分比的出处。
+    无论按哪一组，单次采样都会把「抖了一下」读成「源挂了」，也把「运气好的一跳」读成「源恢复了」。
+    `--samples 3` 取严格多数：3 次里 ≥2 次可用才判可用；平局（仅偶数样本）
+    按不可用处理——宁可多一条告警，不漏一次真故障。
 
 为什么不能只看状态码：
 
@@ -278,6 +290,12 @@ def _parse_content_range(value: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def majority_verdict(results: list[bool]) -> tuple[bool, int]:
+    """多次采样取多数 -> (判可用, 可用次数)。平局按不可用（告警宁多不漏）。"""
+    ok_count = sum(1 for r in results if r)
+    return ok_count * 2 > len(results), ok_count
+
+
 def probe(
     url: str,
     expect_bytes: int = EXPECTED_BYTES,
@@ -543,7 +561,25 @@ def run_self_test() -> int:
         server.shutdown()
         server.server_close()
 
-    print(f"SUMMARY: self-test cases={len(cases)} unexpected={bad}")
+    # 多数判定本身也要测：间歇 502 会不会被误读成「源挂了」，全看这条
+    majority_cases = [
+        ([True], True),
+        ([False], False),
+        ([True, True, False], True),
+        ([False, False, True], False),
+        ([True, False], False),  # 平局按不可用
+    ]
+    for results, expected in majority_cases:
+        got, ok_count = majority_verdict(results)
+        verdict = "PASS" if got == expected else "FAIL"
+        if got != expected:
+            bad += 1
+        print(
+            f"{verdict}: self-test majority {results} -> 判"
+            f"{'可用' if got else '不可用'}（期望 {'可用' if expected else '不可用'}，ok={ok_count}）"
+        )
+
+    print(f"SUMMARY: self-test cases={len(cases) + len(majority_cases)} unexpected={bad}")
     return 1 if bad else 0
 
 
@@ -571,7 +607,22 @@ def main() -> int:
     parser.add_argument("--expect-bytes", type=int, default=EXPECTED_BYTES, help="期望字节数")
     parser.add_argument("--self-test", action="store_true", help="离线自测（本地伪造各类故障）")
     parser.add_argument("--quiet", action="store_true", help="只输出 SUMMARY / RESULT")
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=1,
+        help="采样次数取多数，定时探测建议 3（默认 1，人工门禁够用）",
+    )
+    parser.add_argument(
+        "--sample-interval",
+        type=float,
+        default=5.0,
+        help="多次采样之间的间隔秒数（默认 5）",
+    )
     args = parser.parse_args()
+
+    if args.samples < 1:
+        parser.error("--samples 至少 1")
 
     if args.self_test:
         return run_self_test()
@@ -579,17 +630,41 @@ def main() -> int:
     url = args.url or gradle_default_url() or FALLBACK_URL
     source = "命令行参数" if args.url else f"{rel(GRADLE_FILE)} 的默认源"
     print(f"== check_model_host.py == 探测 {url}（来源：{source}）")
+    if args.samples > 1:
+        print(f"SAMPLING: n={args.samples} interval={args.sample_interval:g}s 多数判定")
 
     sink = make_sink(args.quiet)
-    ok = probe(
-        url,
-        expect_bytes=args.expect_bytes,
-        timeout=args.timeout,
-        deep=args.deep,
-        sink=sink,
-    )
+    results: list[bool] = []
+    for index in range(1, args.samples + 1):
+        before = (_passed, _failed, _warned)
+        ok = probe(
+            url,
+            expect_bytes=args.expect_bytes,
+            timeout=args.timeout,
+            deep=args.deep,
+            sink=sink,
+        )
+        results.append(ok)
+        if args.samples > 1:
+            print(
+                f"SAMPLE {index}/{args.samples}: "
+                f"{'可用' if ok else '不可用'}"
+                f"（+{_passed - before[0]} passed / +{_failed - before[1]} failed）",
+                flush=True,
+            )
+            if index < args.samples:
+                time.sleep(max(0.0, args.sample_interval))
+
+    available, ok_count = majority_verdict(results)
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
-    if ok and _failed == 0:
+    if args.samples > 1:
+        print(f"MAJORITY: {ok_count}/{args.samples} 次可用 -> 判{'可用' if available else '不可用'}")
+        if 0 < ok_count < args.samples:
+            print(
+                "WARN: 采样结果不一致——源在抖动（间歇 502 / 单跳超时）而非彻底不可用，"
+                "按 Runbook §2.3 分级处理，别按单次结果下结论"
+            )
+    if available:
         print("RESULT: 源可用（exit 0）")
         return 0
     print("RESULT: 源不可用（exit 1）—— 处置见 docs/model-host-runbook.md")

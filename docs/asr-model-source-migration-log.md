@@ -88,30 +88,141 @@ git commit -m "chore(repo): 移除误提交的 build-voca30 子模块指针"
 合并后 `:app:compileDebugKotlin` 通过、`:app:testDebugUnitTest --tests "com.ispeech.data.*"` BUILD SUCCESSFUL、
 `check_static` 6/6、`check_crosscut` 138/138、`check_model_host` 7/7 全绿。
 
-### 4.2 两条子分支都未推到 origin
+### 4.2 两条子分支都未推到 origin —— 已闭合（2026-11-18 更正）
 
-`agent/agent/voca-34`、`agent/sre/voca-35` 在 `origin` 上都不存在，也没有 PR。
-合并前需推送并开 PR（标题带 `VOCA-33`）。截至 2026-11-10 仍未推送。
+> 本节原文（2026-11-10 写）：「`agent/agent/voca-34`、`agent/sre/voca-35` 在 `origin` 上都不存在，
+> 也没有 PR。合并前需推送并开 PR（标题带 `VOCA-33`）。截至 2026-11-10 仍未推送。」
+
+**该结论已过期，照它判断现状会得出错误结论。** 两条分支随后都已推到 `origin`
+（`origin/agent/agent/voca-34`、`origin/agent/sre/voca-35` 现在都在），改动也已在
+2026-11-10 23:08 CST 经统一合并窗口 squash 进 `main`。合并结论见 §4.3，引擎变更后的现状见 §8。
+
+### 4.3 合并结论（2026-11-18 补，VOCA-475）
+
+| squash commit | 时间（+0800） | 内容 | 执行者 |
+|---|---|---|---|
+| `d3316a0` | 2026-11-10 23:07:58 | VOCA-33：本文件的验收记录 | Lin（项目经理主导的统一合并窗口，见项目规则 §三） |
+| `3d62d9d` | 2026-11-10 23:08:02 | VOCA-34：下载校验 + `.part` 自愈，元数据收敛到 `AsrDownloadPolicy` | 同上 |
+| `61eb974` | 2026-11-10 23:08:08 | VOCA-35：默认源切 OSS + 探测脚本 + Runbook | 同上 |
+
+复跑验证（2026-11-18，境内机器）：
+
+```bash
+git fetch origin
+git log -1 --format='%H %ci' origin/main        # fa57a076…  2026-11-15 10:02:24 +0800
+for c in d3316a0 3d62d9d 61eb974; do
+  git merge-base --is-ancestor $c origin/main && echo "$c 在 main 上"   # 三条全部命中
+done
+git branch -r | grep voca-3                     # origin/agent/agent/voca-34、origin/agent/sre/voca-35 均在
+```
 
 ## 5. 其他发现（不属本 issue 范围）
 
 - `FunAsrModelStore.kt` 类注释仍写「默认指向自有服务器的 nginx 静态目录」，换源后已不准确。
   该文件归 VOCA-34，等其合并后单独改一行，**不要**在本 issue 里动它以免制造冲突。
+  → 2026-11-18 更新：VOCA-34 已 `done`，这一行没跟着改，已另立 VOCA-478 承接（含坏 `.part` 的 `BZh` 魔数预检优化）。
 - `build-voca30/keystore/keystore.properties` 以明文提交了 `storePassword` / `keyPassword`
   （自签测试证书）。虽非本次变更引入，但属凭据入库，建议单独开 issue 处理（转用环境变量或
   从版本库移除并轮换）。
+  → 2026-11-18 更新：已立 VOCA-477；当前该文件在 `main` 上的路径是 `keystore/keystore.properties`。
 - `通用短语.csv`（61 KB）在仓库根与 `build-voca30/` 下各有一份同内容副本，属导入源文件残留。
 
 ## 6. 状态
 
-| Issue | 状态 | 说明 |
+> 2026-11-18 按 Multica 平台核对后重写；同日二次核对又抓到一行脱节（VOCA-474 记成 `qa_be`，
+> 平台早已 `done`）。原表还把 VOCA-34 记成 `in_review`、VOCA-35 记成 `in_progress`，两者早已 `done`。
+> 状态是快照，**权威值以平台为准**，不要拿本节当实时看板；改这张表前先跑一次下面这条命令逐行对：
+>
+> ```bash
+> multica issue children 01a1bfa9-9508-7999-bbba-0bba096cc903 --output json \
+>   | jq -r '.. | objects | select(has("identifier") and has("status")) | "\(.identifier) \(.status) \(.updated_at)"' | sort
+> # 2026-11-18 二次核对输出（UTC）：34/35/474 done、475 in_progress、476/477/478 backlog
+> ```
+
+| Issue | 状态（2026-11-18 快照） | 说明 |
 |---|---|---|
-| VOCA-34 | `in_review` | 下载链路修复，16/16 单测通过，等人工评审 |
-| VOCA-35 | `in_progress` | 换源已落地、验收全绿、gitlink 已由 `f916c4b` 清除；等 SRE 本轮自检后转 `in_review` |
-| VOCA-33 | `in_progress` | 父 issue；链路已端到端验证，待两条子分支推送并开 PR 后转 `in_review` |
+| VOCA-34 | `done` | 下载校验与 `.part` 自愈已进 `main`（`3d62d9d`）。注：`done` 早于项目规则 §四 要求的真机回归，该缺口现由 VOCA-476 承接 |
+| VOCA-35 | `done` | 换源 + 探测脚本 + Runbook 已进 `main`（`61eb974`） |
+| VOCA-33 | `in_progress` | 父单。验收口径 A1–A4：A1 达成；A2 待 PR #6 合并；**A3（VOCA-474）已闭合**、A4（VOCA-476）仍未闭合 —— 详见 §8 |
+| VOCA-474 | `done` | `main` 活链路 `VoskModelStore` 下载零校验 + zip-slip，平台 2026-11-17 19:24Z 置 `done`。**注意**：`done` 是单子状态，不代表代码已落地 —— 承载修复的 PR #31（head `fix/voca-474-vosk-download-hardening`）此刻仍 `OPEN`、`mergedAt=null`，`origin/main` 仍是 `fa57a07`。合 main 属生产操作，要人类确认；在合并前从 `main` 出包仍无该校验 |
+| VOCA-475 | `in_progress` | 本文件所在的收口单：文档状态同步 + 定时探测 + OSS 对象异地留档 |
+| VOCA-476 | `backlog` | 真机回归证据，前置 = PR #6 合并出包 + 人类接上设备 |
+| VOCA-477 | `backlog` | `keystore/keystore.properties` 明文凭据 |
+| VOCA-478 | `backlog` | `FunAsrModelStore` 类注释 + 坏 `.part` 魔数预检 |
 
 ## 7. 待人类决策
 
+> 11-09 提出后无人应答；2026-11-18 在 VOCA-33 / VOCA-475 再次升级，**限期 2026-11-20**。
+> 沉默不再当作「默认不接」——两条都要一句原文答复（接 / 不接 + 决定人 + 理由）。
+
 1. **月外网流出预算上限**：建议先按 ¥100/月（约 2,500 次下载）设流量告警，用到 70% 预警。
-2. **定时探测落在哪**：构建机 crontab（改动小、与现有构建机同机）vs GitHub Actions（异地探测、
-   不依赖自有机器）。建议前者，因为探测要反映国内用户实际链路。
+   未答复期间阿里云控制台没有任何流量告警，账单是唯一的事后信号。
+2. **定时探测落在哪**：探测要跑在**境内出口**的常驻机器上，境外探测不代表用户链路
+   （VOCA-33 用一次误判换来的教训，详见 `docs/model-host-runbook.md` §2.2）。
+   - 可选：远端构建机 crontab（境内机房、常驻，建议项）；阿里云函数计算定时触发（境内 region、常驻、成本近零）。
+   - **两个候选都是机房出口**，与用户住宅/移动出口不同链路，所以落点定了之后**还要在本机（住宅/移动）或办公网各跑一次做对照**，
+     两边结论一致才算数。理由同下面「不可选」那条：出口不等于用户链路，只是方向反过来 —— 境内机房「绿」也不保证用户侧「绿」。
+   - **不可选**：GitHub Actions —— runner 在境外，链路结论不成立，本条已从候选里划掉，不是等人二选一。
+   - 未答复期间脚本不接任何调度 → 见 §8.3。
+
+## 8. 合并之后的引擎变更与现状（2026-11-18 补，VOCA-475）
+
+前面各节记录的是 11-09~11-10 的换源事实，**没有被 11-14 之后的变更作废，但生效范围变了**。
+这一节只讲现状，避免后来者照 §4.2 的旧结论或 §6 的旧表判断。
+
+### 8.1 时间线
+
+| 时间（+0800） | 事件 |
+|---|---|
+| 2026-11-10 23:08 | 三条 squash（`d3316a0` / `3d62d9d` / `61eb974`）进 `main`，见 §4.3 |
+| 2026-11-14 16:52 | `07214d6` 引入 Vosk 离线引擎：`main` 的 `AsrEngine` 变成 `SYSTEM / CUSTOM / VOSK`（无 `FUNASR`），麦克风链路改走 `IspeechImeService.kt:1630 → VoskModelStore.ensureModel`；`FunAsrSpeechEngine` 在 `main` 上除自身声明外零调用点 |
+| 2026-11-15 10:02 | `main` 到 `fa57a07`（当前 tip） |
+| 2026-11-15 11:09 | 发布线 `release/voca-186-v1.6`（tip `eba7a61`）仍是 FunASR 接线：`IspeechImeService.kt:284 funasrVoice = FunAsrSpeechEngine(...)`，`app/build.gradle.kts:22` 默认源为 OSS，该分支上没有 `VoskModelStore.kt` |
+| 2026-11-17 | VOCA-33 质检 FAIL（打回项 3「监控仍为零」/ 4「文档与事实矛盾」/ 残余风险 3「OSS 对象只有一份」）→ 拆 VOCA-474 / 475 / 476 |
+| 待发生 | PR #6（VOCA-190，base `main`、head `76491b9`、`OPEN` / `MERGEABLE`、6 files +208−21）恢复 FunASR 接线，排在 11-19 统一合并窗口；写 `main` 属生产操作，需人类确认，agent 不自行合并 |
+
+复跑判据（2026-11-18 实测，全部本地 `git` 断言；每条都已逐条跑通、输出非空）：
+
+```bash
+git show origin/main:app/src/main/java/com/ispeech/settings/store/AsrSettings.kt | grep -n "SYSTEM\|CUSTOM\|VOSK"
+#   :6 SYSTEM、:14 CUSTOM、:22 VOSK —— 没有 FUNASR
+
+git grep -n "FunAsrSpeechEngine" origin/main -- app/src
+#   只有 FunAsrSpeechEngine.kt:44 类声明 + :344 TAG 两处自身引用，无调用点
+
+git grep -n "VoskModelStore.ensureModel" origin/main -- app/src
+#   origin/main:.../com/ispeech/input/IspeechImeService.kt:1630 —— 这就是 main 的活链路
+
+git grep -n "FunAsrSpeechEngine(" origin/release/voca-186-v1.6 -- app/src/main/java/com/ispeech/input/IspeechImeService.kt
+#   :284 funasrVoice = FunAsrSpeechEngine(applicationContext) —— 发布线接了
+
+git ls-tree -r --name-only origin/release/voca-186-v1.6 | grep -c VoskModelStore.kt
+#   0 —— 该分支没有这个文件；注意 grep -c 计数为 0 时退出码是 1，不是断言失败
+```
+
+> 路径备忘：`IspeechImeService.kt` 在 `app/src/main/java/com/ispeech/input/`，**不是** `app/src/input/`。
+> 上一版这里写的源相对路径 `app/src/input/IspeechImeService.kt` 不存在，`git grep` 直接 exit 1 零输出，
+> 判据跑不通（VOCA-475 质检打回项 2）。写判据时先跑一遍再贴。
+
+### 8.2 准确定性
+
+- **装上 v1.6 内部包的人**：本单的换源与下载器加固是活的（发布线接线 + OSS 默认源都在包里）。
+- **今天从 `main` 出包的人**：走 Vosk，本单能力一项都不覆盖 —— 那是 VOCA-474 的范围，不是换源失败。
+- 人类 2026-11-17 已裁 FunASR 为 `active（在用）`，`main` 上断线定性为**回归**（VOCA-446 / ADR-0003），
+  PR #6 合并即闭合 A2，不需要重开换源讨论。
+
+### 8.3 本单（VOCA-475）交付的收口证据
+
+1. **境内探测首次实跑**（2026-11-18 03:18~03:27 +0800，探测机出口经 `ipinfo.io` 判为 Guangzhou / CN，
+   即境内链路，见 Runbook §1 复核行与 §2.2）：默认源 `--samples 3`
+   → `MAJORITY: 3/3 次可用`、`SUMMARY: passed=21 failed=0`、**exit 0**；旧源 `cvm.agentai0.com`
+   同样 3 次采样 → `3/3` 被重定向到 dnspod 拦截页、**exit 1**。脚本已加 `--samples N` 多数采样
+   （平局判不可用），`--self-test` 11 项全过。
+2. **OSS 对象异地留档**：已在同账号、另一 region 的既有备份桶落一份副本并逐字节复验一致
+   （ETag / MD5 / CRC64 与主源逐项相同，重下载后 sha256 等于权威值），命令与结果见
+   `docs/model-host-runbook.md` §5.4 与 §7.1。
+
+**仍未闭合的一条**：定时探测没有调度器 —— 卡在 §7.2 的人类答复（限期 11-20），不卡脚本。
+落点定了之后闭环还差一步：crontab 顶部要显式配 `ALERT_WEBHOOK`（cron 不继承登录 shell 环境，
+空值时 curl exit 2、只有日志痕迹，Runbook §2.2 前置条件 1），并按 §7.2 的要求与住宅或办公网出口
+做一次对照。答复到达前，本单覆盖的是「脚本 + 采样口径 + 定稿接法 + 境内一次实跑证据」，不是「已有告警」。
