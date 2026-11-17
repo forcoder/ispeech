@@ -455,6 +455,11 @@ VIEW_LINE_REF = re.compile(r"SoftKeyboardView\.kt:(\d+)(?:\s*[-–~]\s*(\d+))?")
 MARKER_WINDOW = 12  # 摘录往上找标记的窗口（行），出了这个窗口就算「无标记」
 EXCERPT_CLAIM = re.compile(r"KeyDef\.\w+\(\s*KeyAction\.")
 KEYDEF_ACTION = re.compile(r"KeyDef\.\w+\(\s*KeyAction\.([A-Z_]+)")
+# 承诺小节里「回潮的摘录」有两种形态：内嵌 KeyDef 摘录（AC1-5 能逐字段比）、以及贴回来的围栏代码块
+# （AC1-5 对后者没有判据）。围栏块默认计红，只有信息串明显不是源码的（命令 / 纯文本 / 图）放行 ——
+# 「这一段到底算不算源码摘录」不能留成可争辩的口子，否则守卫又回到只锚 KeyDef 五个字。
+FENCE_INFO = re.compile(r"^\s*```[ \t]*(\S*)")
+NON_EXCERPT_FENCE_INFO = {"bash", "sh", "shell", "text", "txt", "console", "mermaid"}
 # 承诺锚点：整句删掉/换成同义表述都要能被识别，识别不到才算守卫失效
 PROMISE_ANCHOR = re.compile(
     r"不嵌源码摘录|不内嵌[^\n]{0,10}(?:摘录|代码|片段)|不含源码摘录|不写源码摘录|只给符号引用"
@@ -765,6 +770,24 @@ def section_scope(text: str, needle: str) -> str:
     return "\n".join(lines[start:end])
 
 
+def section_excerpts(section: str) -> tuple[int, list[str]]:
+    """承诺小节里的摘录回潮总数 = 内嵌 KeyDef 摘录 + 围栏代码块（附围栏信息串清单）。"""
+    keydef = len(EXCERPT_CLAIM.findall(section))
+    fences: list[str] = []
+    in_fence = False
+    for line in section.splitlines():
+        m = FENCE_INFO.match(line)
+        if not m:
+            continue
+        if in_fence:
+            in_fence = False
+            continue
+        in_fence = True
+        if m.group(1).lower() not in NON_EXCERPT_FENCE_INFO:
+            fences.append(m.group(1) or "（无语言标注）")
+    return keydef + len(fences), fences
+
+
 # --------------------------------------------------------------------------
 # AC-1：文档指位 == 该树 toolbarKeys() 解析结果
 # --------------------------------------------------------------------------
@@ -919,7 +942,7 @@ def check_ac1(r: Report, root: Path, keys: list[dict], span: tuple[int, int]) ->
     # （改词 / 整节删掉 / 搬走却没落地）= 守卫本身失效，同样必须显式红 —— 只锚五个字时，
     # 换一句同义表述就让这条编号从读数里消失，等于没有守卫。
     t9 = read(root, T9_DOC_REL)
-    promises: list[tuple[str, int, str, int]] = []
+    promises: list[tuple[str, int, str, int, list[str]]] = []
     embedded_all = 0
     for f in files:
         rel = f.relative_to(root).as_posix()
@@ -927,8 +950,8 @@ def check_ac1(r: Report, root: Path, keys: list[dict], span: tuple[int, int]) ->
         embedded_all += len(EXCERPT_CLAIM.findall(text))
         for pm in PROMISE_ANCHOR.finditer(text):
             at = text.count("\n", 0, pm.start()) + 1
-            sec = len(EXCERPT_CLAIM.findall(section_scope(text, pm.group(0))))
-            promises.append((rel, at, pm.group(0), sec))
+            cnt, fences = section_excerpts(section_scope(text, pm.group(0)))
+            promises.append((rel, at, pm.group(0), cnt, fences))
     if not promises:
         if not t9:
             r.skip("AC1-8", f"该树没有 {T9_DOC_REL}（早于这份文档的版本），摘录口径守卫无从谈起")
@@ -941,17 +964,22 @@ def check_ac1(r: Report, root: Path, keys: list[dict], span: tuple[int, int]) ->
             )
     else:
         rotted = [p for p in promises if p[3]]
-        for rel, at, wording, cnt in rotted:
+        for rel, at, wording, cnt, fences in rotted:
+            parts = ([f"围栏代码块 {fences}"] if fences else []) + (
+                ["内嵌 KeyDef 摘录"] if cnt > len(fences) else []
+            )
             r.fail(
                 "AC1-8",
-                f"{rel}:{at} 承诺「{wording}」的同一节里仍有 {cnt} 处内嵌 KeyDef 摘录 —— 口径又腐烂了（守卫按承诺所在文件现定位，不靠固定文件名）",
+                f"{rel}:{at} 承诺「{wording}」的同一节里回潮 {cnt} 处摘录（{' + '.join(parts)}）—— 口径又腐烂了"
+                f"（守卫按承诺所在文件现定位，不靠固定文件名；围栏块除命令/纯文本/图外一律计红）",
             )
         if not rotted:
-            where = "、".join(dict.fromkeys(f"{rel}:{at}" for rel, at, _, _ in promises))
+            where = "、".join(dict.fromkeys(f"{rel}:{at}" for rel, at, _, _, _ in promises))
             r.ok(
                 "AC1-8",
-                f"守卫本次生效：{len(promises)} 处承诺（{where}）所在小节内已无内嵌 KeyDef 摘录；"
-                f"范围内另有 {embedded_all} 处摘录在承诺小节之外，由 AC1-5 逐字段比，不属本条追究范围",
+                f"守卫本次生效：{len(promises)} 处承诺（{where}）所在小节内已无摘录回潮（内嵌 KeyDef 与围栏代码块都算）；"
+                f"范围内另有 {embedded_all} 处 KeyDef 摘录在承诺小节之外，由 AC1-5 逐字段比，不属本条追究范围；"
+                f"其余文档里的裸 `文件:行号` 引用只有 SoftKeyboardView.kt 的跨度有判据（AC1-5），其它文件没有",
             )
 
     r.ok(
@@ -1207,8 +1235,12 @@ def panel_rows(xml: str) -> list[dict]:
     return rows
 
 
+# 命中只认选择器自身的内容特征（标题文案 / 选择器组件名）。包名在本判据里只当**排除**用
+# （own_packages() 的职责），绝不当命中：com.android.systemui 的状态栏 / 导航栏、
+# com.android.settings 的常驻页面在真机 dump 里天天在场，把它们算成「弹窗已出现」的证据，
+# 「点了没切走」就会打成 PASS AC4-1 / PASS AC6-2 —— 第二次质检的打回项 1。
 PICKER_WINDOW = re.compile(
-    r"输入法选择|InputMethodMenu|Choose input method|Select input method|package=\"com\.android\.(settings|systemui)"
+    r"输入法选择|选择输入法|InputMethodMenu|Choose input method|Select input method"
 )
 
 
@@ -1247,10 +1279,12 @@ def own_packages(xml: str, app_pkg: str = "") -> set[str]:
 
 
 def _picker_up(xml: str, app_pkg: str = "") -> bool:
-    """系统输入法选择器窗口是否真的在屏上 —— 按窗口归属判，不按单条文案判。
+    """系统输入法选择器窗口是否真的在屏上 —— 归属只做排除，命中只看选择器内容特征。
 
     只在**非本应用**的节点上找选择器特征；包名缺失的节点归属不明，一律不算证据
-    （宁可判不出兜底，也不给一条假绿）。
+    （宁可判不出兜底，也不给一条假绿）。反过来说，「非本应用」也**不是**弹窗的证据：
+    systemui 的状态栏 / 导航栏这类常驻窗口同样非本应用，把它们当命中就是打回项 1 的洞，
+    所以 blob 里不拼 `package=`，命中一律要落到标题文案或选择器组件名上。
     """
     _, _, nodes = _nodes(xml)
     if nodes is None:
@@ -1266,7 +1300,6 @@ def _picker_up(xml: str, app_pkg: str = "") -> bool:
                 n.get("content-desc") or "",
                 n.get("resource-id") or "",
                 n.get("class") or "",
-                f'package="{pkg}"',
             ]
         )
         if PICKER_WINDOW.search(blob):
@@ -1314,7 +1347,12 @@ def check_device_ac345(r: Report, serial: str, ids: list[str], rows: list[dict],
             r.fail("AC3-1", f"点了「{target['desc']}」但 default_input_method 仍是 {after or before}（前后无变化）—— AC-3 不成立")
             picker, toast = system_picker_up(serial, xml, app_pkg)
             if picker or toast:
-                r.ok("AC4-1", f"切换失败有兜底（系统选择器={picker} / 「系统不允许切换输入法」={toast}）；选择器只认非本应用包名的节点，自家 {app_pkg or '面板'} 的按钮与提示不参与")
+                r.ok(
+                    "AC4-1",
+                    f"切换失败有兜底（系统选择器={picker} / 「系统不允许切换输入法」={toast}）；"
+                    f"归属只做排除（自家 {app_pkg or '面板'} 的按钮与提示不算），命中只认选择器标题文案 / 组件名 —— "
+                    f"systemui 状态栏这类常驻窗口不参与",
+                )
             else:
                 r.fail("AC4-1", "切换失败且既没弹系统选择器、也没显示「系统不允许切换输入法」—— 静默失败")
     if n == 1:
@@ -1372,7 +1410,11 @@ def check_ac6(r: Report, serial: str, props: dict[str, str], switched: bool | No
     else:
         picker, toast = system_picker_up(serial, "", app_pkg)
         if picker or toast:
-            r.ok("AC6-2", f"EMUI 拦截成立且兜底生效（系统选择器={picker} / 文案={toast}）；选择器只认非本应用包名的节点")
+            r.ok(
+                "AC6-2",
+                f"EMUI 拦截成立且兜底生效（系统选择器={picker} / 文案={toast}）；"
+                f"命中只认选择器标题文案 / 组件名，常驻系统窗口（状态栏等）不参与判定",
+            )
         else:
             r.fail("AC6-2", "EMUI 拦截成立且无任何兜底提示 —— 用户点了没反应，E 类缺陷")
 
@@ -1725,6 +1767,36 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
     if _picker_up('<hierarchy><node text="输入法选择" /></hierarchy>', "com.ispeech.ime"):
         fails.append("包名缺失（归属不明）的节点被当成系统窗口证据 —— 宁可判不出，也不许给绿")
 
+    # 常驻系统窗口不是「弹窗已出现」的证据（第二次质检打回项 1）：systemui 的状态栏 / 导航栏、
+    # settings 的非选择器页在真机 dump 里天天在场。把它们当命中，静默失败会洗成
+    # PASS AC4-1 有兜底 + PASS AC6-2 兜底生效 —— 而 AC-6 的场景里 AC3-1 判红是预期，
+    # 整条链只剩这一句验收信号，绿了就是放行错东西。
+    resident = stub_dump.replace(
+        "</node></hierarchy>",
+        '<node text="" resource-id="com.android.systemui:id/status_bar" package="com.android.systemui" bounds="[0,0][1080,80]"/>'
+        '<node text="" resource-id="com.android.systemui:id/nav_bar" package="com.android.systemui" bounds="[0,1760][1080,1800]"/>'
+        '<node text="应用管理" resource-id="android:id/title" package="com.android.settings" bounds="[0,0][1080,200]"/>'
+        "</node></hierarchy>",
+    )
+    if _picker_up(resident, "com.ispeech.ime"):
+        fails.append(
+            "systemui 状态栏/导航栏 + settings 常驻页被当成系统选择器已弹出 —— "
+            "包名只能当排除依据，命中必须落到选择器自己的标题文案 / 组件名上"
+        )
+    if "package" in PICKER_WINDOW.pattern:
+        fails.append(f"PICKER_WINDOW 又把包名写进命中条件（{PICKER_WINDOW.pattern}）—— 往正则里加包名就是复现同一个洞")
+
+    # 收紧命中不许把真弹窗判没了：三种标题文案（含 AOSP 中文标题）仍要判得出
+    titles_hit: list[bool] = []
+    for title in ("输入法选择", "选择输入法", "Select input method"):
+        titled = stub_dump.replace(
+            "</node></hierarchy>",
+            f'<node text="{title}" resource-id="android:id/title" package="com.android.settings"/></node></hierarchy>',
+        )
+        titles_hit.append(_picker_up(titled, "com.ispeech.ime"))
+        if not titles_hit[-1]:
+            fails.append(f"标题为「{title}」的系统选择器窗口判不出 —— AC-4 兜底会被误报成静默失败（假红）")
+
     # AC1-8 的锚点不许只锚五个字：改词要还能锚住，锚点整段删掉必须显式红。
     # （夹具的 Kotlin 源码从「好树」现读，`code` 这个变量名在下面 `for code in AC_RUNTIME` 里已被占用）
     a8 = workdir / "selftest-ac18"
@@ -1769,6 +1841,27 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
     moved_txt = "FAIL" if moved else ("无结论" if not rr.hits("AC1-8") else rr.hits("AC1-8")[0][0])
     if not any("internal-qa-build.md" in h[2] for h in moved):
         fails.append(f"承诺搬到别的文档后 AC1-8 没跟着咬（实际 {moved or rr.hits('AC1-8')}）—— 守卫仍绑在固定文件名上")
+
+    # 摘录不止 KeyDef 一种形态：非 KeyDef 的源码围栏块贴进承诺小节必须红（否则「换个语言的代码块」
+    # 就绕开了守卫）；命令 / 纯文本这类明显不是源码的围栏块不许被计红，不然下一个人只会关掉判据。
+    for extra in (a8 / "docs").glob("*.md"):
+        if extra.name != "t9-and-symbols.md":
+            extra.unlink()
+    promise_head = "## 4. 接线\n\n只给符号引用，不嵌源码摘录。\n\n"
+    for why_f, body_f, want_f in (
+        ("承诺节内贴非 KeyDef 源码块", '```kotlin\nval row = LinearLayout(context).apply { setPadding(dp(12), 0, dp(12), 0) }\n```\n', "FAIL"),
+        ("承诺节内贴无语言标注代码块", '```\nKeyDef.fn(KeyAction.SWITCH_IME, "输", weight = 1f)\n```\n', "FAIL"),
+        ("承诺节内只有命令示例", '```bash\npython3 tools/verify/check_voca167.py --self-test\n```\n', "PASS"),
+    ):
+        (a8 / "docs" / "t9-and-symbols.md").write_text(promise_head + body_f, encoding="utf-8")
+        rr3 = Report("selftest-ac18-fence")
+        keys3, a3s, b3 = parse_toolbar(read(a8, VIEW_REL))
+        check_ac1(rr3, a8, keys3, (a3s, b3))
+        hits3 = rr3.hits("AC1-8")
+        if not hits3:
+            fails.append(f"AC1-8 围栏变异「{why_f}」一条结论都没有 —— 守卫静默失效")
+        elif hits3[0][0] != want_f:
+            fails.append(f"AC1-8 围栏变异「{why_f}」判成 {hits3[0][0]}（期望 {want_f}）：{hits3[0][2][:90]}")
 
     # 摘录行自称「数字页」/ 整段没有任何锚点，都不许让「字段不符」降级成不判：
     # 前者换锚点、后者删锚点，是能绕开逐字段比对的两条最短路径。
@@ -1826,7 +1919,9 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
         f"自带按钮不误判成系统弹窗={not _picker_up(dmp)} "
         f"面板提示语不误判成系统弹窗={not _picker_up(stub_dump, 'com.ispeech.ime')} "
         f"(不传 applicationId 时={not _picker_up(stub_dump, '')}) "
-        f"真弹窗仍判得出={_picker_up(stub_sys, 'com.ispeech.ime')}"
+        f"常驻系统窗口(systemui 状态栏+settings 页)不误判成弹窗={not _picker_up(resident, 'com.ispeech.ime')} "
+        f"真弹窗仍判得出={_picker_up(stub_sys, 'com.ispeech.ime')} "
+        f"标题变体（3 种）全判得出={all(titles_hit)}"
     )
     print(
         "SELFTEST: AC1-8 锚点变异 "
