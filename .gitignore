@@ -42,6 +42,8 @@ dist/deploy-*.log
 dist/screenshots/
 dist/ispeech-debug-*.apk
 dist/app-debug.apk
+# 带时间戳的临时出包（VOCA-446 §6 F-7：这类未登记本地产物易被 baseline 无差别捕获，且单文件 >100 MB 推不上 GitHub）
+dist/ispeech-release-[0-9]*-*.apk
 
 # 短语数据导出
 通用短语.csv
