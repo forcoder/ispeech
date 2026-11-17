@@ -21,9 +21,9 @@
 | # | 事实 | 命令 | 结果 |
 | --- | --- | --- | --- |
 | E1 | 阻断文件 | `git cat-file -s d0a15bc6` | `139171786` B = **132.7 MiB** |
-| E2 | 远端 43 个分支全部干净 | 见下方审计脚本（`refs/remotes/origin`） | **0 个** >100 MiB 可达 blob |
+| E2 | 远端 43 个分支全部干净 | 见下方审计脚本（`refs/remotes/origin`） | `refs/remotes/origin` 44 个 ref（43 个分支 + `origin/HEAD`）逐个跑，**0 个** >100 MiB 可达 blob |
 | E3 | `main` 干净 | `git rev-list --objects origin/main \| …` | **0 个** >100 MiB blob；可达最大 blob 是 `dist/ispeech-debug.apk` 22,795,894 B |
-| E4 | 污染只在本地分支 | 同一审计脚本跑 `refs/heads` | **49 / 82** 本地分支被同一个 blob 污染（其中 10 个远端有对应分支、39 个只在本地） |
+| E4 | 污染只在本地分支 | 同一审计脚本跑 `refs/heads` | 当场复跑 **50 / 84**（其中 10 个远端有对应分支、40 个只在本地）；本单首次实测为 49 / 82，增量是并发新建的 worktree 分支 |
 | E5 | 污染来源是平台基线提交 | `git log --all --format='%h %s' -- dist/ispeech-release-1.5-20261115-1004.apk` | 命中提交标题清一色是 `chore(agent): …uncommitted work…` / `multica: local directory snapshot` |
 | E6 | 98.4 MiB 曾经推上去过 | `git branch -a --contains 199b972` | **两条**远端分支携带该包：`origin/release/voca-186-v1.6`、`origin/chore/voca-121-dist-readme-gate`，说明**硬上限在 98.4 与 139.2 MiB 之间**（GitHub 文档口径 100 MiB）；50 MiB 以上只告警不拦截 |
 | E7 | 基线提交尊重 `.gitignore` | `git diff --stat main HEAD` | 只多出那个 APK；`.multica/`、`AGENTS.md`、`CLAUDE.md` 等被忽略的文件没进树 → **改 `.gitignore` 就能止住** |
@@ -43,8 +43,8 @@ git for-each-ref --format='%(refname:short)' refs/remotes/origin | while read -r
 done
 ```
 
-分支计数是**活仓库**上的快照：两次实测之间本地分支从 79 涨到 82、污染分支从 46 涨到 49
-（其他 agent 的 worktree 正在并发建分支）。因此所有分支数量只作量级参考，
+分支计数是**活仓库**上的快照：三次实测之间本地分支 79 → 82 → 84、污染分支 46 → 49 → 50
+（其他 agent 的 worktree 正在并发建分支，每个新 run 的基线提交又带走一次污染）。因此所有分支数量只作量级参考，
 **执行时一律以审计脚本当场输出为准**；结论（远端 0 个巨型 blob）在两次实测中均成立。
 
 ## 三、方案对比与推荐
@@ -109,7 +109,7 @@ done
 | `agent/ux/voca-45` | 是 | 5 | 3（`docs(ux)` 质检整改；`898dbea` 摘包提交**不要**带） | 否 |
 | `agent/ba/voca-122` | 是 | 3 | 2（`docs(requirements)`） | 否 |
 | `agent/agent/voca-121` / `-33` / `-56` / `agent/mika/voca-30` | 是 | 1–2 | 0（只有平台基线提交，无实际工作） | 否 |
-| 其余 39 个被污染的本地分支 | 否 | — | 远端无对应分支，按 P0-A 合并后重建即可 | — |
+| 其余 40 个被污染的本地分支（E4 当场口径） | 否 | — | 远端无对应分支，按 P0-A 合并后重建即可 | — |
 
 分叉判定用 `git rev-list --count origin/$B..$B`（本地领先）与 `git rev-list --count $B..origin/$B`
 （远端领先），两个都不为 0 即已分叉。**FF 性由模板结构保证，而不是由本地分支保证**：
@@ -205,4 +205,4 @@ du -sh "$(git rev-parse --git-common-dir)"
   不影响本方案结论；若走 P2 的 LFS，需要人类确认组织 LFS 存储/带宽配额与计费口径后再动。
 - `main` 已 tracked 的 131.5 MiB 历史 APK 是否长期留在 git 里（P2 议题）：影响 clone 速度，
   但不阻塞任何推送；本单不扩范围处理。
-- 39 个「远端无对应分支」的污染分支是否还有人在用，需要各 issue owner 认领后再删（P0-C 前置）。
+- 40 个「远端无对应分支」的污染分支（E4 当场口径）是否还有人在用，需要各 issue owner 认领后再删（P0-C 前置）。
