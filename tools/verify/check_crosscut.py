@@ -22,7 +22,9 @@
      `android.speech.RecognitionService`（不是调用方的 RECOGNIZE_SPEECH）、必须保留
      BIND_RECOGNITION_SERVICE 真服务过滤、判定计数必须进 AsrTrace、拦下会话的 reason
      必须走 RecognitionServices.REASON_*，且 ev=blocked 的两个打点出口（服务侧 traceVoiceBlocked
-     / 控制器侧 startListening 的绑定失败）逐个钉住——少钉一个、或多出第三个没断言的出口，都 FAIL
+     / 控制器侧 startListening 的绑定失败）逐个钉住。出口按**发射器**（`AsrTrace.w(` / `AsrTrace.i(`
+     的调用点）采集，不按 `AsrTrace.EV_BLOCKED` 这个 token 采集：多一个没断言的出口——无论它引用
+     常量还是把事件名写成裸串——都 FAIL；事件名写裸串另有单独一条断言。少钉一个也 FAIL
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -86,6 +88,7 @@ INPUT_MODE = JAVA / "input" / "InputMode.kt"
 INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
+ASR_TRACE = JAVA / "input" / "AsrTrace.kt"
 RECOGNITION_SERVICES_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "RecognitionServicesTest.kt"
 # 识别服务**自己**声明的 action（服务方），与调用方发起识别用的
 # `android.speech.action.RECOGNIZE_SPEECH` 不是一回事 —— 拿后者枚举服务，命中永远是 0 条（VOCA-310）。
@@ -923,6 +926,9 @@ def check_voice_chain() -> None:
     #      「点了语音键却没进识别中」不允许存在查不到日志的路径。出口有两个（服务侧统一入口
     #      traceVoiceBlocked / 控制器侧 startListening 的绑定失败），两处各有一条断言，
     #      外加一条「main 里 ev=blocked 的出口集合就是这两个」的结构性断言——多一个没钉住的出口也 FAIL。
+    #      打回项 4 改的是这条集合断言的**采集口径**：抓发射器（AsrTrace.w/i 的调用点），
+    #      不抓 `AsrTrace.EV_BLOCKED` 这个 token——ev 形参是无类型 String，新出口写裸串 "blocked"
+    #      与引用常量在编译期、字节码、logcat 上一模一样，按 token 采集会从断言底下走过去。
     query_region = strip_comments(function_region(controller, r"private fun queryRecognizers\("))
     probe_region = strip_comments(function_region(controller, r"fun probeUsableServices\("))
     intent_region = strip_comments(function_region(controller, r"private fun buildIntent\("))
@@ -934,12 +940,31 @@ def check_voice_chain() -> None:
     blocked_trace = strip_comments(function_region(svc, r"private fun traceVoiceBlocked\("))
     bind_region = strip_comments(function_region(controller, r"private fun startListening\("))
     recognition_test = read(RECOGNITION_SERVICES_TEST)
-    # ev=blocked 的打点出口，按 (文件, 所在函数) 归属；下面两条断言一一对着它
+    # ev=blocked 的打点出口，按 (文件, 所在函数) 归属；下面几条断言一一对着它。
+    # 采的是**发射器**（AsrTrace.w / AsrTrace.i 的调用点）：ev 传的是常量还是裸串，
+    # 行为完全相同，所以两种写法都要算进出口集合（VOCA-310 打回项 4）。
+    # 事件名的取值从 AsrTrace.kt 现读，门禁里不另抄一份字面量。
+    m_ev_blocked = re.search(r'const val EV_BLOCKED\s*=\s*"([^"]+)"', strip_comments(read(ASR_TRACE)))
+    ev_blocked_value = m_ev_blocked.group(1) if m_ev_blocked else ""
     blocked_sites = set()
+    ev_sites = []
     for kt in sorted(JAVA.rglob("*.kt")):
         kt_body = strip_comments(read(kt))
-        for m in re.finditer(r"AsrTrace\.EV_BLOCKED", kt_body):
-            blocked_sites.add((kt.name, enclosing_fun(kt_body, m.start())))
+        for m in re.finditer(r"AsrTrace\.(?:w|i)\(\s*[^,]*,\s*([^,)\n]+)", kt_body):
+            ev = m.group(1).strip()
+            site = (kt.name, enclosing_fun(kt_body, m.start()), ev)
+            ev_sites.append(site)
+            if ev == "AsrTrace.EV_BLOCKED" or ev.strip('"') == ev_blocked_value:
+                blocked_sites.add(site[:2])
+    off_const_ev = sorted(s for s in ev_sites if not s[2].startswith("AsrTrace.EV_"))
+    check(
+        bool(ev_sites) and not off_const_ev,
+        "AsrTrace 打点的 ev 实参一律引用 AsrTrace.EV_* 常量（不写裸串、不绕本地常量）",
+        f"app/src/main 下这些打点调用点的第二个实参不是 AsrTrace.EV_* 引用：{off_const_ev} —— "
+        f"ev 形参是无类型 String，写成裸串 \"blocked\"（或绕一道本地常量）与引用常量编出来的字节码、"
+        f"打进 logcat 的一模一样，上面的出口集合与 docs 里的 grep 口径都抓不到这种新出口"
+        f"（VOCA-310 打回项 4）",
+    )
 
     m_action = re.search(r'const val SERVICE_INTERFACE\s*=\s*"([^"]+)"', strip_comments(controller))
     action_value = m_action.group(1) if m_action else ""
@@ -1030,7 +1055,8 @@ def check_voice_chain() -> None:
         blocked_sites == {("IspeechImeService.kt", "traceVoiceBlocked"),
                           ("VoiceInputController.kt", "startListening")},
         "ev=blocked 的打点出口有两个、逐个被上面钉住（main 里不存在第三处未断言的出口）",
-        f"app/src/main 下 AsrTrace.EV_BLOCKED 的实际出口是 {sorted(blocked_sites)}，应为 "
+        f"app/src/main 下 AsrTrace 打点里 ev=blocked 的实际出口（按调用点采集，引用常量与写裸串都算）是 "
+        f"{sorted(blocked_sites)}，应为 "
         f"[('IspeechImeService.kt', 'traceVoiceBlocked'), ('VoiceInputController.kt', 'startListening')]："
         f"少一个说明拦下会话又出现查不到日志的路径，多一个说明新增了没配断言、也没进 docs 表格的出口"
         f"（VOCA-310 打回项 2）",
