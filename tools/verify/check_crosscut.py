@@ -22,9 +22,11 @@
      `android.speech.RecognitionService`（不是调用方的 RECOGNIZE_SPEECH）、必须保留
      BIND_RECOGNITION_SERVICE 真服务过滤、判定计数必须进 AsrTrace、拦下会话的 reason
      必须走 RecognitionServices.REASON_*，且 ev=blocked 的两个打点出口（服务侧 traceVoiceBlocked
-     / 控制器侧 startListening 的绑定失败）逐个钉住。出口按**发射器**（`AsrTrace.w(` / `AsrTrace.i(`
-     的调用点）采集，不按 `AsrTrace.EV_BLOCKED` 这个 token 采集：多一个没断言的出口——无论它引用
-     常量还是把事件名写成裸串——都 FAIL；事件名写裸串另有单独一条断言。少钉一个也 FAIL
+     / 控制器侧 startListening 的绑定失败）逐个钉住。出口按**发射器**的调用点采集（`AsrTrace.w(` /
+     `AsrTrace.i(` / `AsrTrace.line(`，点号与实参之间允许换行），不按 `AsrTrace.EV_BLOCKED` 这个 token
+     采集：多一个没断言的出口——无论它引用常量、把事件名写成裸串、还是把点号折下一行——都 FAIL；
+     事件名写裸串另有单独一条断言，绕过封装直接 `Log.x(AsrTrace.TAG, …)` 也单独拦一条（条件项 C1）。
+     少钉一个也 FAIL
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -941,8 +943,10 @@ def check_voice_chain() -> None:
     bind_region = strip_comments(function_region(controller, r"private fun startListening\("))
     recognition_test = read(RECOGNITION_SERVICES_TEST)
     # ev=blocked 的打点出口，按 (文件, 所在函数) 归属；下面几条断言一一对着它。
-    # 采的是**发射器**（AsrTrace.w / AsrTrace.i 的调用点）：ev 传的是常量还是裸串，
+    # 采的是**发射器**（AsrTrace.w / AsrTrace.i / AsrTrace.line 的调用点）：ev 传的是常量还是裸串，
     # 行为完全相同，所以两种写法都要算进出口集合（VOCA-310 打回项 4）。
+    # 条件项 C1 补的两个方向：点号与实参之间允许换行（`AsrTrace` ↵ `.w(…)` 是同一条语句），
+    # 以及 `AsrTrace.line()` —— 它和 w/i 的形参同序（第二个实参就是事件名），走它拼日志同样算发射。
     # 事件名的取值从 AsrTrace.kt 现读，门禁里不另抄一份字面量。
     m_ev_blocked = re.search(r'const val EV_BLOCKED\s*=\s*"([^"]+)"', strip_comments(read(ASR_TRACE)))
     ev_blocked_value = m_ev_blocked.group(1) if m_ev_blocked else ""
@@ -975,9 +979,10 @@ def check_voice_chain() -> None:
 
     blocked_sites = set()
     ev_sites = []
+    raw_tag_sites = []
     for kt in sorted(JAVA.rglob("*.kt")):
         kt_body = strip_comments(read(kt))
-        for m in re.finditer(r"AsrTrace\.(?:w|i)\(", kt_body):
+        for m in re.finditer(r"AsrTrace\s*\.\s*(?:w|i|line)\s*\(", kt_body):
             _, comma = top_level_arg(kt_body, m.end())  # 第一实参 = sessionId
             ev, _ = top_level_arg(kt_body, comma + 1)   # 第二实参 = 事件名
             site = (kt.name, enclosing_fun(kt_body, m.start()), ev)
@@ -985,6 +990,11 @@ def check_voice_chain() -> None:
             literals = re.findall(r'"([^"]*)"', ev)
             if re.search(r"AsrTrace\.EV_BLOCKED\b", ev) or ev_blocked_value in literals:
                 blocked_sites.add(site[:2])
+        # 绕过封装、自己拿 AsrTrace.TAG 发日志：事件名不再经过任何形参，
+        # 上面的 ev 常量断言与出口集合都读不到它（条件项 C1 的第三种写法）。
+        # AsrTrace.kt 内部的 `Log.w(TAG, line(…))` 不带限定名，正是发射器本体，不在采集范围。
+        for m in re.finditer(r"Log\s*\.\s*\w+\s*\(\s*AsrTrace\s*\.\s*TAG\s*,", kt_body):
+            raw_tag_sites.append((kt.name, enclosing_fun(kt_body, m.start())))
     off_ev = sorted(
         s for s in ev_sites
         if re.search(r'"[^"]*"', s[2]) or not re.search(r"AsrTrace\.EV_\w+", s[2])
@@ -996,6 +1006,13 @@ def check_voice_chain() -> None:
         f"ev 形参是无类型 String，写成裸串 \"blocked\"（或绕一道本地常量）与引用常量编出来的字节码、"
         f"打进 logcat 的一模一样，上面的出口集合与 docs 里的 grep 口径都抓不到这种新出口"
         f"（VOCA-310 打回项 4）",
+    )
+    check(
+        not raw_tag_sites,
+        "事件名一律经 AsrTrace 封装发射（main 里没有直接 Log.x(AsrTrace.TAG, …) 的调用点）",
+        f"app/src/main 下这些调用点绕过 AsrTrace.w / i / line 直接拿 AsrTrace.TAG 发日志：{raw_tag_sites} —— "
+        f"这种写法的事件名不经过形参，ev 常量断言与下面的出口集合都读不到它，"
+        f"拦下会话可以再加一个没断言的出口（VOCA-310 条件项 C1）",
     )
 
     m_action = re.search(r'const val SERVICE_INTERFACE\s*=\s*"([^"]+)"', strip_comments(controller))
@@ -1087,7 +1104,8 @@ def check_voice_chain() -> None:
         blocked_sites == {("IspeechImeService.kt", "traceVoiceBlocked"),
                           ("VoiceInputController.kt", "startListening")},
         "ev=blocked 的打点出口有两个、逐个被上面钉住（main 里不存在第三处未断言的出口）",
-        f"app/src/main 下 AsrTrace 打点里 ev=blocked 的实际出口（按调用点采集，引用常量与写裸串都算）是 "
+        f"app/src/main 下 AsrTrace 打点里 ev=blocked 的实际出口（按发射器调用点采集：`AsrTrace.w/i/line`，"
+        f"点号换行与写裸串都算；绕过封装的 `Log.x(AsrTrace.TAG, …)` 由上面一条单独拦）是 "
         f"{sorted(blocked_sites)}，应为 "
         f"[('IspeechImeService.kt', 'traceVoiceBlocked'), ('VoiceInputController.kt', 'startListening')]："
         f"少一个说明拦下会话又出现查不到日志的路径，多一个说明新增了没配断言、也没进 docs 表格的出口"
