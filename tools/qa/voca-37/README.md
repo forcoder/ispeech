@@ -188,7 +188,7 @@ B 包 `cffc0cd` = 旧 head + `d3b6f84`(VOCA-170) + `d283706`(VOCA-184) + `4d6363
 
 ## evidence/ 与 shots/
 
-`ev_*.txt` 为当场 stdout 原文（第七轮的每行都带 `ts=`，文件头还带 `# 被测=` / `# cmd:` / `# rc=`），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模：`tools/qa/voca-37/` 下 20 个 `.py` + 8 个 `.sh`，`evidence/` 101 份（96 `.txt` + 4 `.xml` + 1 `.log`，其中 23 份 `ev_r7_*.txt`），`shots/` 86 张**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
+`ev_*.txt` 为当场 stdout 原文（第七轮的每行都带 `ts=`，文件头还带 `# 被测=` / `# cmd:` / `# rc=`），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模：`tools/qa/voca-37/` 下 20 个 `.py` + 8 个 `.sh`，`evidence/` 102 份（97 `.txt` + 4 `.xml` + 1 `.log`，其中 24 份 `ev_r7_*.txt`），`shots/` 86 张**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
 
 ```bash
 python3 tools/qa/voca-37/ac2.py <apk> 440 keyevent   # 硬件/注入键路径 + 开关开/关反例
