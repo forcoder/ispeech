@@ -47,6 +47,30 @@
 - 松手收尾的兜底：`finish()` 后 6s 仍未收到 `onResults` / `onError` 时由 `finishWatchdog` 复位并提示「没听清」——按住-说话没有「再点一次」可用于恢复，不复位就会卡在「收音中」。
 - 取消即 `destroy()`：只 `stopListening()` 会让系统继续占麦克风，导致下一次 `ERROR_RECOGNIZER_BUSY`；因此取消 / 销毁都释放识别器。
 - `EXTRA_CALLING_PACKAGE`：输入法不是宿主，部分 ROM 缺该 extra 会直接回 `ERROR_CLIENT`，故透传 `currentInputEditorInfo.packageName`。
+- 识别服务枚举用**服务方**声明的 action（VOCA-310）：`RecognitionServices.SERVICE_INTERFACE` = `android.speech.RecognitionService`，与发起识别用的 `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` 是两个不同的 action，拿后者枚举命中恒为 0（`AndroidManifest` 的 `<queries>` 也只放行了前者）。判定链路是「枚举 → 按 `BIND_RECOGNITION_SERVICE` 留下真服务（挡住华为 `FakeRecognitionService` 那类绑得上却永不回结果的桩服务）→ 纯函数 `RecognitionServices.blockedReason(available, usable)` 归类」；`createSpeechRecognizer` 失败不再往外抛，归为 `service_bind_failed`。
+
+### 前置判定：为什么这一按没进「识别中」（VOCA-310）
+
+判定收在一处、打点有两处出口：`IspeechImeService.toggleVoiceInput()` 问 `controller.probeBlockedReason(asr)`，非空就走 `traceVoiceBlocked(reason)` 拦下（控制器为空的分支同走这个入口）；第三条 `service_bind_failed` 在 `VoiceInputController.startListening()` 里就地打——探测放行、识别器却建不起来时已经不在服务侧代码路径上。所以「点了语音键却没进识别中、日志里却什么都查不到」这条路是被门禁堵住的，不是被单一出口堵住的：`tools/verify/check_crosscut.py` 8.2b 逐处钉住这两个出口（删掉任一处调用、或把某一处换成注释，离线门禁即 FAIL），再加三条断言把「新出口绕过上面这条」的路堵死：出口集合按**发射器**采集——`app/src/main` 下每个 `AsrTrace.w(` / `AsrTrace.i(` / `AsrTrace.line(` 调用点都算一个出口，把点号折下一行（`AsrTrace` 换行 `.w(…)`）也算（第二实参在 `w` / `i` / `line` 里形参同序，就是事件名；把事件名写成裸串 `"blocked"` 还是引用 `AsrTrace.EV_BLOCKED`，编出来的字节码与 logcat 一模一样，只按常量 token 采集会漏掉后者），集合必须恰好等于这两处；ev 实参一律要由 `AsrTrace.EV_*` 常量给出——出现字符串字面量（含 `if/else` 里混一条裸串）或整个实参不引用任何 `EV_*` 常量（绕本地 `val`）即 FAIL，`if (ok) AsrTrace.EV_EMPTY else AsrTrace.EV_RESULT` 这种纯常量条件是合法的，门禁按括号配平取实参，不会把它切半截误报；第三条拦绕过封装的写法——`app/src/main` 里出现 `Log.x(AsrTrace.TAG, …)` 即 FAIL，因为这种调用点的事件名不经过任何形参，前两条都读不到它（`AsrTrace.kt` 内部的 `Log.w(TAG, line(…))` 不带限定名，是发射器本体，不在这条范围里）。以上两句只覆盖**带限定名**的调用点，经 `import … as` 别名发射（`ASR.w(null, ASR.EV_BLOCKED, …)`）、把 TAG 存进变量再发（`Log.w(tag, …)`）、把 TAG 写成字面串（`Log.w("AsrTrace", …)`）这三种写法实测走得出采集，记为不在采集范围，覆盖面到此为止——走得出的是「日志行照样有 ev=blocked、只是没进采集」，破的是覆盖面被写成全称，不是「拦下必有归类」这条契约。采集范围与上面这几句措辞是否一致、变异条数是否漂了，由 `python3 tools/verify/check_voca310_gate.py` 逐只在副本里复跑核对（VOCA-310 条件项 C1′；同一张表里 M-B / M-B2 把「常量值写调用方 action」的两种读法各钉一条，2 条与 1 条不是矛盾，是两只变异）。三个 reason 是日志契约（同一节钉住字面量，改名即 FAIL）：
+
+| `ev=blocked reason=` | 判定条件 | 候选条文案 |
+| --- | --- | --- |
+| `no_recognition_available` | `SpeechRecognizer.isRecognitionAvailable()` 为 false：系统侧没有可绑定的识别服务 | `voice_unavailable`（设备不支持语音输入） |
+| `no_usable_service` | 服务查到了，但按 `BIND_RECOGNITION_SERVICE` 筛完剩 0 个：机型只预置桩服务 | `voice_service_unavailable` |
+| `service_bind_failed` | 前置判定放行，`createSpeechRecognizer` 却建不起来（绑定失败） | `voice_service_unavailable` |
+
+拦下会话**之前**先打一行 `ev=bind`，字段是 `engine=` / `services=`（枚举到几条）/ `usable=`（筛完剩几条）/ `dropped=`（被过滤几条）/ `requested=`（CUSTOM 指定的组件，SYSTEM 为 `system_default`）/ `first_usable=`。只有 `ev=blocked` 分不出「真没服务」和「查询写错了 action」，那正是本单最初的排查困境。
+
+取证两条命令，**先跑 ② 再读 ①**（② 不装包、不改机器，回答的是「这台机到底有没有真服务」这个前提）：
+
+```bash
+# ① 会话侧：这一按被判成了什么（ev=bind 给计数，ev=blocked 给归类）
+adb -s <serial> logcat -d -s AsrTrace | grep -E 'ev=(bind|blocked)'
+# ② 机型侧：设备上声明了识别服务的组件与各自的保护权限
+adb -s <serial> shell cmd package query-services -a android.speech.RecognitionService
+```
+
+② 里只有 `permission=android.permission.BIND_RECOGNITION_SERVICE` 的那几条是真服务；实测华为 ALN-AL00 唯一命中 `com.huawei.vassistant.voiceui.service.FakeRecognitionService`（`BIND_VOICE_INTERACTION`）——这种机器上 `usable=0` 并提示 `voice_service_unavailable` 是**预期结果**，不是本缺陷复发。换成 `android.speech.action.RECOGNIZE_SPEECH` 查会得到 `No services found`，那正是 VOCA-310 修掉的错法。
 
 ## 三、复刻义务清单
 
@@ -69,6 +93,10 @@
 | 语音链路真的起来了、麦克风真的被采集 | `docs/v1.5-verify-log.md` ①（真机 Huawei：`phone8.png` 状态条「语音识别中...」、`logcat` 绑定 `com.huawei.vassistant/.voiceui.service.FakeRecognitionService`）与 §5（模拟器：候选条「Listening…」+ 系统麦克风指示） |
 | 状态机能优雅收尾、不卡「聆听中」 | 同上 §5：5 秒后候选条变「Voice recognition failed」、麦克风指示消失、输入法未崩溃 |
 | 中英文案齐全 | `tools/verify/check_crosscut.py` 第 8 节（`voice_*` / `asr_*` 中英键名一致性断言） |
+| 前置判定不再被「action 用错」挡掉（VOCA-310） | `tools/verify/check_crosscut.py` 8.2b（枚举 action、`BIND_RECOGNITION_SERVICE` 过滤、`ev=bind` 计数、三个 reason 字面量、两个打点出口逐处钉住、按发射器采集的 `ev=blocked` 出口集合断言、ev 实参必须引用 `AsrTrace.EV_*` 常量，共 20 向，写错即 FAIL）+ `app/src/test/java/com/ispeech/input/RecognitionServicesTest.kt`（真服务判据 + 前置判定两态） |
+| 「点了语音键却没进识别中」必定有日志（VOCA-310 打回项 2） | 两个打点出口各有断言：`IspeechImeService.toggleVoiceInput()` 的三个拦下分支（`controller == null` / 探测拦下 / 绑定失败在 `VoiceInputController.startListening()` 内）删掉任一处打点、或换成注释，8.2b 即 FAIL；另有「`app/src/main` 里 `AsrTrace.w(` / `AsrTrace.i(` / `AsrTrace.line(` 打点中 ev=blocked 的出口恰好是 `traceVoiceBlocked` + `startListening` 两个」的结构性断言（按发射器调用点采集，新出口写成裸串 `"blocked"`、把点号折到下一行、或改走 `AsrTrace.line(` 同样被抓），外加「ev 实参一律引用 `AsrTrace.EV_*` 常量」与「不许绕过封装直接 `Log.x(AsrTrace.TAG, …)`」各一条。`rg -n "no_recognition_available" app/src/main` 命中常量与调用 |
+| **门禁自己的口径与变异是否一致**（VOCA-310 条件项 C1′ + 质检需澄清 ③） | `python3 tools/verify/check_voca310_gate.py`：17 只变异在一次性副本里逐只复跑（8 种发射器写法 = K1~K5 拦住 / N1~N3 走得出，加 M-A / M-B / M-B2 / M-H / M-C1 / M-C2 / M-I / M-D / M-E 判定与打点方向），核对**新增 FAIL 条数**与**被点名的断言**；再核对三处覆盖面声明（`check_crosscut.py` 文档头 8.2b 段、出口集合断言标题与 FAIL 文案、本节 §二 那段）与本表同集合——全称没加限定、排除句漏点名、已被拦住的还留在排除句里，都是这条命令的 FAIL。读数 `SUMMARY: passed=29 failed=0`。**M-B 的两种读法已拆成两只变异**：改 `VoiceInputController.kt:391` 的**常量取值**新增 2 条 FAIL（取值 + `<queries>` 名单），改 `:92` 的**枚举调用点为裸串**新增 1 条（只命中 queryIntentServices 那条）；条数不同不是复现不出来，是两只不同的改法。**N1/N2/N3 走得出的是真实写法不是理论写法**：`python3 tools/verify/check_voca310_gate.py --emit /tmp/voca310-probes` 把 8 只探针全打进去，`./gradlew -p /tmp/voca310-probes --offline :app:compileDebugKotlin` → `BUILD SUCCESSFUL`（N3 必须是独立文件——别名 import 会把本文件的 `AsrTrace` 简单名遮掉，实测 9 处 `Unresolved reference`） |
+| **基线机侧口径未取证**（VOCA-310 口径 1 / 3） | 静态与构建证据齐（见 PR），设备侧三项仍缺：`adb -s 23F0224224000950` 的包身份、`AsrTrace` 原文、截图。**前提同样待确认**：基线机是否真的预置了持 `BIND_RECOGNITION_SERVICE` 的识别服务——同 ROM 家族的 ALN-AL00 只查到华为桩服务，若基线机同构，修完 action 后仍是 `usable=0`，只是日志能说清。设备窗口归 VOCA-228 / VOCA-127 复测；`adb` 本身在 PATH 可用，缺的是那台机器 |
 
 ## 五、已知差异与限制
 

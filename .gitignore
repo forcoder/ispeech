@@ -45,3 +45,7 @@ dist/app-debug.apk
 
 # 短语数据导出
 通用短语.csv
+
+# Python 校验脚本的字节码缓存（上一轮被自动提交带进仓库，不该入库）
+__pycache__/
+*.pyc
