@@ -6,6 +6,9 @@
 > AC-3.7 与 AC-3.12 的判定以该版本 §3.5 的子节「AC-3.7 / AC-3.12 判定口径（v1.1.2 修订）」为唯一依据：
 > AC-3.12 **未作废**，作废的只是其中「页码 +1」半句（VOCA-185 `fa57a07` 删了页码控件），
 > 其余改写为「学习前 / 学习后两次快照」的 ①②③ 三条门禁，见本文 §2。
+> **引用版本未过期**：权威文件已升到 v1.1.3（`agent/ba/voca-122 @ 36403e6`），v1.1.3 只动条目 1/4 与
+> §7/§13，**§3.5 的判定文本与 v1.1.2 逐字相同**（`git diff b8e8d40 36403e6` 已核实）；本文继续引
+> `b8e8d40` 是为了让行号与本文其它处的「v1.1.2」一致，读的人不必担心口径过期。
 > JVM 段（AC-3.1~3.6、3.9、AC-3.4 的纯函数段）已由 `./gradlew testDebugUnitTest` 覆盖；本文只列**本机不可自动执行**的真机项。
 > 开发者在无 `adb` 连接设备时不得声称已验，必须按本文交付给测试执行。
 
@@ -39,8 +42,8 @@ adb logcat -s IspeechIme:D IspeechIme:I IspeechIme:W UserDictStore:I | grep -E "
 ```
 
 > `-s` 是白名单，没列的 tag 会被整条滤掉，`grep` 只能在它已经放行的行里挑。本文涉及两类日志、两个 tag，
-> **两个都必须列**：`phrase_learn` 走 `TAG="IspeechIme"`（发射点 `IspeechImeService.learnPhrase` /
-> `onCommit` 分支），`phrase_remove` 走 `UserDictStore`（发射点 `KeyboardViewModel.removeUserWord`）。
+> **两个都必须列**：`phrase_learn` 走 `TAG="IspeechIme"`、`phrase_remove` 走 `UserDictStore`；
+> 逐条发射点与触发条件见下方清单（唯一权威表，正文各处只指它、不各自复述）。
 > 少写 `UserDictStore:I` 会让 §5 的 AC-3.10 永远是 0 命中，那是文档的错，不是功能的错。
 >
 > 忘了挂前台管道（或中途断线重连）时，用同一份 buffer 事后补抓，判据不变：
@@ -48,6 +51,34 @@ adb logcat -s IspeechIme:D IspeechIme:I IspeechIme:W UserDictStore:I | grep -E "
 > ```bash
 > adb logcat -d | grep -E "phrase_learn|phrase_remove"
 > ```
+
+**日志发射点清单**（`git grep -n "phrase_learn\|phrase_remove" app/src/main` 的全部 6 处）。本文任何一条
+「期望出现」的判据都必须能在下表里指到一行；指不到的，是文档写错，不是功能 fail：
+
+| 日志文本 | tag / 级别 | 发射点 | 触发条件 |
+|---|---|---|---|
+| `phrase_learn commit code=… text=…` | `IspeechIme` / I | `IspeechImeService.kt:1143` | tracker 判成词，**且**「用户词频学习」开关开着 |
+| `phrase_learn skipped reason=disabled` | `IspeechIme` / D | `:1140` | 判成词但开关关闭（见 §4） |
+| `phrase_learn skipped reason=interrupt` | `IspeechIme` / D | `:1178` | **只有** `onUpdateSelection` 判出「他因光标移动」这一条路径会打，且受下方 300 ms 宽限窗约束 |
+| `phrase_learn skipped reason=window / existing / repeat / clock_backwards count=…` | `IspeechIme` / D | `:1126` | 第二字上屏时 tracker 给出跳过原因（需要那时仍有上一跳可凑；来源非单字，或码点长度 ≠ 1） |
+| `phrase_learn undecidable first=… second=… count=…` | `IspeechIme` / W | `:1124` | 同上，原因为编码推导失败 |
+| `phrase_remove code=… text=…` | `UserDictStore` / I | `KeyboardViewModel.kt:137` | 设置页单条删除（见 §5） |
+
+> **面板开合不打日志**：`openPanel:1316` / `closePanel:1356` 只调 `phraseTracker.onInterrupt()` 清状态，
+> 后面没有日志语句；`onInterrupt()` 之后下一次单字上屏会被当成**新的第一跳**（`lastSkip` 为 null，
+> `onPhraseCommit:1120` 直接 `?: return`），整条路径一行都不打。所以 §1 ③ 组**不会**出现
+> `reason=interrupt`，它的判据只能是「词库无新增 + 没有 commit 日志」。
+>
+> **300 ms 自因宽限窗（操作节奏是判据的一部分）**：本服务写完 InputConnection 后有
+> `SELF_WRITE_GRACE_MILLIS = 300L` 的宽限窗（`IspeechImeService.kt:128`），窗内的光标回调一律
+> **不判中断、也不打日志**（`onUpdateSelection:1172-1174` 的 `withinSelfWrite`）。这是 ADR `F1`
+> 的保护、不是 bug，但它意味着：
+>
+> - §1 ② 组必须在「喂」上屏 **≥ 500 ms 之后**再移动宿主光标。若在 300 ms 内连打（脚本化步骤几乎必然如此），
+>   ② 组会直接学出 `phrase_learn commit code=klqt` —— 那是**步骤踩进了宽限窗**，不是功能的 fail，
+>   按 §1 ② 的归因段重跑，不要退回开发。
+> - §1 ① 组的反向用例同样靠这个窗保护，**不要**为了「看起来更快」把它改成脚本连打：窗替 `F1` 兜底之后，
+>   这一组就测不到它唯一要测的东西（正常上屏被自己误判成中断）。① 组必须手动、按人眼节奏点选。
 
 词库落盘检查（每次验证前后各取一次）：
 
@@ -59,11 +90,20 @@ adb shell run-as com.ispeech.ime cat files/user_dict.txt
 
 ADR §1 的 `F1` 风险点是「本服务自己造成的上屏把上一跳误判成中断」，所以第 ① 组是**反向用例**，必须最先跑。
 
+> **② 与 ③ 之间清一次词库**（`adb shell pm clear com.ispeech.ime` + 重挂日志）。② / ③ 的语义是「上一跳被中断
+> 作废」，但最后一步的「猫」仍会成为**新的第一跳**留在状态机里；不清词库直接跑下一组，本组的「喂」会和
+> 上一组留下的「猫」凑成另一个词，打出 `phrase_learn commit code=qtkl text=猫喂` 并写库（① 组不会，它的两跳
+> 已被正常消费）。这属预期行为，但会污染计数，所以三组的判定都只看 `klqt 喂猫` 与 `commit code=klqt`，
+> 别把 `qtkl` 之类的旁生条目算进 fail。
+
 ### ① 连续拼两个单字不移动光标（正向 + 反向合并）
 
 1. 输入 `klge`，候选第 1 条应为「喂」，点选它上屏；
 2. 1~3 s 内输入 `qtal`，选「猫」上屏；
 3. 重复 10 次（每次换一对不同的字，例如 `lkg`+`gytg`→加班 会被「系统已有」挡掉，换 `wqiy`+`klge` 之类）。
+
+**节奏要求（不得脚本连打）**：全部手动点选，每次上屏后停 ≥ 500 ms 再做下一个动作。本服务上屏后有
+300 ms 自因宽限窗（见 §0），脚本在窗内连打等于让宽限窗替 `F1` 兜底，这一组就测不到它要测的东西。
 
 **期望**：
 
@@ -83,10 +123,16 @@ reason 原文记进报告；只有换字对之后 `commit` 仍不足 10 条，�
 ### ② 拼完第一字后移动宿主光标
 
 1. 输入 `klge`，选「喂」上屏；
-2. 用系统手势或方向键把宿主光标移到别的位置（例如点一下输入框开头的文字）；
+2. **等 ≥ 500 ms**（越过 §0 的 `SELF_WRITE_GRACE_MILLIS = 300 ms` 宽限窗），再用系统手势或方向键把宿主光标
+   移到别的位置（例如点一下输入框开头的文字）。光标基线容差 `selectionTolerance` 默认 0
+   （`IspeechImeService.kt:277`），所以只要移开就是「他因」，不需要移很远；
 3. 1~3 s 内输入 `qtal`，选「猫」上屏。
 
-**期望**：日志出现 `phrase_learn skipped reason=interrupt`，且 `user_dict.txt` **没有** `klqt 喂猫` 新增。
+**期望**：日志出现 `phrase_learn skipped reason=interrupt`（发射点 `:1178`，见 §0 清单），且 `user_dict.txt` **没有** `klqt 喂猫` 新增。
+
+**先归因再判 fail**：若第 3 步打出的是 `phrase_learn commit code=klqt`，说明第 2 步的光标操作落在了
+300 ms 宽限窗里（窗内的回调一律不判中断），**这是步骤问题、不是功能 fail** —— 把第 2 步的等待加到
+≥ 500 ms 重跑一次；只有加了等待之后仍然学出词，才计入 AC-3.4 的 fail。
 
 ### ③ 拼第一字后切短语面板再切回
 
@@ -94,7 +140,19 @@ reason 原文记进报告；只有换字对之后 `commit` 仍不足 10 条，�
 2. 点工具栏打开「快捷短语」面板，再关掉；
 3. 1~3 s 内输入 `qtal`，选「猫」上屏。
 
-**期望**：日志出现 `phrase_learn skipped reason=interrupt`，词库无新增。
+**期望**（口径来源：验收文件 §3.5 真机表 ③ 行「期望同上，**无新增**」，同表 JVM 行断言的是「写入次数 0、
+状态回 `idle`」——两层都在断言「没学成」，没有一层断言面板路径会打日志）：
+
+1. `user_dict.txt` **没有** `klqt 喂猫` 新增（与验证前那次 dump 逐行比）；
+2. 日志里**没有** `phrase_learn commit code=klqt`。这是本组的**正控**：面板中断若失效，「猫」会顺上「喂」
+   凑成 `klqt` 并打出这条 commit —— 所以「没有 commit」恰恰证明了中断生效；
+3. 本组**不要求**任何 `skipped` 日志。
+
+> **为什么 ③ 组不会有 `reason=interrupt`**：面板开合路径（`IspeechImeService.kt:1316` / `:1356`）
+> 只调 `phraseTracker.onInterrupt()` 清状态、**不打日志**，③ 组出现该日志属 ② 组（唯一发射点 `:1178`
+> 在光标回调里）。若在 ③ 的同一次会话里看到 `reason=interrupt`，它来自 ② 的光标操作、或从面板里
+> 点了候选（`:1126` 的「来源非单字」分支）——不能当 ③ 的通过证据，也**不能因为它没出现而判 ③ fail**。
+> 本期约定不动实现（只在面板路径补一条 `source=panel` 日志属实现变更，需另立改动并回来同步本节与 §0）。
 
 **取证要求**：机型 / ROM 版本 / 三组的 logcat 关键行原文随报告留档；不得只写「已验」。
 
@@ -239,9 +297,11 @@ adb logcat -d | grep -E "ANR in com.ispeech.ime|Input dispatching timed out"
 
 | 项 | 说明 |
 | --- | --- |
+| 中断的可观测性 | `onInterrupt()` 有 5 个调用点，但**只有** `onUpdateSelection:1178` 那条会打日志：面板开合（`:1316`/`:1356`）、`commitDirect:997`（标点/空格/英文）、AI 回复上屏（`:2013`）三处都是「静默清状态」。这是**观测口径的限制**，不是功能缺陷——§1 ③ 组因此只能判「无新增 + 无 commit」，任何「期望出现 interrupt 日志」的判据都只对 ② 组成立 |
+| 自因宽限窗 | `SELF_WRITE_GRACE_MILLIS = 300L`（`:128`）：上屏后 300 ms 内的光标回调不判中断、不打日志。它是 `F1` 的保护，同时要求**手动按人眼节奏操作**（② 组的移光标必须 ≥ 500 ms 后做，① 组不得脚本连打），见 §0 |
 | 时间窗 W | 默认 5 s（`PhraseLearningTracker.LEARN_WINDOW_MILLIS`），ADR 允许按 UX 真机节奏复核后调整，调整只改这一个参数 |
 | 只学五笔 2 字 | 拼音态、3 字及以上词组不参与（二期） |
-| 「候选第 1 条」口径 | 验收文件 v1.1.2 §3.5（`agent/ba/voca-122 @ b8e8d40`，裁决评论 `01a1e5ef`）：AC-3.7 门禁 = 候选条**序列 index 0**，锚点为数字角标「1」+ 首选高亮 + 刷新后 `scrollTo(0,0)` 必在最左。「词组组内第 1 与 index 0 同一结果」是该裁决的**推论**（满码不产生单字候选 + `USER_BOOST = 100_000` 大于词库最大权重 65535），不是对门禁的替代 |
+| 「候选第 1 条」口径 | 验收文件 v1.1.2 §3.5（`agent/ba/voca-122 @ b8e8d40`，裁决评论 `01a1e5ef`）：AC-3.7 门禁 = 候选条**序列 index 0**，锚点为数字角标「1」+ 首选高亮 + 刷新后 `scrollTo(0,0)` 必在最左。「词组组内第 1 与 index 0 同一结果」是该裁决的**推论**（`USER_BOOST = 100_000` 大于词库最大权重 65535，加上满码不出单字候选），不是对门禁的替代。**其中「满码不出单字候选」只在本文的受控向量下成立**（捆绑 `wubi86.dict`、未启用含 `klqt*` 单字的分类词库）：分类 / 细胞词库经 `CellDictEngine` 的 `code.startsWith(needle)` 分支**可以**在满码下补出单字候选（`LookupKind.WUBI` → tier 1 压过 tier 2 的「喂猫」），此时按 §2 前置 2 判**用例不适用**，不判 fail（与 §2 前置 2 的 `CellDictEngine` caveat 同一口径，勿两处各说各话） |
 | AC-3.12 | **未作废**，判定仍是「学习前 / 学习后两次快照」的 ①②③（见 §2.3）；作废的只有「页码 +1」半句（`fa57a07` 删了页码控件），「总数 +1」只在 `klqt` 这个受控向量成立、不得推广（§2.4）。本 issue 只学习、不做召回；召回路径 `related()` 在 main 上仍在被调用，与本文各条门禁无关，本文不对其下结论 |
 | 档序（词组 vs 单字谁在前） | 裁决**明确不需要改**已合并的分组顺序就能保住 AC-3.7 的强断言，本期也不改。若产品后续要求「学习词永远压过单字排全局首位」，那是对 `fa57a07` 已合并行为的变更，按裁决走 UX + 架构师**新开 issue**，不在本 issue / 本文口径内（验收文件 §13.4 第 6 条） |
 | 生僻字档位变化 | 非 BMP 单字（如 `𧝣`）的候选档位由「词组档」修正为「单字档」，候选顺序可能变化，属预期修正 |
