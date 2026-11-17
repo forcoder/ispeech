@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ispeech.data.FunAsrModelStoreTest" tests="16" skipped="0" failures="0" errors="0" timestamp="2026-11-17T15:40:54" hostname="MStudio" time="0.011">
+  <properties/>
+  <testcase name="首次请求 Content-Length 与预期总长不符判为 SIZE_MISMATCH" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.006"/>
+  <testcase name="未配置期望摘要时跳过摘要校验" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="续传回 206 时从已下载字节处追加" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="摘要不符判为 DIGEST_MISMATCH（调用方据此删包并返回 false）" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.002"/>
+  <testcase name="没有 part 时收到 416 属于普通 HTTP 失败" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.001"/>
+  <testcase name="无摘要时回落到最小长度下限" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.001"/>
+  <testcase name="首次请求返回 200 的 HTML 判为 NOT_MODEL_PAYLOAD 且不写入" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="垃圾 part 触发 416 时删除后从 0 重试" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="Content-Type 大小写与参数不影响 HTML 判定" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="摘要一致才通过且大小写不敏感" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.001"/>
+  <testcase name="有摘要时以权威总长判定完成" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="首次请求长度未知时放行（由摘要兜底）" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="续传时服务端忽略 Range 回 200 则清空重写而不是续接" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="其他非 2xx 状态码归为 HTTP 加状态码" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="首次请求长度等于预期总长时从头写" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <testcase name="四类失败类别都是机器可识别的固定字符串" classname="com.ispeech.data.FunAsrModelStoreTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

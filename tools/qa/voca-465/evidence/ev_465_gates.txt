@@ -1,0 +1,19 @@
+# 静态门禁 9 脚本（被测代码 = 78a7981，仓库工作树直接跑）
+check_static rc=0 :: SUMMARY: passed=6 failed=0 warned=0
+check_input_logic rc=0 :: SUMMARY: passed=40 failed=0 warned=0
+check_t9 rc=0 :: SUMMARY: passed=87 failed=0 warned=1
+check_stats rc=0 :: SUMMARY: passed=53 failed=0 warned=0
+check_phrase_usage rc=0 :: SUMMARY: passed=31 failed=0 warned=0
+check_pinyin rc=0 :: SUMMARY: passed=66 failed=0 warned=0
+check_crosscut rc=0 :: SUMMARY: passed=157 failed=0 warned=0
+check_quick_trigger rc=0 :: SUMMARY: passed=65 failed=0 warned=1
+check_ai_suggest rc=0 :: SUMMARY: passed=39 failed=0
+--- crosscut 第 13 组逐行 ---
+-- 13. 双击空格出句号（VOCA-46）--
+PASS: 非空格上屏一律清零 lastSpaceCommitAt（R3：每个 commitText 落点都在清零的函数里）
+PASS: 双击判定含「删除前确认光标前是空格」这道保险（未确认即退回普通空格）
+PASS: handleSpace 把「光标前一个字符」喂给判定
+PASS: 双击判定不在 View 层（R8：不与 installSpaceGesture 抢事件）
+PASS: 双击空格设置项闭环（默认关 + key / 持久化 / UI / 中英文案齐全）
+PASS: 硬件 / 注入键空格经 takesHardwareSpace 进 handleSpace（D1：两条键路径同一条判定链，自动重复不接管）
+SUMMARY: passed=157 failed=0 warned=0

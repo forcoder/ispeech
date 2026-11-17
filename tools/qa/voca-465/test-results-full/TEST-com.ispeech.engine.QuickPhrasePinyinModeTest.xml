@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ispeech.engine.QuickPhrasePinyinModeTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-17T15:40:54" hostname="MStudio" time="0.004">
+  <properties/>
+  <testcase name="多个快捷短语互不干扰" classname="com.ispeech.engine.QuickPhrasePinyinModeTest" time="0.003"/>
+  <testcase name="模糊音开启时含 zh ch sh 与 n l 的触发码仍精确命中" classname="com.ispeech.engine.QuickPhrasePinyinModeTest" time="0.0"/>
+  <testcase name="拼音态输入 ytyc 命中雨天泳池并排在首位" classname="com.ispeech.engine.QuickPhrasePinyinModeTest" time="0.0"/>
+  <testcase name="既有 exact prefix contains regex 模式行为不变" classname="com.ispeech.engine.QuickPhrasePinyinModeTest" time="0.0"/>
+  <testcase name="五笔态输入 ytyc 命中雨天泳池并排在首位" classname="com.ispeech.engine.QuickPhrasePinyinModeTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

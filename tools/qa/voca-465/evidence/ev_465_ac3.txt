@@ -1,0 +1,5 @@
+TOUCH	y=1652	diff={'double_space_period': True}	verdict=hit_target
+SWITCH state=True raw=12020801
+AC3/key  host='中国国之利刃' len=6 hasPeriod=False
+AC3/soft host='中国国之利刃' len=6 hasPeriod=False
+PARITY same

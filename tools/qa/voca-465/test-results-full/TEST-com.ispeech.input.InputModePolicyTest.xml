@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ispeech.input.InputModePolicyTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-17T15:40:54" hostname="MStudio" time="0.001">
+  <properties/>
+  <testcase name="默认拼音时 中英切换只在拼音与英文之间" classname="com.ispeech.input.InputModePolicyTest" time="0.001"/>
+  <testcase name="设置项到中文输入态的映射" classname="com.ispeech.input.InputModePolicyTest" time="0.0"/>
+  <testcase name="开关关闭时任何输入态都不接管硬件键空格" classname="com.ispeech.input.InputModePolicyTest" time="0.0"/>
+  <testcase name="中英切换后的输入态与硬件键空格接管口径一致" classname="com.ispeech.input.InputModePolicyTest" time="0.0"/>
+  <testcase name="从英文回到中文时以设置为准 而不是切换前的输入法" classname="com.ispeech.input.InputModePolicyTest" time="0.0"/>
+  <testcase name="旧版本持久化值可解析 未知值回落拼音" classname="com.ispeech.input.InputModePolicyTest" time="0.0"/>
+  <testcase name="默认五笔时 中英切换只在五笔与英文之间" classname="com.ispeech.input.InputModePolicyTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
