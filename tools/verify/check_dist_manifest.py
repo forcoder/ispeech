@@ -46,7 +46,8 @@ DIST = ROOT / "dist"
 MANIFEST = DIST / "SHA256SUMS"
 
 LINE_RE = re.compile(r"^([0-9a-f]{64})  (.+)$")
-# GitHub 单文件 100 MB 硬限制（GH001 拒推），超过只 WARN：产物治理归 VOCA-292
+# GitHub 单文件 100 MB 硬限制（GH001 拒推）。超限时按跟踪状态分流（判定见 check_manifest 体积段）：
+# 未跟踪 → FAIL（记了也推不上去，等于写一条永久假答案）；已跟踪 / 无 git 元数据 → WARN（产物治理归 VOCA-292）。
 SIZE_WARN_BYTES = 100 * 1024 * 1024
 
 _passed = 0
@@ -175,13 +176,18 @@ def check_manifest() -> int:
         size = apk.stat().st_size
         if size <= SIZE_WARN_BYTES:
             continue
-        # 未跟踪 + 超 100 MB：记录进清单也推不上去（GH001），等于凭空造一行假记录
-        untracked_oversize = tracked is not None and p not in tracked
-        check(not untracked_oversize,
-              f"{p} 体积 {size:,} B 超 GitHub 单文件 100 MB 硬限"
-              + ("（未跟踪）：先进不了仓库，清单记了就是假答案 —— 把它移出 dist/ 再 --regen"
-                 if untracked_oversize else "（已跟踪），含它的分支推不上去（产物治理见 VOCA-292）"),
-              warn=not untracked_oversize)
+        if tracked is None:
+            # git archive 解包：分不清跟踪状态，既不能判 FAIL，也不能谎称「已跟踪」
+            report("WARN", f"{p} 体积 {size:,} B 超 GitHub 单文件 100 MB 硬限（无 git 元数据，"
+                           "跟踪状态未知）：产物治理见 VOCA-292")
+        elif p not in tracked:
+            # 未跟踪 + 超 100 MB：记录进清单也推不上去（GH001），等于凭空造一行假记录
+            report("FAIL", f"{p} 体积 {size:,} B 超 GitHub 单文件 100 MB 硬限（未跟踪）："
+                           "先进不了仓库，清单记了就是假答案 —— 把它移出 dist/ 再 --regen")
+        else:
+            # 已跟踪超限：判定权归 VOCA-292，不阻断出包；但它不是「通过」——含它的分支推不上 GitHub
+            report("WARN", f"{p} 体积 {size:,} B 超 GitHub 单文件 100 MB 硬限（已跟踪）："
+                           "含它的分支推不上去（产物治理见 VOCA-292）")
 
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
@@ -227,15 +233,18 @@ def self_test() -> int:
             f.write_bytes(data)
         (root / "dist" / "SHA256SUMS").write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
 
-    def run_check(root: Path) -> int:
+    def run_full(root: Path) -> subprocess.CompletedProcess:
         # 必须跑副本：脚本用 __file__ 的 parents[2] 定位仓库根，跑原件会去校验真仓库
         return subprocess.run(
             [sys.executable, str(root / "tools" / "verify" / script.name)], cwd=root,
             capture_output=True, text=True,
-        ).returncode
+        )
 
-    def scenario(name: str, apks: dict[str, bytes], manifest_lines: list[str], expect_ok: bool,
-                 untracked: dict[str, int] | None = None) -> None:
+    def run_check(root: Path) -> int:
+        return run_full(root).returncode
+
+    def scenario(name: str, apks: dict[str, bytes], manifest_lines: list[str],
+                 expect_ok: bool) -> None:
         tmp = Path(tempfile.mkdtemp(prefix="distsum-selftest-"))
         try:
             (tmp / "tools" / "verify").mkdir(parents=True)
@@ -243,14 +252,44 @@ def self_test() -> int:
             subprocess.run(["git", "init", "-q", "."], cwd=tmp, capture_output=True)
             build(tmp, apks, manifest_lines)
             subprocess.run(["git", "add", "-A"], cwd=tmp, capture_output=True)
-            # git add 之后再放：模拟「baseline 从工作目录扫进来的未跟踪大二进制」
-            for rel_path, size in (untracked or {}).items():
-                f = tmp / "dist" / rel_path
-                with f.open("wb") as fh:
-                    fh.truncate(size)
             rc = run_check(tmp)
             check((rc == 0) == expect_ok,
                   f"[self-test] {name}：期望 {'PASS' if expect_ok else 'FAIL'}，实得 rc={rc}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def oversize_scenario(name: str, apks: dict[str, bytes], manifest_lines: list[str],
+                          size: int) -> None:
+        """同一条体积规则的两个分支各跑一次：未跟踪必须挡住、已跟踪必须只 WARN。
+
+        只看退出码挡不住「两个分支都返回通过」这类失效 —— 已跟踪那半必须验到 WARN 行，
+        否则文案写的 WARN 与机器打的 PASS 会再次分叉（本仓史上真发生过）。
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="distsum-selftest-oversize-"))
+        try:
+            (tmp / "tools" / "verify").mkdir(parents=True)
+            shutil.copy(script, tmp / "tools" / "verify" / script.name)
+            subprocess.run(["git", "init", "-q", "."], cwd=tmp, capture_output=True)
+            big = tmp / "dist" / "big.apk"
+            big.parent.mkdir(parents=True, exist_ok=True)
+            with big.open("wb") as fh:  # 稀疏文件：标称 101 MB，不占实际磁盘
+                fh.truncate(size)
+            build(tmp, apks, manifest_lines)
+            subprocess.run(["git", "add", "-A"], cwd=tmp, capture_output=True)
+            tracked_run = run_full(tmp)
+            tracked_warn = [ln for ln in tracked_run.stdout.splitlines()
+                            if ln.startswith("WARN:") and "big.apk" in ln]
+            # 只取消暂存、保留字节：同一条包换到「未跟踪」分支
+            subprocess.run(["git", "rm", "--cached", "-q", "--", "dist/big.apk"],
+                           cwd=tmp, capture_output=True)
+            untracked_run = run_full(tmp)
+            untracked_fail = [ln for ln in untracked_run.stdout.splitlines()
+                              if ln.startswith("FAIL:") and "big.apk" in ln]
+            check(bool(tracked_warn) and tracked_run.returncode == 0
+                  and bool(untracked_fail) and untracked_run.returncode == 1,
+                  f"[self-test] {name}：期望 已跟踪=WARN+rc0 / 未跟踪=FAIL+rc1，实得 "
+                  f"已跟踪={len(tracked_warn)} WARN+rc{tracked_run.returncode} / "
+                  f"未跟踪={len(untracked_fail)} FAIL+rc{untracked_run.returncode}")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -281,13 +320,12 @@ def self_test() -> int:
     scenario("格式非法（缺一个空格）", good, [lines_for(good)[0].replace("  ", " ", 1),
                                             lines_for(good)[1]], False)
 
-    # 未跟踪的超限包按实际字节入册：其余检查全过，只有体积规则能挡住它
+    # 超限包按实际字节入册：其余检查全过，只有体积规则能挡住它
     h = hashlib.sha256()
     for _ in range(101):
         h.update(b"\0" * (1024 * 1024))
-    scenario("未跟踪且超 100 MB 的包（记了也推不上去）", good,
-             lines_for(good) + [f"{h.hexdigest()}  big.apk"], False,
-             untracked={"big.apk": 101 * 1024 * 1024})
+    oversize_scenario("超 100 MB 的包（未跟踪挡住 / 已跟踪只 WARN）", good,
+                      lines_for(good) + [f"{h.hexdigest()}  big.apk"], 101 * 1024 * 1024)
 
     tmp = Path(tempfile.mkdtemp(prefix="distsum-selftest-nogit-"))
     try:

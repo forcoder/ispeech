@@ -63,7 +63,7 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 | 3 | 每条记录指向的文件真实存在 | 防止「包已删除、记录还在」的孤儿行 |
 | 4 | 每条记录的 sha256 == 实际字节 | 等价 `cd dist && shasum -a 256 -c SHA256SUMS`；main 上曾有 2 条 FAILED |
 | 5 | **穷尽覆盖**：`dist` 下每个该记录的 APK 都有一行 | 只校验「清单里有的」，漏记的包一声不吭 —— `_archive/` 三个历史包就是这么漏掉的 |
-| 6 | 未跟踪且 >100 MB 的包不入册即中止 | 记了也推不上 GitHub（GH001），清单会指向仓库里永远不存在的字节；已跟踪超限只 `WARN`，那半归 VOCA-292 |
+| 6 | 未跟踪且 >100 MB 的包不入册即中止 | 记了也推不上 GitHub（GH001），清单会指向仓库里永远不存在的字节。已跟踪超限只 `WARN`（归 VOCA-292），无 git 元数据时同样只 `WARN` 并写明「跟踪状态未知」—— 分不清就不抢判定权，也不谎称已跟踪 |
 
 「该记录的集合」= `git ls-files --cached --others --exclude-standard -- dist` 里的 `*.apk`
 （已跟踪 + 会被 `git add -A` 扫进来的），因此刚 `cp` 进 `dist/` 还没入库的新包立刻要求记录；
@@ -78,7 +78,7 @@ debug 包归手机自查用出包日志里的 `sha256=` 行 + 设备侧 `dumpsys
 ```bash
 python3 tools/verify/check_dist_manifest.py           # 校验；任一 FAIL 退出码 1
 python3 tools/verify/check_dist_manifest.py --regen   # 按当前字节整份重写清单（唯一写入路径）
-python3 tools/verify/check_dist_manifest.py --self-test  # 8 场景双向验判定逻辑本身，不动仓库
+python3 tools/verify/check_dist_manifest.py --self-test  # 8 场景双向验判定逻辑本身，不动仓库（超限那条把两个分支各跑一次）
 ```
 
 **出包门禁（第五条）**：`tools/deploy/deploy.sh` 在 ③ 校验段调用它，位置在 `--skip-verify`
@@ -86,6 +86,11 @@ python3 tools/verify/check_dist_manifest.py --self-test  # 8 场景双向验判�
 ⑤ 归档段在 `cp` 之后立即 `--regen`（重写 + 整份回读校验，FAIL 即中止出包），随后按本包是否真进了
 清单分支打印：入册报「本包已入 dist/SHA256SUMS：<路径>」，被 `.gitignore` 排除则 `[warn]` 明说未入册
 并给出自查方式。**不会对着一个没记录的 debug 包说「已记录」。**
+
+超限那条断言的是**输出行的级别**，不只是退出码：`git add` 后（已跟踪）必须出现一行 `WARN:` 且 `rc=0`，
+`git rm --cached` 后（未跟踪）必须出现一行 `FAIL:` 且 `rc=1`。上一版只比退出码，结果「已跟踪只 WARN」
+在机器上打的其实是一行 `PASS`（连「超限」两个字都没有），文案与机器分叉了一整轮 —— 只比 `rc` 的自测
+挡不住这种漂移，所以本条把两个分支的级别都验上。
 
 ## check_model_host.py —— 模型托管源可用性（**需联网**）
 

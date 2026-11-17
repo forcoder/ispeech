@@ -7,6 +7,7 @@
 - **关联既有文档**：`dist/README.md`「构建与实测环境 / 校验」两节、`tools/verify/README.md`、VOCA-186「最终包门禁固定四项」
 - **本文的基线口径**：所有结论以 **`origin/main` = `fa57a07`** 为准；发布分支 `release/voca-186-v1.6`（`eba7a61`）的差异在 §6 逐条对读。
 - **修订**：2026-11-17 按 VOCA-400 质检打回项修订三处 —— D2 补「第五条门禁覆盖不到 debug 产物」这条边界、§3 取证命令改为可原样复现的形式、§4 补未跟踪超限包的处置口径；场景数由 7 增至 8。
+- **二次修订**：2026-11-17 按质检 PASS-WITH-CAVEAT 的 Z1/Z2 修三处。① §6 第 2 条与 §4 对超限包的判定口径不一致 —— 核对时发现**不只是文案漂移，机器打的也不是 `WARN`**：`dist/` 下已跟踪的超限包在门禁里打的是一行 `PASS`，连「超限」两个字都没有；已把判定改成三态（§4 体积规则），并让 `--self-test` 的超限场景**同时断言两个分支的输出级别**（§4 末）。② §3「签名侧实测」那张表原先没写命令、无法复现，补上本机真跑得通的取证书 / 取指纹路径（本机**没有** `apksigner`）。③ 交付评论 §⑥ 把指纹归给 `apksigner verify --print-certs` —— 那条命令在本机不存在，归因已在那条评论里就地更正（数值未动）。
 - **范围**：只定「随包校验清单」的生成口径与门禁接线。不动应用内版本号逻辑（VOCA-233 已 `done`），不做仓库产物治理（VOCA-292），不拍板签名策略（VOCA-159）。
 
 ---
@@ -95,6 +96,50 @@ done
 | 仓库当前 `dist/ispeech-debug.apk`（`b308f7ad…`） | `CN=Android Debug` | `857ce64e…f66a0ed` |
 | VOCA-159 11-14 12:28 装进用户手机的那包 | `CN=Android Debug` | 同上（是仓库外重签副本 `e1de4def…`，**不在仓库、也不在任何清单**） |
 
+上表**本机可复现**，但复现路径要先说清楚：本机**没有** `apksigner`（无 Android SDK），而这两个包**只有 v2 签名**（v1 条目数为 0），所以证书只能从 APK Signing Block 里取。一次性取证脚本，不进仓库（不属出包链路）：
+
+```bash
+$ command -v apksigner || echo "apksigner: 本机没有（无 Android SDK）"
+apksigner: 本机没有（无 Android SDK）
+$ unzip -l dist/ispeech-release-v1.5.apk | grep -cE "\.(RSA|DSA|EC)|\.SF"
+0                                     # 无 META-INF/*.RSA、*.SF → 没有 v1 签名
+$ cat > /tmp/carve_apk_cert.py <<'PY'
+"""从 APK 的 APK Signing Block（v2/v3 签名）里取签名证书 DER，写到 stdout。
+本机没有 apksigner / Android SDK 时用这个：只需要 python3 + openssl。"""
+import pathlib
+import re
+import struct
+import sys
+
+d = pathlib.Path(sys.argv[1]).read_bytes()
+eocd = d.rindex(b"PK\x05\x06")
+cd = struct.unpack_from("<I", d, eocd + 16)[0]          # 中央目录起点
+if d[cd - 16:cd] != b"APK Sig Block 42":
+    sys.exit("没找到 APK Sig Block 42 —— 这包没有 v2/v3 签名")
+size = struct.unpack_from("<Q", d, cd - 24)[0]          # 签名块长度
+blk = d[cd - 24 - size:cd - 24]
+for m in re.finditer(rb"\x30\x82", blk):
+    i = m.start()
+    n = struct.unpack_from(">H", blk, i + 2)[0] + 4      # DER: SEQUENCE + 2 字节长度
+    if blk[i + 4:i + 6] == b"\x30\x82" and len(blk[i:i + n]) == n:
+        sys.stdout.buffer.write(blk[i:i + n])            # 首个内层也是 SEQUENCE 的 = 证书
+        sys.exit(0)
+sys.exit("签名块里没有 X.509 证书")
+PY
+$ python3 /tmp/carve_apk_cert.py dist/ispeech-release-v1.5.apk > /tmp/v15.der
+$ openssl x509 -inform DER -in /tmp/v15.der -noout -subject -fingerprint -sha256
+subject=C=CN, ST=Guangdong, L=Guangzhou, O=iSpeech, OU=iSpeech, CN=iSpeech Prototype
+sha256 Fingerprint=70:B4:F4:A2:BE:35:CC:D9:A6:73:D3:1D:33:A1:E4:BF:C1:6A:20:8E:43:BD:D5:D8:BF:5D:1C:AB:10:CF:2A:C7
+$ python3 /tmp/carve_apk_cert.py dist/ispeech-debug.apk > /tmp/dbg.der
+$ openssl x509 -inform DER -in /tmp/dbg.der -noout -subject -fingerprint -sha256
+subject=CN=Android Debug, O=Android, C=US
+sha256 Fingerprint=85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED
+```
+
+`keytool -printcert -file /tmp/v15.der` 给出同一个值（`所有者: CN=iSpeech Prototype`、`签名算法名称: SHA256withRSA`、`2048 位 RSA 密钥`、版本 3）。取证书这一步不靠猜：两个包的签名块里满足「外层与内层都是 SEQUENCE」的候选**各只有 1 个**（块内偏移 104），所以「第一个能 parse 的就是证书」这条在这个仓库里是确定的，不是运气。
+
+上一版这里写的是「实测（`apksigner verify --print-certs`）」—— 那条命令在本机不存在，读者按它复现只会得到 `command not found`；数值本身没错（`70b4f4a2…cf2ac7` / `857ce64e…f66a0ed` 与上面两行 `sha256 Fingerprint` 逐位一致），错的是归因。这就是质检 Z2 打回来的那条。
+
 **由此得出本 ADR 的边界结论**：清单只能证明「仓库字节」，证明不了「手机字节」，因为交付路径上存在仓库外的重签变体。这条不是 VOCA-400 能修的，已按 issue 要求回写 VOCA-159（签名 / 版本号策略待拍板项），本 ADR 不代拍。
 
 ## 4. 门禁（VOCA-186 四项之后的第五条）
@@ -108,24 +153,28 @@ done
 - **③ 静态校验**：清单校验放在 `--skip-verify` 分支**之外**，硬 `die`。跳过它等于允许带一份会说谎的清单出包，而「会说谎」正是本次的原始故障。
 - **⑤ 归档到 dist**：`cp` 完成后立即 `--regen`（内部先重写、再整份回读校验，任一 FAIL 即 `die`，出包不往后走），然后**按本包是否真进了清单分支打印**：入册 → `本包已入 dist/SHA256SUMS：<相对路径>`；被 `.gitignore` 排除（默认 debug 路径）→ `[warn]` 明说「未入册、清单答不了它的字节」并给出日志 sha256 + `dumpsys` 的自查口径。**「新包在离开工位前就已经被记录」只对 `--release` 成立**，边界与理由见 D2。
 
-**未跟踪且 >100 MB 的包：门禁判 FAIL（不是 WARN），处置写死**
+**包 >100 MB（GitHub 单文件硬限）：判定按 git 跟踪状态三态分流，处置写死**
 
-| 谁 | 做什么 | 判据 |
+| 状态 | 门禁 | 处置（谁 / 移去哪） |
 |---|---|---|
-| 执行人（出包/SRE） | `mv` 出仓库、移到本机**仓库外**目录（本 worktree 之外，例：`~/ispeech-artifacts/`），再跑 `--regen` 收敛 | 仓库里 release/debug 包实测 15–23 MB；`dist/` 下出现 >100 MB 者，按定义不是本仓库产物，而是被 baseline 从工作目录扫进来的外来残留 |
-| 同上 | 移不走（属本仓库正常产物且确需入库）时，**停下开单**，由 VOCA-292 判是否入 Git LFS | GitHub 单文件 100 MB 硬限（GH001 实测拒推）：`--regen` 会把这种包照记进清单，清单一旦随包提交，就是把「仓库里永远不存在的字节」写成可信答案 —— 与本 issue 要消灭的故障同类 |
+| **未跟踪** | `FAIL`（不是 WARN），`--regen` 照记但整份回读仍 `rc=1` → ⑤ `die`，出包中止 | 执行人（出包/SRE）把包 `mv` 出仓库、移到本机**仓库外**目录（例 `~/ispeech-artifacts/`），再跑一次 `--regen` 收敛；移不走就地停下开单 |
+| **已跟踪** | `WARN`，不阻断出包 | 属历史既有状态，判定权归 VOCA-292（要不要进 Git LFS），本门禁不抢；WARN 行写明「含它的分支推不上去」 |
+| **跟踪状态未知**（无 git 元数据，`git archive` 解出来的包） | `WARN`，不阻断 | 分不清跟踪与否时既不能判 FAIL、**也不能谎称「已跟踪」** —— 文案跟着状态走，不然又是一处「文档说的和机器做的不一致」 |
 
-已跟踪且 >100 MB 仍只 `WARN`（那是历史既有状态，判定权归 VOCA-292，本门禁不抢）。
+为什么未跟踪那一态必须 FAIL：`--regen` 会把这种包照记进清单，而它推不进 GitHub（GH001）—— 清单一旦随包提交，就是把「仓库里永远不存在的字节」写成可信答案，与本 issue 要消灭的故障同类。仓库里 release/debug 包实测 15–23 MB，`dist/` 下出现 >100 MB 者按定义不是本仓库产物，而是被 runtime baseline 从工作目录扫进来的外来残留。
+
+> **本条的来历（Z1，2026-11-17 二次修订）**：上一版这里写「已跟踪仍只 WARN」，§6 又写「对 >100 MB 的包给 WARN 不给 FAIL」，两处互相矛盾。核对时发现**机器做的和三处文案都不一样**：已跟踪超限那行调的是 `check(True, …)`，打的是 `PASS:` 且不带「超限」二字 —— 文档要表达的 WARN 在实现里根本没有出口，而只比退出码的 `--self-test`（`rc=0` 对 `rc=0`）看不见这个差别。现在判定显式走三态，超限场景同一次构造两个分支、**断言输出级别**（见下）。
 
 **判定逻辑自身可验**（沿 `check_model_host.py --self-test` 先例）：
 
 ```bash
 $ python3 tools/verify/check_dist_manifest.py --self-test
 …（8 条 PASS）
+PASS: [self-test] 超 100 MB 的包（未跟踪挡住 / 已跟踪只 WARN）：期望 已跟踪=WARN+rc0 / 未跟踪=FAIL+rc1，实得 已跟踪=1 WARN+rc0 / 未跟踪=1 FAIL+rc1
 SUMMARY: passed=8 failed=0 warned=0
 ```
 
-8 个场景含**双向**断言：好状态与「无 git 元数据（`git archive` 解包）退回目录扫描」两种状态放行，篡改一位 hex / 新增未记录包 / 孤儿行 / 同路径两行 / 格式非法 / **未跟踪且超 100 MB** 六种坏状态必须各自挡住。最后一个用稀疏文件（`truncate` 到 101 MB）构造，不占实际磁盘。只测「好状态通过」的门禁等于没有门禁。
+8 个场景含**双向**断言：好状态与「无 git 元数据（`git archive` 解包）退回目录扫描」两种状态放行，篡改一位 hex / 新增未记录包 / 孤儿行 / 同路径两行 / 格式非法 / **未跟踪且超 100 MB** 六种坏状态必须各自挡住。超限那条用稀疏文件（`truncate` 到 101 MB）构造，不占实际磁盘，同一个沙箱跑两个分支：`git add -A` 后要求出现 `WARN:` 行且 `rc=0`，`git rm --cached` 后（字节原地保留）要求出现 `FAIL:` 行且 `rc=1` —— 断言落在**输出级别**上，只看 `rc` 会像上一版那样对「WARN 其实是 PASS」视而不见。只测「好状态通过」的门禁等于没有门禁。
 
 ## 5. 回滚
 
@@ -152,6 +201,6 @@ CONFLICT (content): Merge conflict in dist/SHA256SUMS    # ← 本 PR 新增
 **未覆盖 / 移交**：
 
 1. → **VOCA-159**：重签变体的命名与记录策略（待人类拍板，已回写该单）。
-2. → **VOCA-292**：`main` 跟踪 8 个 `dist/*.apk` 与 baseline 收尾扫进大二进制。本 PR 只处理了直接卡住交付的那一个文件（见下），通用防护归 VOCA-292。校验脚本对 >100 MB 的包给 `WARN` 不给 `FAIL`，就是为了不抢那条的判定权。
+2. → **VOCA-292**：`main` 跟踪 8 个 `dist/*.apk` 与 baseline 收尾扫进大二进制。本 PR 只处理了直接卡住交付的那一个文件（见下），通用防护归 VOCA-292。判定**按跟踪状态分流**（与 §4 一致）：**未跟踪**且 >100 MB 判 `FAIL` 并中止出包（处置见 §4 那张表）；**已跟踪**且 >100 MB 只给 `WARN` 不给 `FAIL`，就是为了不抢那条的判定权；**无 git 元数据**（`git archive` 解出来的包）同样只 `WARN`，写明「跟踪状态未知」。
 3. `dist/README.md` 的打包段引用仓库根 `README.md` 与 `./ispeech-remote.sh`，**后者在本仓库不存在**（仓库根没有 `*.sh`）。本次只替换其中产生漂移的 `>>` 那一行，远端构建链路的文档失效另开单。
 4. 清单不含**构建 commit** 与 `versionCode/versionName`。有 sha256 才能定「哪一包」，但定「这包是 main 哪个提交打的」仍需人工。建议后续把构建 commit 写进 `dist/README.md` 的包表格（VOCA-186 已有此要求，缺执行载体）。
