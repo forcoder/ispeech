@@ -1,7 +1,7 @@
 # VOCA-37 · Stage 3 键盘交互回归报告（模拟器口径）
 
 - 被测构建：`c524351e2e509ed294f49dd3d2f7a1bf29e07a4d`（PR #18 head，base `fa57a07`；PR #18 仍为 OPEN，未合并）
-- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（48 份当场 stdout 原文）+ `shots/`（7 张截图）。返修提交 `57f5f5b` 单独是 13 files +597/−35，**PR #25 累计**（`gh pr view 25 --json changedFiles,additions,deletions`）是 61 files +2029/−0；本轮返修在其上再加一个提交，累计数以 issue 评论里的当场 `gh pr view` 输出为准。
+- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（48 份当场 stdout 原文）+ `shots/`（7 张截图）。三个口径分开写：返修提交 `57f5f5b` 单独 13 files +597/−35；第二轮返修提交 `4009fb4` 单独 11 files +609/−39；**PR #25 累计到 head `4009fb4`** 是 67 files +2599/−0（其中 evidence 48、shots 7、`tools/` 66、`docs/` 1）。复算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`——本句所在行的这次措辞修改本身还会让 head 往前挪一格、行数差两三行，所以以 head SHA 为准，不要拿本行的数字当最新值。
 - 规格权威：`agent/ux/voca-45-spec` @ `28c1cac`（main 上的 602 行翻页版与 `agent/ux/voca-45` @ `fc564aa` 均已过期，本报告不引用）
 - 执行环境：本地 AVD `ispeech_test`（1080×2340 / 440dpi / arm64 / 2G），Android 14 模拟器；对照基准为同机搜狗 `com.sohu.inputmethod.sogou/.SogouIME`
 - 执行人：测试工程师（QA）· 2026-11-17 03:40–05:20 首测，06:55–07:45 按质检 6 条返修，12:25–12:45 按质检第二轮 4 条返修（本地时区）
