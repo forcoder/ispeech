@@ -3,6 +3,7 @@ package com.ispeech.input
 import com.ispeech.settings.store.KeyboardSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -191,5 +192,129 @@ class SpaceKeyPolicyTest {
     @Test
     fun `英文态连按两次空格出两个空格`() {
         assertEquals(SpaceKeyPolicy.Action.SPACE, judge(spaceAgoMs = 50L, englishMode = true))
+    }
+
+    // ── VOCA-465 D1：硬件 / 注入键的 KeyEvent 入口要不要接管 ──
+
+    /** 与 [judge] 同一套状态口径，判的是接管与否（`onKeyDown` 里那一步）。 */
+    private fun takes(
+        settings: KeyboardSettings = enabled,
+        repeat: Boolean = false,
+        t9Pending: Boolean = false,
+        composing: Boolean = false,
+        aiReplyPending: Boolean = false,
+        voicePending: Boolean = false,
+        associationPending: Boolean = false,
+        englishMode: Boolean = false,
+    ): Boolean = SpaceKeyPolicy.takesHardwareSpace(
+        state = SpaceKeyPolicy.State(
+            t9Pending = t9Pending,
+            composing = composing,
+            aiReplyPending = aiReplyPending,
+            voicePending = voicePending,
+            associationPending = associationPending,
+            englishMode = englishMode,
+            keyRepeat = repeat,
+        ),
+        settings = settings,
+    )
+
+    @Test
+    fun `空缓冲的硬件键空格由输入法接管 判定链才收得到第二下`() {
+        // D1 根因：修复前这里放行给宿主，lastSpaceCommitAt 永远是 null，AC-2 硬件键 4 组全阴性
+        assertTrue(takes())
+        // 接管后判定链与软键走同一个 decide：第一下普通空格，窗口内第二下出句号
+        assertEquals(SpaceKeyPolicy.Action.SPACE, judge())
+        assertEquals(SpaceKeyPolicy.Action.DOUBLE_SPACE_PERIOD, judge(spaceAgoMs = 50L))
+    }
+
+    @Test
+    fun `开关关闭时硬件键空格交回宿主 行为与修复前一致`() {
+        val off = KeyboardSettings()
+        assertFalse(takes(settings = off))
+        // 中文标点关闭同理：判定链本来就只会出空格，不抢宿主的空间键（R6）
+        assertFalse(takes(settings = KeyboardSettings(doubleSpacePeriod = true, chinesePunctuation = false)))
+        assertFalse(takes(englishMode = true))
+    }
+
+    @Test
+    fun `硬件键长按的自动重复不算双击`() {
+        assertFalse("按住空格不该连发出句号，重复事件交回宿主", takes(repeat = true))
+        // 关掉重复之外的其余条件都相同时，独立两按仍然接管
+        assertTrue(takes(repeat = false))
+    }
+
+    @Test
+    fun `链条上有别的接管项时保持既有放行口径 本单不扩大键路径行为面`() {
+        assertFalse(takes(composing = true))
+        assertFalse(takes(t9Pending = true))
+        assertFalse(takes(aiReplyPending = true))
+        assertFalse(takes(voicePending = true))
+        assertFalse(takes(associationPending = true))
+    }
+
+    /**
+     * 在判定层复现「连按 [times] 下硬件空格」：每下先判接管，再走 [SpaceKeyPolicy.decide]，
+     * 时间戳按服务侧口径更新（SPACE 记为本次时刻、出句号清零）。
+     * 光标前那个字符按「上屏序列的最后一个字符」还原，宿主吞不掉接管后的空格。
+     */
+    private fun keySequence(times: Int, gapMs: Long): List<SpaceKeyPolicy.Action> {
+        val out = mutableListOf<SpaceKeyPolicy.Action>()
+        var previous: Long? = null
+        var lastCommitted = ""
+        var clock = now
+        repeat(times) {
+            assertTrue("第 ${it + 1} 下必须被输入法接管，否则判定链收不到事件", takes())
+            out += SpaceKeyPolicy.decide(
+                state = SpaceKeyPolicy.State(
+                    precedingIsSpace = lastCommitted == " ",
+                    lastSpaceCommitAt = previous,
+                ),
+                settings = enabled,
+                now = clock,
+            )
+            when (out.last()) {
+                SpaceKeyPolicy.Action.SPACE -> {
+                    previous = clock
+                    lastCommitted = " "
+                }
+                SpaceKeyPolicy.Action.DOUBLE_SPACE_PERIOD -> {
+                    previous = null
+                    lastCommitted = "。"
+                }
+                else -> error("空缓冲中文态不该走出上屏候选的分支：${out.last()}")
+            }
+            clock += gapMs
+        }
+        return out
+    }
+
+    @Test
+    fun `两连发在窗口内出句号`() {
+        assertEquals(
+            listOf(SpaceKeyPolicy.Action.SPACE, SpaceKeyPolicy.Action.DOUBLE_SPACE_PERIOD),
+            keySequence(times = 2, gapMs = 50L),
+        )
+    }
+
+    @Test
+    fun `三连发出句号加一个空格 第三下不吞也不多出句号`() {
+        // 规格没写三连发，这里把期望钉死：第三下按「单击」处理 = 普通空格，且时间戳已清零不再连着出句号
+        assertEquals(
+            listOf(
+                SpaceKeyPolicy.Action.SPACE,
+                SpaceKeyPolicy.Action.DOUBLE_SPACE_PERIOD,
+                SpaceKeyPolicy.Action.SPACE,
+            ),
+            keySequence(times = 3, gapMs = 10L),
+        )
+    }
+
+    @Test
+    fun `超过窗口的两连发只出两个空格`() {
+        assertEquals(
+            listOf(SpaceKeyPolicy.Action.SPACE, SpaceKeyPolicy.Action.SPACE),
+            keySequence(times = 2, gapMs = 500L),
+        )
     }
 }

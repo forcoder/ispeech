@@ -1812,6 +1812,21 @@ def check_double_space_period() -> None:
         f"双击空格设置项断链：{broken}",
     )
 
+    # 13.6 VOCA-465 D1：KeyEvent 入口的空缓冲空格必须进判定链，否则外接 / 注入键永远出不了句号。
+    #      「放行给宿主」这条捷径一旦回来，软键照样能过，只有硬件键会静默失败 —— 单测拿不到宿主，
+    #      adb 复跑又排在别人手上，所以把它钉在源码结构里。
+    key_entry = bodies.get("onKeyDown", "")
+    gate = bodies.get("takesHardwareSpace", "")
+    check(
+        "takesHardwareSpace(event)" in key_entry
+        and 'handleSpace(via = "key")' in key_entry
+        and "SpaceKeyPolicy.takesHardwareSpace" in gate
+        and "event.repeatCount" in gate,
+        "硬件 / 注入键空格经 takesHardwareSpace 进 handleSpace（D1：两条键路径同一条判定链，自动重复不接管）",
+        f"{rel(SERVICE)} onKeyDown 没走 takesHardwareSpace / handleSpace(via = \"key\")，"
+        f"或 takesHardwareSpace 没排除 repeatCount —— KeyEvent 路径的空格又回到宿主吞掉了",
+    )
+
 
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")

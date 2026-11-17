@@ -592,7 +592,15 @@ class IspeechImeService : InputMethodService() {
         if (keyCode == KeyEvent.KEYCODE_SPACE || keyCode == KeyEvent.KEYCODE_ENTER ||
             keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
         ) {
-            if (buffer.isEmpty() && !aiReplyActive && !associationActive) return false
+            val idle = buffer.isEmpty() && !aiReplyActive && !associationActive
+            // VOCA-465 D1：空缓冲时这里原本一律放行给宿主，KeyEvent 根本进不了 handleSpace()，
+            // 双击空格句号在外接 / 物理 / 注入键上全阴性。只在「出句号还有可能成立」时接管，
+            // 其余（含开关关闭、自动重复、英文态）维持放行，行为与修复前一致。
+            if (idle && keyCode == KeyEvent.KEYCODE_SPACE && takesHardwareSpace(event)) {
+                handleSpace(via = "key")
+                return true
+            }
+            if (idle) return false
             if (keyCode == KeyEvent.KEYCODE_SPACE) handleSpace() else handleEnter()
             return true
         }
@@ -720,8 +728,11 @@ class IspeechImeService : InputMethodService() {
      *
      * 判定必须在服务侧做（R8）：空格键已经绑了 `SoftKeyboardView.installSpaceGesture`
      * 的长按进语音，View 层再加一个双击手势会和它抢事件。
+     *
+     * @param via 按键入口，只进日志：`soft` = 软键盘点击，`key` = 硬件 / 蓝牙 / 注入键。
+     *            D1 就是因为两条入口走不到同一个判定，日志必须能把它们分开。
      */
-    private fun handleSpace() {
+    private fun handleSpace(via: String = "soft") {
         val now = SystemClock.elapsedRealtime()
         val action = SpaceKeyPolicy.decide(
             state = SpaceKeyPolicy.State(
@@ -738,6 +749,7 @@ class IspeechImeService : InputMethodService() {
             settings = settings,
             now = now,
         )
+        Log.d(TAG, "space via=$via action=$action doubleSpace=${settings.doubleSpacePeriod}")
         when (action) {
             SpaceKeyPolicy.Action.COMMIT_T9 -> commitT9()
             SpaceKeyPolicy.Action.COMMIT_TOP -> commitTop()
@@ -783,11 +795,41 @@ class IspeechImeService : InputMethodService() {
      * [lastSpaceCommitAt] 只证明「刚刚有一次空格上屏」，证明不了那个空格还在原地：宿主可以自己吞掉它，
      * 用户也可以移动光标，而 R4 说的「移动光标」在输入法侧没有观测点（挂 `onUpdateSelection` 会被自家
      * commitText 打回）。这一次读取就是那个缺失的观测点：读不到当不成立，宁可出两个空格也不误删别人的字。
-     * `getTextBeforeCursor` 是到宿主的跨进程调用，所以只在时间窗状态成立时才读。
+     * `getTextBeforeCursor` 是到宿主的跨进程调用，所以只在时间窗状态成立时才读；
+     * 真读了就打一行 `spaceProbe`（logcat 时刻给间隔、`roundTripMs` 给单次成本）——
+     * 硬件键接管后它会多起来，这条是父单要的 INP 观测点（VOCA-465 / VOCA-37 §五）。
      */
-    private fun lastSpaceStillBeforeCursor(): Boolean =
-        lastSpaceCommitAt != null &&
-            currentInputConnection?.getTextBeforeCursor(1, 0)?.toString() == " "
+    private fun lastSpaceStillBeforeCursor(): Boolean {
+        val previous = lastSpaceCommitAt ?: return false
+        val startedAt = SystemClock.elapsedRealtime()
+        val matched = currentInputConnection?.getTextBeforeCursor(1, 0)?.toString() == " "
+        Log.d(
+            TAG,
+            "spaceProbe agoMs=${startedAt - previous} " +
+                "roundTripMs=${SystemClock.elapsedRealtime() - startedAt} matched=$matched",
+        )
+        return matched
+    }
+
+    /**
+     * 空缓冲时，这一发硬件 / 注入键空格要不要由输入法吃掉（VOCA-465 D1）。
+     *
+     * 判定本身在 [SpaceKeyPolicy.takesHardwareSpace]；这里只喂它用得上的状态，
+     * 刻意不读 `precedingIsSpace` 也不查无障碍服务 —— 接管判断用不到，多读一次就是多一次跨进程往返。
+     */
+    private fun takesHardwareSpace(event: KeyEvent): Boolean =
+        SpaceKeyPolicy.takesHardwareSpace(
+            state = SpaceKeyPolicy.State(
+                t9Pending = t9Digits.isNotEmpty(),
+                composing = buffer.isNotEmpty(),
+                aiReplyPending = aiReplyActive,
+                voicePending = voiceActive,
+                associationPending = associationActive,
+                englishMode = mode == InputMode.ENGLISH,
+                keyRepeat = event.repeatCount > 0,
+            ),
+            settings = settings,
+        )
 
     /** 回车：缓冲有内容时上屏首选，否则输出换行 */
     private fun handleEnter() {
