@@ -726,7 +726,11 @@ def mode_guard_lines(lines: list[str]) -> set[int]:
 
 
 def length_drops_entries(name: str, src: str) -> list[str]:
-    """读盘侧「按长度丢弃 / 截断条目」的语句，返回出处列表（空 = 契约没被破坏）。"""
+    """读盘侧「按长度丢弃 / 截断条目」的语句，返回出处列表（空 = 契约没被破坏）。
+
+    判到语句层：换写法（`fields[0].length`）躲不掉，把长度判定提取成另一个函数再
+    `if (helper(t)) continue` 则躲得掉 —— 那种间接写法留给 C1-5 的单测兜，脚本不假装会做跨函数污点分析。
+    """
     lines = src.splitlines()
     exempt = mode_guard_lines(lines)
     hits: list[str] = []
@@ -751,15 +755,33 @@ def length_drops_entries(name: str, src: str) -> list[str]:
     return hits
 
 
+def function_body(src: str, signature: str) -> str:
+    """从 `signature` 所在行起，取到缩进回到同一层级为止 —— 只看这个函数自己写了什么。
+
+    不这么收窄的话，「函数体里没启用守卫」会被紧随其后的下一条声明里的同名 token 蒙过去。
+    """
+    lines = src.splitlines()
+    hits = [i for i, line in enumerate(lines) if signature in line]
+    if not hits:
+        return ""
+    idx = hits[0]
+    base = len(lines[idx]) - len(lines[idx].lstrip())
+    body = [lines[idx]]
+    for line in lines[idx + 1:]:
+        if line.strip() and len(line) - len(line.lstrip()) <= base:
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
 def remote_read_wiring(engine_src: str, locator_src: str) -> list[str]:
     """C1-6b 的接线断言：守卫必须被云端读取链路调用，否则它只是个没人用的正确函数。"""
     bad: list[str] = []
-    if "fun fromRemoteText(" not in engine_src:
+    remote_body = function_body(engine_src, "fun fromRemoteText(")
+    if not remote_body:
         bad.append("QuickPhraseEngine.kt 没有 fromRemoteText —— C1-6b 守卫的入口被删")
-    else:
-        head = engine_src.split("fun fromRemoteText(", 1)[1][:400]
-        if "applyTriggerLengthGuard = true" not in head and "guardedRemoteMode(" not in head:
-            bad.append("fromRemoteText 不再启用长度守卫 —— 退化成 fromText 的别名")
+    elif "applyTriggerLengthGuard = true" not in remote_body and "guardedRemoteMode(" not in remote_body:
+        bad.append("fromRemoteText 函数体内没有启用长度守卫 —— 退化成 fromText 的别名")
     if "QuickPhraseEngine.fromRemoteText(" not in locator_src:
         bad.append("QuickLocator.kt 里没有任何 fromRemoteText 调用 —— 云端读取链路不走守卫")
     if REMOTE_THEN_BRANCH_UNGUARDED_RE.search(locator_src):
