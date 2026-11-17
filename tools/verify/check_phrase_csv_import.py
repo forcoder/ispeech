@@ -676,7 +676,10 @@ def quick_trigger_limits() -> tuple[int, int]:
 #  承认抓不到的间接写法（兜它的是 C1-5 的行为单测，不是本脚本）：把长度判定抽成独立布尔
 #  函数再 `if (helper(t)) continue`；把截断长度写成非字面量实参再 `take(n)` / `take(CUT)` ——
 #  实参是变量或具名常量时，锚点 ② 与候选条数上限 `out.take(limit)` 无法区分，硬判会误伤。
-#  锚点 ② 作用域是这三处文件全体：与长度无关的字面量 `out.take(8)` 也会红，规定出口是收敛成具名常量。
+#  锚点 ② 作用域：QuickPhraseEngine.kt / QuickLocator.kt 整份文件 + QuickPhraseCodec 整个 object（第三处不是
+#  整份 QuickPhrasesViewModel.kt —— 那是 UI 文件；VOCA-454 质检打回项 1 后按大括号配平取 object 体，不再是字符窗口）。
+#  作用域内与长度无关的字面量 `out.take(8)` 也会红，规定出口是收敛成具名常量；命中行号按文件绝对行报，
+#  object 挪出 QuickPhrasesViewModel.kt 会让第三处作用域取空、正向存在性断言先红（fail-closed，不会静默变绿）。
 # ──────────────────────────────────────────────────────────────
 
 MODE_GUARD_DEF_RE = re.compile(r"\bfun\s+(\w+)\s*\([^)]*\)\s*:\s*QuickMatchMode\b")
@@ -736,13 +739,14 @@ def mode_guard_lines(lines: list[str]) -> set[int]:
     return exempt
 
 
-def length_drops_entries(name: str, src: str) -> list[str]:
+def length_drops_entries(name: str, src: str, first_line: int = 1) -> list[str]:
     """读盘侧「按长度丢弃 / 截断条目」的语句，返回出处列表（空 = 契约没被破坏）。
 
     两条锚点见本节段首注释：①「长度判据 + 同一缩进块里的丢弃语句」，②「定长截断字面量」。
     判到语句层：换写法（`fields[0].length`、`fields[0].take(4)`）躲不掉；把长度判定提取成
     `if (helper(t)) continue`、或把截断长度写成非字面量实参（局部变量 / 具名常量）再 `take(n)`
     则躲得掉 —— 这几种间接写法留给 C1-5 的行为单测兜，脚本不假装会做跨函数污点分析。
+    `first_line` 把命中行号折算回文件绝对行号（扫描的是一段声明体而非整份文件时）。
     """
     lines = src.splitlines()
     exempt = mode_guard_lines(lines)
@@ -754,7 +758,7 @@ def length_drops_entries(name: str, src: str) -> list[str]:
         if not code:
             continue
         if LITERAL_TRUNCATE_RE.search(code):
-            hits.append(f"{name}:{i + 1} 定长截断 {code}")
+            hits.append(f"{name}:{i + first_line} 定长截断 {code}")
             continue
         if not LENGTH_TEST_RE.search(code):
             continue
@@ -768,7 +772,7 @@ def length_drops_entries(name: str, src: str) -> list[str]:
             body.append(strip_kotlin_comment(follow))
         for stmt in body:
             if DISCARD_RE.search(stmt):
-                hits.append(f"{name}:{i + 1} {code}")
+                hits.append(f"{name}:{i + first_line} {code}")
                 break
     return hits
 
@@ -840,8 +844,9 @@ def remote_read_wiring(engine_src: str, locator_src: str) -> list[str]:
     # 只查前一段的话，`val mode = declaredMode`（收下开关却不用）会让守卫变成无人调用的正确函数还报绿。
     parse_body = function_body(engine_src, "private fun parse(")
     if "applyTriggerLengthGuard" in parse_body and not any(g in parse_body for g in guard_calls):
-        bad.append("parse(...) 收了 applyTriggerLengthGuard 却没调用本文件内任一返回 QuickMatchMode 的守卫函数 —— "
-                   "开关是死的，守卫退化成无人调用的正确函数")
+        bad.append("parse(...) 收了 applyTriggerLengthGuard，却没调用本文件内任何返回 QuickMatchMode 的函数 —— "
+                   "名字无关的范围是本文件内：守卫挪出 QuickPhraseEngine.kt 同样会红，"
+                   "出口是把守卫与 parse 留在同一文件")
     if REMOTE_THEN_BRANCH_UNGUARDED_RE.search(locator_src):
         bad.append("QuickLocator.kt 的 REMOTE 分支走的是 fromText —— 存量 >4 位行的 DEF-3 静默复发")
     if not (REMOTE_THEN_BRANCH_GUARDED_RE.search(locator_src)
@@ -883,18 +888,24 @@ def check_existing_contract_unchanged() -> None:
     vm_text = read(QUICK_VM)
     engine_src = read(QUICK_ENGINE) if QUICK_ENGINE.exists() else ""
     locator_src = read(QUICK_LOCATOR) if QUICK_LOCATOR.exists() else ""
-    codec_parse = vm_text.split("fun parse(text: String)", 1)[1][:1500] if "fun parse(text: String)" in vm_text else ""
-    read_side = " ".join((engine_src, locator_src, codec_parse))
+    codec_obj = function_body(vm_text, "internal object QuickPhraseCodec")
+    codec_at = vm_text.find("internal object QuickPhraseCodec")
+    codec_first = vm_text[:codec_at].count("\n") + 1 if codec_at >= 0 else 1
+    read_side = " ".join((engine_src, locator_src, codec_obj))
+    codec_present = "QuickPhraseCodec.parse(" in vm_text and "fun parse(text: String)" in codec_obj
     check(
-        "QuickPhraseCodec.parse(" in vm_text and codec_parse != ""
-        and "isValidShortcutTrigger" not in read_side,
-        "读取侧（QuickPhraseCodec.parse / QuickPhraseEngine / QuickLocator）不调用编辑器校验器（C1-5）",
-        "读取侧引用了编辑器校验器 isValidShortcutTrigger，导入的超 4 位历史条目会被静默丢弃",
+        codec_present and "isValidShortcutTrigger" not in read_side,
+        "读取侧（QuickPhraseCodec 整个 object / QuickPhraseEngine / QuickLocator）不调用编辑器校验器（C1-5）",
+        ("第三处作用域取空 —— QuickPhrasesViewModel.kt 里已取不到 QuickPhraseCodec 的 parse"
+         "（object 挪出该文件，或声明名不再含 QuickPhraseCodec），C1-5 的读取侧断言失去落点"
+         if not codec_present else
+         "读取侧引用了编辑器校验器 isValidShortcutTrigger，导入的超 4 位历史条目会被静默丢弃"),
     )
     drop_hits: list[str] = []
-    for name, src in (("QuickPhraseEngine.kt", engine_src), ("QuickLocator.kt", locator_src),
-                      ("QuickPhraseCodec.parse", codec_parse)):
-        drop_hits += length_drops_entries(name, src)
+    for name, src, first in (("QuickPhraseEngine.kt", engine_src, 1),
+                             ("QuickLocator.kt", locator_src, 1),
+                             ("QuickPhrasesViewModel.kt(QuickPhraseCodec)", codec_obj, codec_first)):
+        drop_hits += length_drops_entries(name, src, first)
     check(
         not drop_hits,
         "读取侧从不按长度丢弃 / 截断条目（C1-5；按长度收严匹配方式豁免，C1-6b）",
