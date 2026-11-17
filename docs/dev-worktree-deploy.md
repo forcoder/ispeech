@@ -105,6 +105,23 @@ tools/deploy/deploy.sh --merge-all --target auto  # 先 land-all 再部署
 
 其他参数：`--release`、`--no-build`（复用 `app/build/outputs/apk/...` 现有产物）、`--skip-verify`。
 
+### 单 ABI 包（附件体积上限 / 指定 SoC 复测）
+
+全量 release 包含 4 个 ABI（约 139 MB），超过平台附件上限（>100 MB 直接 413），派生单 ABI 包用：
+
+```bash
+tools/deploy/abi_apk.sh app/build/outputs/apk/release/app-release.apk arm64-v8a
+```
+
+签名证书、`applicationId`、`versionCode/Name` 与全量包一致，可直接覆盖安装；脚本末尾会自检
+`.so` 页对齐 / 签名 / 剩余 ABI 清单，任一项不过就非零退出（**不会产出装不上的包**）。
+
+> 坑（VOCA-231 实测）：`zip -d` 删条目会重排归档、打乱原本由 AGP 做好的页对齐，而本包
+> `extractNativeLibs=false`，`.so` 必须按页对齐才能被系统 mmap。此时必须
+> `zipalign -p -f 4`（`-p` 不可省）再 `apksigner sign`；只写 `-f 4` 的包安装报
+> `INSTALL_FAILED_INVALID_APK: Failed to extract native libraries`，看起来像“包坏了”，
+> 实际是构建步骤漏了 `-p`。
+
 ## 6. 装真机
 
 USB：
@@ -155,3 +172,4 @@ adb -s <serial> install -r dist/ispeech-debug-v1.5-<旧时间戳>.apk   # 回装
 | 新任务分支缺少已 land 的改动 | 本地 main 领先 origin/main 时会以本地为基准；若仍异常，手动 `git rebase main` |
 | `deploy.sh` 拒绝执行 | 当前不是 main 或 main 有未提交改动——去 worktree 干活，别在 main 改 |
 | release 包装不上 | 未配置 `keystore/keystore.properties` 时 release 不签名，只能用 debug 装机 |
+| 单 ABI 包装不上，报 `Failed to extract native libraries` | `.so` 没按页对齐：用 `tools/deploy/abi_apk.sh`（内部 `zipalign -p -f 4` + 自检），别手搓 `zip -d` + `zipalign -f 4` |

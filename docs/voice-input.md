@@ -33,6 +33,7 @@
 | 关注点 | 位置 |
 | --- | --- |
 | 识别器封装 | `app/src/main/java/com/ispeech/input/VoiceInputController.kt` |
+| 链路埋点 | `app/src/main/java/com/ispeech/input/AsrTrace.kt`（见 §七） |
 | 服务状态机 | `app/src/main/java/com/ispeech/input/IspeechImeService.kt`（`toggleVoiceInput` / `showVoiceCandidate` / `commitVoice` / `cancelVoice` / `applyAsrChange`） |
 | 设置模型 | `app/src/main/java/com/ispeech/settings/store/AsrSettings.kt`（`AsrEngine` / `AsrLanguage` / `AsrSettings` / `ASR_MODEL_EXTRA`） |
 | 持久化 | `SettingsStore`（`asrSettingsFlow` / `asrSettings` / `setAsrSettings`） |
@@ -89,3 +90,220 @@
 | **影响范围** | 仅决定中文态默认输入法与中/英切换目标，不影响英文态、语音识别、符号面板等其他功能。 |
 
 > 回归用例：`InputModePolicyTest` 覆盖「默认五笔 ⇄ 英文」「默认拼音 ⇄ 英文」以及从英文回到中文时以设置为准。
+
+## 七、ASR 业务埋点（`AsrTrace`）
+
+**为什么有这一节**（VOCA-231）：真机上语音键卡在「语音识别中…」长时间不复位，而 `logcat` 里
+**一条 ASR 业务打点都没有** —— 既有日志全在 `catch` 分支，而「卡住」不抛异常，于是不可诊断。
+埋点把「选了哪个引擎 → 服务 / 模型是否就绪 → 开始收音 → 首个结果 → 结束 / 出错 / 超时 → UI 是否复位」
+逐段落成一行，**只加日志、不改任何行为**。
+
+- **TAG**：`AsrTrace`（全链路单 TAG，一条命令抓完整会话）
+- **实现**：`app/src/main/java/com/ispeech/input/AsrTrace.kt`
+- **会话 id**：`voiceSessionId`，每次按键（含被拦下的按键）新开一个，串起同一次语音输入的所有行
+
+```
+adb logcat -d -s AsrTrace:* | grep -c 'session='          # 有没有打点（0 行即为缺陷本身）
+adb logcat -d -s AsrTrace:* | grep 'session=v3'           # 追一次会话
+adb logcat -d -s AsrTrace:* | grep -E 'ev=(timeout|error|blocked)'   # 只看异常
+```
+
+| 事件 `ev=` | 打点位置 | 说明 |
+| --- | --- | --- |
+| `begin` | `IspeechImeService.startVoiceTrace` | 一次**真正开始**的语音会话：`via`（`voice_key` / `press_down`）、引擎、进入时的 UI 与收音状态 |
+| `blocked` | `IspeechImeService.toggleVoiceInput` / `toggleVoskVoice` / `onVoicePressDown`、两个引擎的 `start`、`VoiceInputController` 前置校验 | 被拦下：无服务 / 无可用识别服务 / 无麦克风权限 / 模型未就绪 / 已在收音（沿用上一个没结束的 id，所以「再按也没反应」会打在卡住那条会话上） |
+| `bind` | `VoiceInputController.logBind` | 设备上识别服务数量与真正受 `BIND_RECOGNITION_SERVICE` 保护的数量（桩服务能绑不回结果，靠这条区分） |
+| `press` | `IspeechImeService.onVoicePressUp` | 按住说话的**抬起**（按下由 `begin via=press_down` 表示）；只有按下没有抬起 = 手势没回来、收尾没触发 |
+| `start` | `VoiceInputController.startListening`、`VoskSpeechEngine.start` / `FunAsrSpeechEngine.start`、`startVoskModelDownload` | 已下发开始收音；带 `lang` / `partial` / `offline` / `model` / `calling` / `watchdog` |
+| `first_result` | 三个引擎的中间结果首条 + `IspeechImeService.showVoiceCandidate` | **本次会话有没有回调过文本**（只打首条，不刷屏） |
+| `end` | `VoiceInputController.finish` / `stopListening` 分支、离线引擎 `finish` | 进入「等收尾结果」阶段，带 `limit_ms` |
+| `result` / `empty` | `VoiceInputController.onResults`、离线引擎收尾、模型下载收尾 | 会话闭环；`empty` = 回调了但没有文本 |
+| `error` | `VoiceInputController.onError`（带 `code` + `name`）、离线引擎各失败阶段 | 失败原因类别 |
+| `timeout` | `VoiceInputController` 的 `startWatchdog` / `sessionWatchdog` / `finishWatchdog`、两个离线引擎的 `startWatchdog` / `finishWatchdog` + 收音循环、`IspeechImeService.armVoiceSessionGuard` | 兜底超时触发并复位；`stage=` 区分是哪一段超时（取值见 §八） |
+| `retry` | `VoiceInputController.onError`（识别器忙）、CUSTOM 建识别器失败回退 | 原地重试 / 静默回退不再静默 |
+| `cancel` | `VoiceInputController.stop` / `destroy`、`IspeechImeService.cancelVoice` / `resetState` | 会话被丢弃 |
+| `commit` | `IspeechImeService.commitVoiceText` | 最终结果写入输入框（只记长度） |
+| `ui_reset` | `IspeechImeService.endVoiceSession`（语音会话的单一出口，见 §十一） | **UI 是否离开「识别中」——卡住的直接判据**；`reason=` 取值 `candidate_commit`（点候选条上屏）/ `space_commit` / `engine_result` / `engine_error` / `user_stop` / `backspace` / `escape` / `session_timeout` / `reset_state` |
+
+隐私：只记长度（`chars=`）与状态位，**绝不**记录识别文本、输入框内容或宿主编辑字段（共享规程 §8 / §9）。
+
+单测：`app/src/test/java/com/ispeech/input/AsrTraceTest.kt`（行格式、缺省占位、空白压平、id 递增）。
+
+**判读口径**（真机采集时直接分辨触发源）：
+
+| 日志形态 | 结论 |
+| --- | --- |
+| 有 `begin` 无 `press` / `end` | 抬起事件没回来、收尾没被触发（现在会由 `timeout stage=session` 兜住） |
+| 有 `start` 无 `first_result` | 识别服务收了会话不回话（现在会由 `timeout stage=start` 在 10 秒内复位） |
+| 有 `first_result` 无 `result` / `ui_reset` | 只回中间结果、收尾不来（现在会由 `timeout stage=finish` 兜住） |
+| 有 `ui_reset` 且 `ok=true` | 链路正常，UI 已离开「识别中」 |
+
+`grep -c 'session='` 仍是「这个包到底有没有埋点」的判据；`grep -E 'ev=(timeout|error|blocked)'` 直接列出异常。
+
+## 八、语音「识别中」的超时收敛（VOCA-231）
+
+§七 的定位结论是「卡住 = UI 状态机没复位」，根因是**全链路只有一处超时**（松手后等收尾 6 秒），
+而且它只在收到抬起事件之后才挂表 —— 抬起事件丢失、识别服务不回话、离线引擎卡在 `AudioRecord.read()`
+三种情况都没有任何时限，语音键于是永久卡在「识别中」，之后每次按键再开始的尝试又被「已在收音」挡回。
+
+**时限集中在一处**：`app/src/main/java/com/ispeech/input/AsrTiming.kt`（共享规程 §7：不散落魔法值）。
+
+| 常量（毫秒） | 覆盖的阶段 | 到点做什么 |
+| --- | --- | --- |
+| `FIRST_CALLBACK_TIMEOUT_MS = 10_000` | 已下发开始收音 → 第一个回调（系统识别的 `onReadyForSpeech` 等 / 离线引擎真正开始收音） | 复位 + `voice_timeout_service` |
+| `SESSION_TIMEOUT_MS = 60_000` | 系统识别「收音中」硬上限（覆盖按住不放、抬起事件丢失） | 自动按松手处理（走 `finish()`，已说的话还能上屏） |
+| `FINISH_TIMEOUT_MS = 6_000` | 松手 / 二次点击 → 最终结果 | 复位 + `voice_timeout_result` |
+| `UI_SESSION_TIMEOUT_MS = SESSION + FINISH` | UI 侧最后一道（引擎彻底没接住时） | 丢弃会话 + `voice_timeout_session` |
+| `NO_AUDIO_TIMEOUT_MS = 10_000` | 离线引擎收音循环连续拿不到样本 | 退出自旋 + `voice_audio_error` |
+
+任何一条超时都必须做满三件事：①复位状态 ②给用户可读文案（`AsrTiming.messageFor(stage)`）
+③打 `ev=timeout` + `stage=`。缺任一件视为未完成（角色规程：禁止静默失败）。
+
+分层：引擎管**自己阶段**的时限（`VoiceInputController` 三段、两个离线引擎各两段 + 收音循环内的
+无音频判定）；`IspeechImeService.armVoiceSessionGuard` 管**整段 UI**，比引擎侧晚一个收尾窗口，
+所以「自动收尾让已说的话落地」这条正常路径不会被 UI 抢先掐断。离线引擎的 `cancel()` / `destroy()`
+与超时复位都**就地**把 `isListening` 置回 false —— 工作线程可能永远不返回，等它收尾等于永远等不到。
+
+`start` 埋点里的 `watchdog=` 字段就是这一节的接线状态：系统识别 `start+session+finish`、
+离线引擎 `start+finish`；`watchdog=none` 已经不再出现（静态检查会拦住回退）。
+
+回归：`AsrTimingTest`（时限层级、UI 兜底与收尾窗口的关系、每类超时都有独立可读文案）
++ `check_crosscut.py` 8b 段（时限只在 AsrTiming 定义、三段都挂表、收尾都摘表、中英文案齐全）。
+
+**仍未覆盖（下一步）**：抬起事件丢失的护栏目前是「60 秒后自动收尾」，没有把「再按一次 = 结束上一次」
+改成显式语义；桩识别服务（华为 `FakeRecognitionService`）仍需用户在设置里换引擎，代码只能早 10 秒
+告知，不能替它出结果。
+
+## 九、真机复测前置核查（2026-11-16 实测，设备 `FMR0224913042917`）
+
+原始报障机回来了，但**装不上本单的诊断包**，且**这台机器跑不到 §八 的超时分支**。两条都是先跑
+只读命令得到的，不是推断；复测前先把这一节的两道门禁过掉，否则会像上一轮那样「包身份四项全对却装不上」。
+
+### 9.1 现装包身份与签名门禁
+
+| 项 | 机上现装 | 本单诊断包 |
+| --- | --- | --- |
+| versionCode / versionName | `6` / `1.6` | `5` / `1.5` |
+| base.apk sha256 | `9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42` | `1f21e23c21b95ae580619be5558e560a85f4ac5aad6b128d2a3277c191f17621` |
+| 签名证书 | `CN=Android Debug` → `857ce64e…a0ed` | `CN=iSpeech Prototype` → `70b4f4a2…2ac7` |
+| `lastUpdateTime` | 2026-11-15 10:29:20 | — |
+| 是否含 §七/§八 代码 | **否**：dex 里 `AsrTrace` / `AsrTiming` / `armVoiceSessionGuard` / `voice_timeout_result` 全 0 命中，`FunAsrSpeechEngine` 7 命中 | 是 |
+
+分支归属（推断，非包内构建元数据坐实）：`origin/main` 是 `versionCode 5 / 1.5`，只有
+`origin/release/voca-186-v1.6` 是 `6 / 1.6` 且 `AsrSettings` 默认引擎仍为 `FUNASR` —— 与上表的版本号
+和 dex 符号同时吻合，所以判定机上装的是 186 那条发布线的包。要坐实只需在出包机上比对 `dist` 产物的 sha256。
+
+- 签名者不同 → `adb install -r` 必失败（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）；再叠加 6→5 是降级，
+  还需 `-d`。**唯一可行路径是先卸载现装包 = 清空应用数据**（学习词库、设置、剪贴板），属生产操作，
+  需要人类批准后才执行；换包后 `RECORD_AUDIO` 会回到未授权状态。
+- EMUI 的 `pm install` 不支持 `--dry-run`（实测 `Unknown option --dry-run`），**没法在不改设备状态的前提下
+  预验可安装性**；只读预验只能做到上表：`pm path` → `adb pull` → `apksigner verify --print-certs` + `dumpsys package`。
+- 注意：dex 在 APK 里是压缩存储的，直接对 `.apk` 做 `grep` 只能命中 zip 条目名（`assets/…sherpa-onnx…`），
+  **判类名/字符串必须先 `unzip classes*.dex`**。用 `pm path` 的结果直接 `grep` 会得出假的「0 命中」。
+
+### 9.2 这台机器上 `ev=timeout` 跑不到（服务清单实测）
+
+| 命令 | 实测结果 |
+| --- | --- |
+| `cmd package query-services -a android.speech.action.RECOGNIZE_SPEECH` | `No services found`（0 个） |
+| `cmd package query-services -a android.speech.RecognitionService` | 1 个：`com.huawei.vassistant.voiceui.service.FakeRecognitionService`，`permission=android.permission.BIND_VOICE_INTERACTION` |
+| `settings get secure default_speech_recognizer` | `null` |
+| `dumpsys package com.ispeech.ime`（权限） | `RECORD_AUDIO: granted=true (USER_SET)` |
+
+∴ `VoiceInputController.hasUsableService()` 在这台机器上恒为 false —— 判据是 `serviceInfo.permission ==
+BIND_SPEECH_RECOGNITION_SERVICE`，而唯一的服务声明的是 `BIND_VOICE_INTERACTION`。**含义**：即使 VOCA-310
+把查询 action 修对，这里仍然是 `services=1 usable=0`，`SYSTEM` 引擎只会出 `ev=blocked`。
+要验 §八 的 `timeout stage=start/finish/session` 三条分支，只有两条路：① 有真实识别服务的机器（基线机
+`23F0224224000950` / ALN-AL10，验收口径要求的正是它）；② 离线引擎路径（`model_not_ready` / 无音频判定）。
+看到 `ev=blocked` 不算 §八 的超时分支被验证，也不算回归。
+
+### 9.3 报障现象的根因链（补齐）
+
+报障包 `agent/agent/voca-121@e8dc6f1` 的默认引擎是 `AsrEngine.FUNASR`（`AsrSettings.kt:57`，离线
+sherpa-onnx），它的模型源 `http://cvm.agentai0.com/funasr/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2`
+实测返回 **HTTP 502**（域名可解析 43.136.44.72，源站挂着）→ 模型下不来；而当时的离线引擎路径**没有任何
+时限**，UI 于是停在「语音识别中…」不动。`voca-186-v1.6` 起模型源已换成阿里云 OSS，实测 Range 请求返回
+**206 / 1KB 可读** —— 换源这件事不在本单范围，本单解的是「源挂了、服务不回话、引擎卡住时必须按时复位并把
+原因打进日志」，对应 §七 的 `blocked reason=model_not_ready model_dir=`。
+
+仍未解释的一条：报障截图里那个单候选「饭」。模型若从未下成，离线引擎不该出字；但现装包非 debuggable
+（`run-as: package not debuggable`），拿不到 `filesDir` 去证明模型在不在。复测时按日志判，不要靠猜——
+`ev=start model_ready=true` 与 `ev=first_result` 同时出现才说明那次出字来自 ASR。
+
+## 十、`hasUsableService()` 恒为假：语音键根本进不到「识别中」（2026-11-16 实测坐实并修复）
+
+§九 只解释了「这台华为机器为什么跑不到超时分支」。本轮在 API 34 `google_apis` 镜像（AVD
+`ispeech_test`，`sdk_gphone64_arm64`）上用只读的 PackageManager 查询复核，发现判据本身是错的，
+而且**不止华为那一台**：
+
+```
+$ adb -s emulator-5554 shell cmd package query-services -a android.speech.action.RECOGNIZE_SPEECH
+No services found                                    ← 旧代码查的就是这个 action，恒空
+
+$ adb -s emulator-5554 shell cmd package query-services -a android.speech.RecognitionService
+2 services found:
+  AiAiSpeechRecognitionService   (com.google.android.as)   permission=null
+  GoogleTTSRecognitionService    (com.google.android.tts)  permission=null
+
+$ adb -s emulator-5554 shell pm list permissions | grep -iE 'speech|recogn'
+permission:android.permission.MANAGE_SPEECH_RECOGNITION
+permission:android.permission.BIND_MUSIC_RECOGNITION_SERVICE      ← 没有 BIND_SPEECH_RECOGNITION_SERVICE
+$ … | grep -c BIND_RECOGNITION_SERVICE  → 0                        ← 旧代码比对的字符串在系统里不存在
+```
+
+**结论**：修复前 `hasUsableService()` = 「用 Activity 的 action 查服务」∩「权限恰好等于一个不存在的
+字符串」，两个条件各自都恒假，所以它在**任何**机器上都返回 false。`IspeechImeService.kt:1585` 拿它当
+语音键的前置门禁，于是每次点麦克风都直接落到 `blocked reason=no_usable_service` + 「服务不可用」，
+`SYSTEM` 引擎永久不可用，本单要复测的 `ev=timeout stage=` 三条分支也就永远复测不到。
+
+判据不能反过来写成「权限必须等于 `BIND_SPEECH_RECOGNITION_SERVICE`」——实测真服务声明的是
+`permission=null`，那样写还是恒假。现在的规则只拦**实测唯一确认的桩特征**（语音助手的
+`BIND_VOICE_INTERACTION`，见 §9.2），其余一律放行：误拦的代价是功能永久不可用且没有日志可循，
+误放的代价由 §八 的 `FIRST_CALLBACK_TIMEOUT_MS` 在 10 秒内复位并给出可读文案，是可恢复的错误。
+判据抽成纯函数 `isUsableRecognitionService()`，四种实测取值都有单测
+（`RecognitionServiceUsabilityTest`）。
+
+`ev=bind` 因此多了一个 `stubs=` 字段：`services=2 usable=2 stubs=0` 说明这台机器该正常出字，
+`services=1 usable=0 stubs=1` 说明命中的是助手桩、该换引擎——这两种情况以前在日志里长得一模一样。
+
+**与 VOCA-310 的关系**：310 登记的是「查询 action 用错」这半条，本轮把 action 与权限判据一起改了，
+因为只修 action 在这台 AVD 上仍然 `usable=0`（真服务 `permission=null`），本单验收照旧过不去。
+310 的代码部分已并入本 PR，剩下的应是真机验证与关单。
+
+## 十一、语音会话的单一出口（VOCA-231，架构复审 §一 的行为回归）
+
+**现象**（静态可达路径，2026-11-17 架构复审提出）：一次已经上屏成功的语音会话，66 秒后仍会打出
+`ev=timeout stage=session`，把用户当时正在看的候选（很可能是拼音联想）清空、
+覆盖成「说话时间过长，本次语音输入已自动结束」。
+
+**根因**：UI 侧兜底表按 `voiceActive || 系统识别器 isListening || 离线引擎 isListening` 判「还卡在识别中」，
+而「结束一次语音会话」这件事在旧实现里散落在 7 处改写里，其中点候选条上屏那条——
+`bar.onCandidatePicked → pickCandidate() → commit()`——只写了 `voiceActive = false`：
+既没停识别器，也没摘兜底表。识别器在 `onResults` 之前 `isListening` 恒为真，于是三个条件里剩下的两个
+仍把这次会话算成进行中。空格的 `commitVoice()` 摘了表、点选没摘，两条并存的出口长得不一样。
+
+**修法**：收成一个出口 `endVoiceSession(reason, ok)`，一次做完五件事——停两路识别器、清 `voiceActive`、
+摘兜底表、清 `codeOverride`、打 `ev=ui_reset reason=`。七处收尾全部改走它，
+`cancelVoice(reason)` 的 `reason` 改为必填（谁结束的会话必须能从日志判读）。
+判据抽成纯函数 `voiceSessionOccupied(voiceActive, systemListening, voskListening)`，
+兜底表与出口共用同一个判据，避免「出口认为自己收完了、兜底表却还觉得卡着」。
+
+**非语音态是 no-op**：`commit()` 是每条候选上屏的必经路（拼音 / T9 / 联想都走它），
+出口先用 `voiceSessionOccupied` 判有没有会话在进行，没有就直接返回，不给正常打字刷埋点。
+
+**顺带消失的两个副作用**（同一处的连带修复，不是新需求）：
+1. 空格上屏语音候选后，识别器随之停掉，晚到的 `onFinal` 不会再往输入框补第二次同样的文本；
+2. 语音会话结束后的下一次点语音键，不再因为 `isListening` 残留而先走「取消」分支。
+
+**门禁**：`tools/verify/check_crosscut.py` 8b.3 从「数 disarm 出现几次」改成守结构与行为——
+出口必须含五步、`voiceActive = false` 只许出现在出口内、`cancelVoice()` 调用必须带 reason、
+`commit()` / `cancelVoice` / `commitVoice` / `commitVoiceText` 必须调用 `endVoiceSession`。
+把 `commit()` 改回旧写法会立刻红 2 条（本轮实测：`passed=174 failed=2`），旧断言当时是绿的——
+这就是复审说的「门禁守得住字符串，守不住行为」。
+
+**单测**：`app/src/test/java/com/ispeech/input/VoiceSessionExitTest.kt`（3 例）钉住判据：
+只清 `voiceActive` 不停识别器 = 仍算进行中（正是漏网那条）、只清识别器不清 UI = 仍算进行中、
+三个全清 = 结束。判据之外的「每条出口都走单一出口」由上面的静态门禁守。
+
+**仍未坐实的部分**：本条是静态可达路径 + 判据单测，不是运行时日志。
+`ev=timeout stage=session` 至今零运行时样本，要等基线机 `23F0224224000950` 接线后按 §八 的判读表复测。
