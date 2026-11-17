@@ -186,10 +186,15 @@ object QuickLocator {
             if (input == null) return
             runCatching {
                 input.use { stream ->
-                    val engine = QuickPhraseEngine.fromText(
-                        stream.readTextUtf8(),
-                        minTriggerLength = minTriggerLength,
-                    ) ?: return@use
+                    val text = stream.readTextUtf8()
+                    // 云端落盘走 fromRemoteText：升级前已写在盘上的 >4 位 CONTAINS / PREFIX 存量行
+                    // 要在读盘侧就按 EXACT 生效，否则装了拉取侧修复的设备不点第二次同步就永远照旧（VOCA-423）。
+                    // 面板与打字候选共用这份 ruleGroups，两条链路同口径。
+                    val engine = if (source == QuickSource.REMOTE) {
+                        QuickPhraseEngine.fromRemoteText(text, minTriggerLength = minTriggerLength)
+                    } else {
+                        QuickPhraseEngine.fromText(text, minTriggerLength = minTriggerLength)
+                    } ?: return@use
                     groups.add(
                         QuickRuleGroup(
                             source = source,

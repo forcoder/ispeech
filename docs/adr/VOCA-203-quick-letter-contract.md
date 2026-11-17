@@ -316,6 +316,7 @@ when {
 | C1-4 | 长度不改变 mode：编辑器不因 >4 位改写用户选的匹配方式 | 输入 5 位 trigger 后 mode 字段值不变（单测） |
 | C1-5 | 读取侧从不校验长度、从不截断 | 13 位 trigger 的规则行仍完整解析、完整参与匹配（`QuickPhraseEngine.fromText` 单测） |
 | C1-6 | 覆盖条目（`setRemoteShortcut` 新建）mode 规则：`len ≤ 4 → PREFIX`，`len > 4 → EXACT` | 5 位简写生成的覆盖条目 `mode == EXACT`；4 位的仍 `== PREFIX`。与 main `UNGUARDED_MODES = {exact, regex}` 同口径 |
+| C1-6b | **读盘侧同源守卫（2026-11-17 VOCA-423 追加）**：解析 `filesDir/quick_phrases_remote.txt` 时，`len > 4` 且声明 `PREFIX` / `CONTAINS` 的行按 `EXACT` 生效。C1-6 的降级只做在拉取侧，对「装上新包后再点一次立即同步」的设备才有效，升级前的存量行不回写；读盘侧不兜住，最初抱怨的那台设备升级后行为一切照旧。守卫只重解释匹配方式，`trigger` / `label` / `content` / `weight` / `kind` 原样，磁盘文件不回写。作用域限**云端落盘文件**：C1-5 保护的是项目自己或用户写的数据（内置 assets、`quick_phrases_user.txt`、CSV 导入），云端文件是同步产物，其 mode 口径由本节定义 | 单测 `QuickPhraseLegacyRemoteRowTest`：①存量 `dtwsl\t…\tCONTAINS` 行走 `fromRemoteText` 后五笔态敲 `dtws` 无快捷候选；②敲满 `dtwsl` 仍命中 245 字正文；③`dtws` 及以内的 `PREFIX`/`CONTAINS` 行为不变；④`fromText` 仍原样返回声明的 mode（C1-5 不回归）|
 | C1-7 | >4 位时 UI 给可达性提示（非阻断）；确认按钮禁用时必须显示禁用原因 | 存在 `quick_trigger_reachable_hint` 中英文案；`enabled == false` 时弹窗内可见「还差什么」（修 §0 修正 5 的归因错位） |
 | C1-8 | `MAX_CODE_LENGTH = 4`、`MAX_PINYIN_LENGTH = 12` 不变 | `check_quick_trigger.py` L8 / L9 缓冲区断言原样通过 |
 | C1-9 | 用户为 >4 位 trigger 显式选 PREFIX/CONTAINS 时允许保存，但显示误弹警示 | 存在 `quick_trigger_prefix_long_content_warn` 文案；`len(trigger) > 4 && mode ∈ {PREFIX, CONTAINS}` 时可见；与脚本 `:159` 的 warn 同级 |
