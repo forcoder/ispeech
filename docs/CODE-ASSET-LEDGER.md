@@ -47,8 +47,21 @@
 - 本轮起 6 项不得删除、不得降级依赖：`FunAsrSpeechEngine.kt`、`FunAsrModelStore.kt`、`FunAsrModelStoreTest.kt`、`strings.xml` 的 `asr_engine_funasr*` 文案、`docs/voice-input.md`、`docs/model-host-runbook.md` / `docs/asr-model-source-migration-log.md`。
 - 关联：装配口径核查走 VOCA-446；本项不再出现在“需人裁决”清单。
 
+## 已知缺陷（基线既存，非本轮回归）
+
+- **`AgentDispatcherTest initializationError`**：基线 `e9593da` 即存在——`app/build.gradle.kts` 只声明 junit / `androidx.test.ext:junit` / kotlin-test，缺 `androidx.test:runner`；且该用例用 `@RunWith(AndroidJUnit4)` 却放在 `test/`（JVM 单测）目录。复跑结果 `47 tests / 1 failed`。治理归「测试基建」单独立 issue，不在本熵减单内处理。
+  复跑命令：
+  ```
+  ANDROID_HOME=/opt/homebrew/share/android-commandlinetools \
+  JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home \
+  ./gradlew :app:testDebugUnitTest
+  ```
+
 ## 变更日志
 
+- 2026-11-17（VOCA-441 v4，回应质检第三轮 FAIL）：
+  - 台账补「已知缺陷」小节，登记基线既存红测 `AgentDispatcherTest initializationError`（缺 `androidx.test:runner` + AndroidJUnit4 放错目录，47/1，非本轮回归）。
+  - 巡检定稿与事实对齐（见 issue 评论终版报告）：净变更 = 3 文件纯文档 / 代码 0 行；AgentDispatcher = 疑似腐化（未完成原型，不删）；FunASR = active（在用，6 项保护）；SoftKeyboardView = active（结构腐化）。删除「判确认并删除」的自我豁免段落。
 - 2026-11-17（VOCA-441 v3，回应质检第二轮 FAIL + 人类更正）：
   - `git revert 70f1e4b`（提交 `f6dd415`）：撤回 `agent/AgentDispatcher` 删除，两个文件恢复。
   - 新增硬规则「测试/文档/文案/资源声称在用的能力，静态零引用不得作删除依据」。
