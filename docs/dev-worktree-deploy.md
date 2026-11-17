@@ -148,6 +148,11 @@ adb -s <serial> install -r dist/ispeech-debug-v1.5-<旧时间戳>.apk   # 回装
 回滚代码（**不推荐** `reset --hard`）：在 main 上用 `git revert <land 提交>` 生成反向提交，
 再走一次 `deploy.sh` 出包；这样历史可追溯、不影响其它 worktree。
 
+第五条门禁（`dist/SHA256SUMS`）的回滚**分两种粒度**，别一律整包 revert：整包回滚会把清单退回
+「2 条 FAILED + 3 个包漏记」的故障面；只想让出包不中断时，摘掉 `deploy.sh` ③ 段那 7 行即可
+（`--regen`、清单、门禁工具、⑤ 归档回写全部保留）。触发条件、阈值、实测时长与演练读数见
+ADR-0003 `docs/adr/VOCA-400-dist-checksum-manifest.md` §5；发布顺序、判定阈值与通知对象见同文 §7。
+
 ## 8. 常见坑
 
 | 现象 | 原因 / 修法 |
@@ -163,3 +168,5 @@ adb -s <serial> install -r dist/ispeech-debug-v1.5-<旧时间戳>.apk   # 回装
 | 新任务分支缺少已 land 的改动 | 本地 main 领先 origin/main 时会以本地为基准；若仍异常，手动 `git rebase main` |
 | `deploy.sh` 拒绝执行 | 当前不是 main 或 main 有未提交改动——去 worktree 干活，别在 main 改 |
 | release 包装不上 | 未配置 `keystore/keystore.properties` 时 release 不签名，只能用 debug 装机 |
+| 出包卡在 `dist/SHA256SUMS 与包字节不一致 …（本项不可 --skip-verify）` | 清单与字节漂移，`--skip-verify` 跳不过它（设计如此，见 ADR-0003 §4）。跑 `python3 tools/verify/check_dist_manifest.py --regen` 后重出；FAIL 行写「未跟踪」且体积超 100 MB 的，是 runtime 从工作目录扫进来的外来残留——先 `mv` 出 `dist/` 再 `--regen`，别提交 |
+| ⑤ 打了 `[warn] 本包未入 dist/SHA256SUMS` | **不是故障**：默认（debug）产物名被 `.gitignore` 排除，按政策不入库。要清单能回答这一包，改用 `--release`；自查走本次日志的 `sha256=` + 设备侧 `dumpsys package`（口径见 ADR-0003 D2） |
