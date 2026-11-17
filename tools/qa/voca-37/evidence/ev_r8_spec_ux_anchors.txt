@@ -1,0 +1,58 @@
+# round=r8  file=spec_ux_anchors_0e  采集于 2026-11-18T04:31:00+0800
+# cmd: python3 spec_ux_anchors.py   （默认方向：登记基线 8324b03 → 读数口径 0e4eeb0）
+# 第八轮打回项 5 的修正在这里：ANCHORS 里原来有一条 ("§6.5-pp", 599)，8324b03:599 是 §5 无障碍表的「门禁结论」行，
+#   相似度匹配（sim=0.983）把它错配成 pp 门限的新行号，报告 §5、ppsum.py 的 criterion=、两份证据头注都跟着抄错了行。
+#   现在该条从内容锚移出、进 RETIRED，改由 pattern=「相对搜狗 ≤ 1 个百分点」现算新行；
+#   pp 门限另立两条内容锚：§6.1-pp门限B1(8324b03:37) 与 §6.2-pp门限相对搜狗1pp(8324b03:609)，两条本轮 match=True。
+# 本工具的 ANCHORS 行号键在 8324b03 上，只支持 8324b03→新head 这一个方向；0e4eeb0→ef14209 的行号漂移不走这里，
+#   由报告 §0「权威版本」那条表逐行现算（同一文件 git show 两个 ref 对比）。拿本工具硬跑第二个方向会得到一片 MISS，那是行号基准错，不是规格丢了内容。
+# 逐行 ts=：本轮起 P() 给每行补时刻（第八轮打回项 3 对静态工具同样要求「追得到时刻」）。
+# SUMMARY 要求：全部 match=True 或 verdict=REPLACED，不得留 DRIFT/MISS。
+# spec_ux_anchors.py · 规格重锚 8324b03 → 0e4eeb0 · docs/keyboard-ux-spec.md	ts=2026-11-18T04:31:00+0800
+# 旧文件 928 行 · 新文件 1025 行 · 新增规格修订记录（VOCA-464 分档 + AC-12）会让 540 以后的行号整体下移	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-1	old=8324b03:413	new=0e4eeb0:432	match=True	multi=False	snip=### AC-1 候选条空态高度不变	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-2	old=8324b03:427	new=0e4eeb0:446	match=True	multi=False	snip=### AC-2 双击空格出句号	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-3	old=8324b03:440	new=0e4eeb0:459	match=True	multi=False	snip=### AC-3 双击空格不与「上屏首选」打架	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-4	old=8324b03:453	new=0e4eeb0:472	match=True	multi=False	snip=### AC-4 连续横滚生效（用硬件键步长定标，唯一可复现口径）	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-5	old=8324b03:467	new=0e4eeb0:486	match=True	multi=False	snip=### AC-5 左右边界不循环	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-6	old=8324b03:480	new=0e4eeb0:499	match=True	multi=False	snip=### AC-6 起手区约束（带外手势不得驱动横滚）	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-7	old=8324b03:490	new=0e4eeb0:509	match=True	multi=False	snip=### AC-7 竖向与斜向不误滚、不误上屏	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-8	old=8324b03:505	new=0e4eeb0:524	match=True	multi=False	snip=### AC-8 按键音效（本期不采纳，无验收项）	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-9	old=8324b03:509	new=0e4eeb0:528	match=True	multi=False	snip=### AC-9 长按连删保留	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-10	old=8324b03:519	new=0e4eeb0:538	match=True	multi=False	snip=### AC-10 单行 + 恒高下仍完整显示 ≥4 个候选（2026-11-17 新增，本轮必测）	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-10-Given首行	old=8324b03:525	new=0e4eeb0:544	match=True	multi=False	snip=① chip 文本 == 所敲串；② 候选行在位（`scrollView` 可见，不是 chip-only 态）；③ 候	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-10-采样区	old=8324b03:529	new=0e4eeb0:548	match=True	multi=False	snip=采样区 x ∈ [chip 右沿 + 1, 1080 − paddingEnd]，y = 候选带内沿（46 dp 内，去	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-11	old=8324b03:547	new=0e4eeb0:606	match=True	multi=False	snip=### AC-11 候选带内近垂直短拖不得上屏（2026-11-17 新增，本轮不测）	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§5-无障碍表头	old=8324b03:583	new=0e4eeb0:663	match=True	multi=False	snip=## 5. 不可访问性检查（无障碍）	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§5-缺口行1	old=8324b03:589	new=0e4eeb0:669	match=True	multi=False	snip=| 连续横滚 vs TalkBack 滑动导航 | **需补按键路径，不阻塞** | 触摸探索（`isTouchExpl	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§5-缺口行3	old=8324b03:593	new=0e4eeb0:673	match=True	multi=False	snip=| 角标数字 vs 实际入口 | **不合规，需补** | 见 §2.3 G7 / F11：第 10–27 项显示数字角	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§5-合规行	old=8324b03:594	new=0e4eeb0:674	match=True	multi=False	snip=| 候选词朗读 | **合规** | 每个候选 `contentDescription = candidate.disp	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§5-缺口行4	old=8324b03:595	new=0e4eeb0:675	match=True	multi=False	snip=| 键盘按键朗读 | **部分合规，需补** | 文字键靠 `TextView.text` 朗读（`SoftKeyboa	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§5-缺口行5	old=8324b03:597	new=0e4eeb0:677	match=True	multi=False	snip=| 对比度 | **不合规（首选高亮）** | `fa57a07` 上高亮色不再是硬编码 `#FF6A00`，而是 `r	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§6.1-pp门限B1	old=8324b03:37	new=0e4eeb0:48	match=True	multi=False	snip=收敛方案见 §6，推荐 **方案 B1** = 候选条恒高 46 dp + 键高 52→46 dp（现有 `Keyboa	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§6.2-pp门限相对搜狗1pp	old=8324b03:609	new=0e4eeb0:689	match=True	multi=False	snip=搜狗 **978 px / 355.6 dp（41.79 %）**。门限「相对搜狗 ≤ 1 个百分点」= 上限 **10	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§6.5-pp	old=8324b03:599	pattern=相对搜狗 ≤ 1 个百分点	new=0e4eeb0:689	hits=1	verdict=REPLACED	replaced_by=§6.2-pp门限相对搜狗1pp	ts=2026-11-18T04:31:00+0800
+	reason=登记错了节：8324b03:599 是 §5 无障碍表的「门禁结论」行，不是 pp 门限；相似度 0.983 让匹配器放行了无障碍段里措辞相近的一句，报告 §5 与 ppsum.py 的 criterion= 一起被带偏（第八轮打回项 5）	ts=2026-11-18T04:31:00+0800
+	old_text=**门禁结论**：§2.2 与 §2.3 均**可以**在补齐上表五项（无障碍时间窗放宽、横滚的可访问路径与 scroll action、退格补 `conten	ts=2026-11-18T04:31:00+0800
+	new_text=搜狗 **978 px / 355.6 dp（41.79 %）**。门限「相对搜狗 ≤ 1 个百分点」= 上限 **1001 px / 364.0 dp**（本	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-10a	old=8324b03:540	pattern=^\| \*\*AC-10a\*\*	new=0e4eeb0:560	hits=1	verdict=REPLACED	replaced_by=同行改写	ts=2026-11-18T04:31:00+0800
+	reason=判据由单值「≥4 条」改为按面板逻辑宽度分档（VOCA-464），行文字变了，行号也漂	ts=2026-11-18T04:31:00+0800
+	old_text=| **AC-10a**（硬门限） | 实际渲染的前 4 条（真实词库，2–3 字常用词为主） | ≥4 条完整可见 = PASS |	ts=2026-11-18T04:31:00+0800
+	new_text=| **AC-10a**（硬门限；**2026-11-17 起按逻辑宽度分档**） | 实际渲染的前 4 条（真实词库，2–3 字常用词为主） | 档1：≥4 	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=AC-10b	old=8324b03:541	pattern=^\| \*\*AC-10b\*\*	new=0e4eeb0:561	hits=1	verdict=REPLACED	replaced_by=同行改写	ts=2026-11-18T04:31:00+0800
+	reason=旧写的两条出路（缩 chip 宽 / 放宽词长）经现算不可达，4 字以上可见性改由 AC-12 承接	ts=2026-11-18T04:31:00+0800
+	old_text=| **AC-10b**（只记录，不判） | 混合词长（含 4 字成语 / 长词）下的实际完整条数与逐项 pitch | 达不到 4 条 = §2.1 与实现的	ts=2026-11-18T04:31:00+0800
+	new_text=| **AC-10b**（只记录，不判） | 混合词长（含 4 字成语 / 长词）下的实际完整条数与逐项 pitch | 达不到 4 条 = 已裁：长词不进硬门	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§5-缺口行2	old=8324b03:590	pattern=^\| 候选词可点高度	new=0e4eeb0:670	hits=1	verdict=REPLACED	replaced_by=同行改写	ts=2026-11-18T04:31:00+0800
+	reason=门限从 48dp 订正为 46dp（VOCA-464），行文字变了	ts=2026-11-18T04:31:00+0800
+	old_text=| 候选词可点高度 | **不合规，需补** | `candidate_scroll` 的 `minHeight = 38 dp`（`candidate_vie	ts=2026-11-18T04:31:00+0800
+	new_text=| 候选词可点高度 | **不合规，需补；门限订正为 46 dp（VOCA-464）** | `candidate_scroll` 的 `minHeight =	ts=2026-11-18T04:31:00+0800
+ANCHOR	label=§5-既有债行	old=8324b03:592	pattern=^\| 一屏 ≥4 候选	new=0e4eeb0:672	hits=1	verdict=REPLACED	replaced_by=同行改写	ts=2026-11-18T04:31:00+0800
+	reason=「恒高三角」一行已裁：有一条边是假的，剩下的按几何分档	ts=2026-11-18T04:31:00+0800
+	old_text=| 一屏 ≥4 候选（AC-10）× 命中高度冲突 | **有冲突时以可读性优先，交 UI** | AC-10a FAIL 的两条出路（缩 chip 宽度 / 	ts=2026-11-18T04:31:00+0800
+	new_text=| 一屏 ≥4 候选（AC-10）× 命中高度 × 恒高「三角」 | **已裁（VOCA-464）：三角有一条边是假的，剩下的按几何分档** | 旧版本行写「这	ts=2026-11-18T04:31:00+0800
+NEWONLY	label=AC-12	new=0e4eeb0:640	hits=1	snip=### AC-12 候选溢出可见性（2026-11-17 新增，本轮不测 —— 不进 W5 门槛）	ts=2026-11-18T04:31:00+0800
+NEWONLY	label=AC-10a-分档行	new=0e4eeb0:28	hits=22	snip=> ⑥ **AC-10a 由单值硬门限改为按面板逻辑宽度分档**：`≥371 dp` 仍要求完整 4 条（原门限不降），`<371 dp` 	ts=2026-11-18T04:31:00+0800
+NEWONLY	label=§2.1-让步顺序	new=0e4eeb0:23	hits=4	snip=> **修订记录（2026-11-17，VOCA-464 · D3「采纳面让步顺序」裁决落纸）**	ts=2026-11-18T04:31:00+0800
+NEWONLY	label=§9.14-未取证几何	new=0e4eeb0:1025	hits=1	snip=14. **AC-10 的裁决建立在「未取证的几何」上（2026-11-17，VOCA-464）**：本轮全部 8 帧都是 1080 px 	ts=2026-11-18T04:31:00+0800
+SUMMARY	共 21 条 · 内容原样命中 21 · DRIFT 0 · MISS 0	retired_replaced=5	ts=2026-11-18T04:31:00+0800

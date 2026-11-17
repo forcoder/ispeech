@@ -1,13 +1,18 @@
 # VOCA-37 · Stage 3 回归工具与证据
 
-报告：`docs/qa/voca-37-stage3-regression.md`。第七轮起**只有一个被测面**：PR #18 head `78343a4`（用 `gh pr view 18 --json headRefOid` 现算，不抄写），规格锚 PR #17 head `0e4eeb0`。第六轮及以前的两个口径都降为**历史对照**：旧 head 的产物（硬件空格路径还是阴性的那一版）、以及 B 包 `cffc0cd`（见文末）。正文数字一律引 `evidence/ev_r7_*`。
+报告：`docs/qa/voca-37-stage3-regression.md`。第七轮起**只有一个被测面**：PR #18 head `78343a4`（用 `gh pr view 18 --json headRefOid` 现算，不抄写），规格锚 PR #17 head `0e4eeb0`。第六轮及以前的两个口径都降为**历史对照**：旧 head 的产物（硬件空格路径还是阴性的那一版）、以及 B 包 `cffc0cd`（见文末）。正文数字的采信口径自第八轮起是「**§4／§5／§7 的设备读数引 `evidence/ev_r8_*`，其余腿仍引 `ev_r7_*`**」——同一个数两份逐位一致这件事本身就是复现证据，逐文件是采信还是作废见报告 §11.1。
 
 ## 常量在哪
 
 `drive.py` 顶部集中了本机常量：`ADB`（platform-tools 路径，可用 `QA_ADB` 覆盖）、`S`（serial，读 `QA_SERIAL`）、`IME`、`DEN=2.75`（440dpi 的 px/dp）。换机器只改这里；其余脚本 `import drive as D` 复用。
 **环境变量（第七轮加）**：`QA_SERIAL`（**默认 `emulator-5554`，所有脚本统一从这里取，不许各自写死**——同机多开的 5556 会串台）、`QA_ADB`、`QA_HEAD`（默认 `78343a4`）、`QA_SPEC`（默认 `0e4eeb0`）、`QA_APK`（被测包）、`QA_BASE_APK`（档① 修复前对照包）。脚本的 `IDENT` 行会把这些值打出来，装错包直接 `rc=19`。
 
-`drive.log()` 从第七轮起给**每一行**补 `ts=`（调用方显式传了就不覆盖）。之前一份证据只有文件头一个时刻，读者只能把读数追到入库提交，这在第六轮裁决里被定为不合格证据。
+`drive.log()` 从第七轮（入库 `aaa07f6`）起给**每一行**补 `ts=`（调用方显式传了就不覆盖）。之前一份证据只有文件头一个时刻，读者只能把读数追到入库提交，这在第六轮裁决里被定为不合格证据。
+**但「工具备了能力」不等于「每份证据都有时刻」**（第八轮打回项 3），**而第八轮对自己这句话的归因也订正过一次**：`ev_r7_*` 里数据行不带 `ts=` 的成因分两类，不能一概说成「工具没能力」——
+- **抓在改动之前**（链路本来就走 `drive.log`，本轮脚本 0 改动）：`ev_r7_ac10_1080.txt`（文件头 `16:40:19Z`＝+08:00 的 00:40:19）、`ev_r7_ac10_target_geom.txt`（00:42:38）、`ev_r7_d2_base.txt`（`# ts=…01:59:27+0800`）都早于同一链路改过 `drive.log` 后重跑的 `ev_r7_fs115.txt`（首条 `ts=…02:34:21+0800`）；`ppwin.py` 自己的 `log()` 是第七轮 `6882830` 才补的时刻，而 `ev_r7_pp_window.txt` 抓在 00:35:03 → 29 条里 17 条缺。
+- **整条链路不经 `drive.log`**：旧 `g1_g3.sh` 是 shell 直出（`aapt2` dump + `grep`，7 条数据行全无 `ts=`、`grep -c IDENT` = 0）；`ppsum.py`、`spec_ux_anchors.py` 原来是 `print` 直出。
+
+所以第八轮**动工具的只有四处**：`ppsum.py` 与 `spec_ux_anchors.py` 加逐行 `ts=`（后者的 `P()`），旧 shell 换成 Python 工装 `g1g3.py`（逐行 `ts=` + `IDENT` + `SRC_TREE` + `RES_HIT … DEAD／REFERENCED`），再加成对复核用的 `rerun_diff.py`（把「复跑逐位一致」落到字段级，见 `ev_r8_rerun_diff.txt`）；`fs115.py`／`ac10_offline.py`／`ppwin.py`／`drive.py` 本轮 `git diff 1a2727a HEAD` **0 行**，只是按原口径**重跑成 `ev_r8_*`**。逐文件覆盖情况写进报告 §11.1 的表，**不再写整轮 blanket 断言**。核验口径：`grep -vE '^#|^[[:space:]]*$' F | grep -vc 'ts=[0-9]\{4\}-'`（`#` 头/空行豁免；adb 的 `INSTALL out=Performing Streamed Install` 这类透传行要在文件里点名）。
 
 
 ## 脚本
@@ -35,8 +40,11 @@
 | `qa_rows.py` | 单图工具：`python3 qa_rows.py <png> <y0> <y1> <dpi>` 出行带与间距 |
 | `qa_kb.py` | 早期手工探针集合（frame/host/text/bands/shift/ink） |
 | `d1regress.py` | **接管空格键（`35cdbfa`）的 6 档回归面**：档① 开关关=与修复前逐字节同（`--diff` 比两份 stdout 的宿主文本）、档② 英文态/T9 数字态、档③ 需要自己吃空格的宿主、档④ 长按语音（截图带差分，无日志可用）、档⑤ `repeatCount`、档⑥ `spaceProbe` 跨进程读成本。装错包 `rc=19`；基线包无开关键时 `SWITCH route=absent_means_default_off`，**不走设置页试点**（会误伤别的开关） |
-| `spec_ux_anchors.py` | 规格行号重锚：报告引用的每条锚点在 `git show OLD` / `git show NEW` 两侧逐行比内容，出 `match=True` / `DRIFT` / `MISS`（MISS 由人工给 `verdict=REPLACED` 落点）→ `evidence/ev_r7_spec_ux_anchors.txt` |
-| `run_r7_all.sh` / `run_r7b.sh` / `run_r7c.sh` / `run_r7d.sh` / `run_r7e.sh` / `run_r7f.sh` | 第七轮的分串编排：每档单独 stdout + `# rc=`，一档跑挂不拦后面。`r7c` 是「`drive.log` 打上逐行 `ts=`」之后的重跑串，正文 AC-4~7 / AC-1 / D2 的数字以它为准；`r7d`/`r7e` 补 `paths.py`、`ac2`（两条路径）与目标几何 pp ＋ 空格 6 档；**`r7f` 是 AC-9 的唯一采信串**（`r7c` 里那一档吃 `key_map_fail rc=16`，见上面「套件之间会污染键盘态」那条）|
+| `spec_ux_anchors.py` | 规格行号重锚：报告引用的每条锚点在 `git show OLD` / `git show NEW` 两侧逐行比内容，出 `match=True` / `DRIFT` / `MISS`；**第八轮打回项 5 补了两件事**——① 被 VOCA-464 **改写**过的行（旧行文字在新 head 已不存在）不再走相似度匹配，改成 `RETIRED` 表里按锚点句正则现算新行号，输出 `verdict=REPLACED` ＋ 命中模式 ＋ 新旧原文 ＋ 作废理由；② 每行输出补 `ts=`（`P()` 统一打）。为什么必须有 ①：旧版把 pp 门限登记成 `("§6.5-pp", 599)`，而 `8324b03:599` 是 §5 无障碍表的「门禁结论」行，相似度 0.983 让匹配器**放行**了无障碍段里措辞相近的一句 → 报告 §5 与 `ppsum.py` 的 `criterion=` 一起被带偏（第七轮正文那个错行号锚就是这么生成的，订正过程与真锚见报告 §5.6）。跑法 `python3 spec_ux_anchors.py 8324b03 0e4eeb0 docs/keyboard-ux-spec.md` → `evidence/ev_r8_spec_ux_anchors.txt`（`SUMMARY 共 21 条 · 原样命中 21 · DRIFT 0 · MISS 0 retired_replaced=5`）|
+| `g1g3.py` | **G1/G3 的资源面自查**（第八轮新增，替代旧 `g1_g3.sh`）：`aapt2 dump resources` 全量 31870 行 → 按 `page|pager|pagination|candidate_pager` 圈定面板自有资源 → 逐条回源码 grep 引用，出 `SCOPE` / `RES_HIT … status=DEAD|REFERENCED` / `G3_LAYOUT` / `VERDICT`。绑身份：`IDENT stage=0/1 … match=True`（比设备上的 `base.apk` 与本地构建产物）＋ `SRC_TREE head=78343a4 match=True`（代码 grep 跑在被测检出上，不跑在报告所在分支）；装错包 `rc=19`、apk 不存在 `rc=22`、dump 失败 `rc=21`。旧那份 `ev_r7_g1_g3.sh` 只 grep 源码、既不绑包也不查资源表引用，且整份无 `IDENT`、无 `ts=` → 降级为对照 |
+| `pppanel.py` | **「搜狗键区固定 px」这条前提的可证伪检验**（第八轮打回项 1）：吃两份 `ppwin.py` stdout（同 dpi、不同面板），出 `PANEL_READ` ×2 → `GEOMETRY_STEP … sogou_change_pct=` → `HYPOTHESIS hyp=H1_spec_fixed_px / H2_proportional`（各自 predicted / err_pct / delta_pp）→ `SPEC9_VERDICT … verdict=`（固定 px 的误差 > 2% 门限即 `FALSE`）。离线纯算，不碰设备；某一侧在该 dpi 没读数 `GATE rc=40`、整份无帧 `rc=41` |
+| `rerun_diff.py` | **成对复核同一链路的两份证据**（第八轮新增，打回项 3 要的「复跑逐位一致」落到字段级）：读两份 `ev_*.txt`，剥掉 `ts=` 后以 `(tag, code/dens/fs/idx/panel/step)` 为键对齐，把同名字段的差异分成三档 —— `JUDGE_DIFF`（判定量，出现即说明复跑翻了结论，`rc=42`）／`NOISE_DIFF`（`chip_box.n`、`SCROLL.err`、`shot` 这类抖动与命名）／`SNAPSHOT_DIFF`（`PANEL.requested`、`orig_font_scale` 这类入口快照，跑序不同就不同，不进判据但要单独点名，不许并到噪声里吞掉）；四对的当场输出在 `evidence/ev_r8_rerun_diff.txt`（`judge_diff_fields=NONE` ×4）|
+| `run_r7_all.sh` / `run_r7b.sh` / `run_r7c.sh` / `run_r7d.sh` / `run_r7e.sh` / `run_r7f.sh` / **`run_r8_all.sh`** | 第七轮的分串编排：每档单独 stdout + `# rc=`，一档跑挂不拦后面。`r7c` 是「`drive.log` 打上逐行 `ts=`」之后的重跑串，正文 AC-4~7 / AC-1 / D2 的数字以它为准；`r7d`/`r7e` 补 `paths.py`、`ac2`（两条路径）与目标几何 pp ＋ 空格 6 档；**`r7f` 是 AC-9 的唯一采信串**（`r7c` 里那一档吃 `key_map_fail rc=16`，见上面「套件之间会污染键盘态」那条）。**`run_r8_all.sh` 是第八轮的小轮串**：不重测产品面，只把第七轮被判「数据行无 `ts=` / 整份无 `IDENT`」的链路重跑成 `ev_r8_*`（g1_g3 → pp_window 1080×2340 三档两侧 → ac10_1080 → ac10_target_geom → fs115_matrix 8 组），截图换 label（`A8`/`T8`/`R8FS`）不覆盖第七轮帧；`ppsum.py`／`pppanel.py`／`spec_ux_anchors.py` 三条是离线现算，写在报告 §10|
 
 ## fs115 / ac9 / d2check 的退出码（拒绝出数时看这个，别看有没有数字）
 
@@ -50,7 +58,6 @@
 | `fs115.py` | `ime_not_ours` | 17 | 当前 IME 不是本包（前后各读一次，任一端不符即拒绝） |
 | `fs115.py` | `key_map_fail` / `host_not_ready` | 16 / 18 | 键位反推失败（VOCA-184 后曾把两行粘成一行）/ 宿主起不来 |
 | `ac10_offline.py` | `frame_not_in_pr` / `no_chip_box` | 20 / 11 | 帧文件不在 `shots/`（离线没有第二次机会）/ 连 chip 盒都没找到 |
-| `ppwin.py` | 键盘占比 pp 的**同窗对照**：一个连续窗口内先把搜狗各档量完、再量 iSpeech（两侧都在敲完 `shijian` 的组合态读 `type=ime` inset）。`--panel 1260x2720` 覆盖面板几何（**打回项 2 的目标真机形状**）、`--tiers 520:1.0,520:1.15` 选档、`--round` 防跨轮覆盖帧名、`--apk` 触发身份校验；退出时把 `font_scale` / `wm size` / `wm density` 还原成**入口读到的原值**，`TAIL` 行给 `font_scale_now` / `panel_now` 供复核 |
 | `ac9.py` | `del_key_miss` / `fill_short` | 20 / 21 | 200ms 探针删不掉 1 字（点错键）/ 填字没填满目标长度 |
 | `dsdump.py` | `run_as_unavailable` | 21 | `run-as` 或路径真的不对（与「文件不存在=默认值」严格区分） |
 | `voidcheck.py` | — | 22 | 有帧未低于旧口径闸门 → 作废结论需复核（0 = 作废成立） |
@@ -177,7 +184,7 @@ import drive as D; print(D.ime_frame()); print(D.key_map())"
    `AC10b` 行永远跟着出（`recorded=True reason=…`，reason ∈ `meets_threshold` / `viewport_clip` / `long_word_budget`），
    它是「为什么不足 4 条」的归因，**不是免判通道**。
 
-4. **档位绑定几何，不许拿模拟器默认面板去套档1 的硬门限。** 逻辑宽 = 面板宽 ÷ (dpi/160)，档界 `band.TIER_SPLIT_DP = 371.0`（规格 `0e4eeb0:560`，只有一份）：1260×2720@520 = **387.7dp → 档1**；1080×2340@440 = 392.7dp → 档1；1080×2340@520 = **332.3dp → 档2**——现实机型里没有这种面板/dpi 组合，它是模拟器强行改 dpi 造出来的档位。每行 `verdict` 必须带 `tier=`；**档2 在人类签字（R21）之前只能写 `AWAITING_SIGNOFF`，不得写 PASS**，`band.R21_SIGNED = False` 时脚本不会自己变绿。
+4. **档位绑定几何，不许拿模拟器默认面板去套档1 的硬门限。** 逻辑宽 = 面板宽 ÷ (dpi/160)，档界 `band.TIER_SPLIT_DP = 371.0`（规格 `0e4eeb0:560`，只有一份）：1260×2720@520 = **387.7dp → 档1**；1080×2340@440 = 392.7dp → 档1；1080×2340@520 = **332.3dp → 档2**——现实机型里没有这种面板/dpi 组合，它是模拟器强行改 dpi 造出来的档位。每行 `verdict` 必须带 `tier=`；**档2 在人类签字（R21）之前只能记「未签字」，不得写 PASS** —— `band.py:262-264` 的实现是：档2 且按 `tier_need` 判到 PASS 时改打 `tier_verdict=NOT_SIGNED(AC12_unmeasured+R21_open)`（同行 `r21_signed=False`），报告引用时**必须抄这个原文标签**（第八轮订正：以前写的 `AWAITING_SIGNOFF` 是报告自造的字样，脚本从未输出过）；`band.R21_SIGNED = False` 时脚本不会自己变绿。
 
 ## 第七轮按 SRE 五点修的工装（不修这五点，目标几何上的 pp / AC-10 根本拿不到数）
 
@@ -195,7 +202,7 @@ B 包 `cffc0cd` = 旧 head + `d3b6f84`(VOCA-170) + `d283706`(VOCA-184) + `4d6363
 
 ## evidence/ 与 shots/
 
-`ev_*.txt` 为当场 stdout 原文（第七轮的每行都带 `ts=`，文件头还带 `# 被测=` / `# cmd:` / `# rc=`），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模：`tools/qa/voca-37/` 下 20 个 `.py` + 9 个 `.sh`，`evidence/` 102 份（97 `.txt` + 4 `.xml` + 1 `.log`，其中 24 份 `ev_r7_*.txt`），`shots/` 86 张**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
+`ev_*.txt` 为当场 stdout 原文（文件头带 `# 被测=` / `# cmd:` / `# rc=`；**逐行 `ts=` 的覆盖要按文件说**：设备侧 24 份 `ev_r7_*` 里 6 份成片缺（`ac10_1080`／`ac10_target_geom`／`d2_base`／`g1_g3`／`pp_window`／`ac9`）、7 份只缺 adb `INSTALL` 透传那 1 行，第八轮把其中 4 条链路重跑成 `ev_r8_*`（`d2_base` 是档② 基线侧那次中止、`ac9` 缺的是 `HOST`／`PRECHECK`／`chain_rc=` 三条工装状态行，两条都不在本轮重测面内，均已逐份点名），逐文件口径在报告 §11.1 的覆盖表，这里不另立断言），`gradle_test.log` 为单测运行日志，`shots/*.png` 为报告点名的截图（候选带裁图、面板态）。**当前规模（第八轮 `ls | wc -l` 现算）：`tools/qa/voca-37/` 下 23 个 `.py` + 10 个 `.sh`，`evidence/` 110 份（105 `.txt` + 4 `.xml` + 1 `.log`，其中 24 份 `ev_r7_*.txt` ＋ 8 份 `ev_r8_*.txt`），`shots/` 120 张（第八轮新增 34 张：`r8_*` 6 / `r5_A8_*` 8 / `r5_T8_*` 4 / `r5_R8FS_*` 16）**（以 `ls | wc -l` 现算为准，报告头部引用时同样现算，不抄写）。**每个文件是采信还是作废，逐条列在报告 §11.1 的「evidence/ 全量清单」**，不要在这里另立口径；作废值只留作环境争用的证据，不得引用其数字。
 
 ```bash
 python3 tools/qa/voca-37/ac2.py <apk> 440 keyevent   # 硬件/注入键路径 + 开关开/关反例

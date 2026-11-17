@@ -45,3 +45,10 @@ dist/app-debug.apk
 
 # 短语数据导出
 通用短语.csv
+
+# QA 工装从设备上 pull 回来的对照 apk（145MB，只作 ident 比对，绝不入库 —— 第六轮 139MiB 那笔的根因）
+tools/qa/**/_ident.apk
+_ident.apk
+
+# Python 字节码缓存（QA 工装跑出来的，不入库）
+__pycache__/

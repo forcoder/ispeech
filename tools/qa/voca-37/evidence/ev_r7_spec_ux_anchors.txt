@@ -31,7 +31,7 @@ ANCHOR	label=§5-缺口行3	old=8324b03:593	new=0e4eeb0:673	match=True	multi=Fal
 ANCHOR	label=§5-合规行	old=8324b03:594	new=0e4eeb0:674	match=True	multi=False	snip=| 候选词朗读 | **合规** | 每个候选 `contentDescription = candidate.disp
 ANCHOR	label=§5-缺口行4	old=8324b03:595	new=0e4eeb0:675	match=True	multi=False	snip=| 键盘按键朗读 | **部分合规，需补** | 文字键靠 `TextView.text` 朗读（`SoftKeyboa
 ANCHOR	label=§5-缺口行5	old=8324b03:597	new=0e4eeb0:677	match=True	multi=False	snip=| 对比度 | **不合规（首选高亮）** | `fa57a07` 上高亮色不再是硬编码 `#FF6A00`，而是 `r
-ANCHOR	label=§6.5-pp	old=8324b03:599	new=0e4eeb0:679	match=False	verdict=DRIFT	sim=0.983
+ANCHOR	label=§6.5-pp	old=8324b03:599	new=0e4eeb0:<第八轮订正=错锚·该行属§5门禁结论；pp门限真身 0e4eeb0:48 与 :689（现行 ef14209:49/:711）见 ev_r8_spec_ux_anchors.txt>	match=False	verdict=DRIFT	sim=0.983
 	old_text=**门禁结论**：§2.2 与 §2.3 均**可以**在补齐上表五项（无障碍时间窗放宽、横滚的可访问路径与 scroll action、退格补 `conten
 	new_text=**门禁结论**：§2.2 与 §2.3 均**可以**在补齐上表五项（无障碍时间窗放宽、横滚的可访问路径与 scroll action、退格补 `conten
 NEWONLY	label=AC-12	new=0e4eeb0:640	hits=1	snip=### AC-12 候选溢出可见性（2026-11-17 新增，本轮不测 —— 不进 W5 门槛）
@@ -43,7 +43,7 @@ SUMMARY	共 24 条 · 内容原样命中 19 · DRIFT 1 · MISS 4
 ANCHOR	label=AC-10a	old=8324b03:540	new=0e4eeb0:560	verdict=REPLACED	match=False	note=判据由单值≥4 改为按逻辑宽度分档：档1 ≥4；档2 ≥3 且 AC-12 溢出可见；签字前档2 不得当 PASS
 ANCHOR	label=AC-10b	old=8324b03:541	new=0e4eeb0:561	verdict=REPLACED	match=False	note=旧写的两条出路（缩 chip / 放宽词长）经现算不可达，4 字以上可见性改由 AC-12 承接
 ANCHOR	label=§5-既有债行	old=8324b03:592	new=0e4eeb0:672	verdict=REPLACED	match=False	note=「恒高三角」一行已裁：有一条边是假的，剩下按几何分档
-ANCHOR	label=§6.5-pp	old=8324b03:599	new=0e4eeb0:679	verdict=DRIFT	sim=0.983	note=门禁结论一行仅改措辞，行号 599→679
+ANCHOR	label=§6.5-pp	old=8324b03:599	new=0e4eeb0:<第八轮订正=错锚·该行属§5门禁结论；pp门限真身 0e4eeb0:48 与 :689（现行 ef14209:49/:711）见 ev_r8_spec_ux_anchors.txt>	verdict=DRIFT	sim=0.983	note=门禁结论一行仅改措辞，行号 599→679
 # ── 新 head 才有、报告本轮起必须引用的三条
 ANCHOR	label=§2.1-让步顺序	new=0e4eeb0:236	note=空间不足时的让步顺序（VOCA-464 裁）
 ANCHOR	label=AC-12	new=0e4eeb0:640	note=候选溢出可见性：本轮不测、不进 W5 门槛；档2 的耦合条件在 :658
