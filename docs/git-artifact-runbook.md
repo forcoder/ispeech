@@ -77,12 +77,12 @@ done
 | --- | --- | --- | --- |
 | `agent/agent/voca-231` | 是 | 8 | 7（`fix(voice)`/`fix(packaging)`/`docs(voice)`） |
 | `agent/agent/voca-207` | 是 | 5 | 4（`fix(sync)`/`docs(adr)`/`docs(quick)`/`chore(verify)`） |
-| `agent/agent/voca-37` | 是 | 7 | 6（含 `docs(pm)` 风险册记录） |
+| `agent/agent/voca-37` | 是 | 7 | 5（`docs(pm)` 含风险册记录；`7d4b51e` 摘包提交**不要**带） |
 | `agent/ui/voca-69` | 是 | 5 | 4（`fix(ui)`/`docs(ui)` 质检整改） |
-| `agent/ux/voca-45` | 是 | 5 | 4（`docs(ux)` 质检整改；`898dbea` 的摘包提交**不要**带） |
+| `agent/ux/voca-45` | 是 | 5 | 3（`docs(ux)` 质检整改；`898dbea` 摘包提交**不要**带） |
 | `agent/ba/voca-122` | 是 | 3 | 2（`docs(requirements)`） |
 | `agent/agent/voca-121` / `-33` / `-56` / `agent/mika/voca-30` | 是 | 1–2 | 0（只有平台基线提交，无实际工作） |
-| 其余 34 个被污染的本地分支 | 否 | — | 远端无对应分支，按 P0-A 合并后重建即可 |
+| 其余 39 个被污染的本地分支 | 否 | — | 远端无对应分支，按 P0-A 合并后重建即可 |
 
 单分支重建模板（**fast-forward，不需要 force push**，因为远端 tip 是新历史的祖先）：
 
@@ -152,4 +152,4 @@ du -sh "$(git rev-parse --git-common-dir)"
   不影响本方案结论；若走 P2 的 LFS，需要人类确认组织 LFS 存储/带宽配额与计费口径后再动。
 - `main` 已 tracked 的 131.5 MiB 历史 APK 是否长期留在 git 里（P2 议题）：影响 clone 速度，
   但不阻塞任何推送；本单不扩范围处理。
-- 34 个「远端无对应分支」的污染分支是否还有人在用，需要各 issue owner 认领后再删（P0-C 前置）。
+- 39 个「远端无对应分支」的污染分支是否还有人在用，需要各 issue owner 认领后再删（P0-C 前置）。
