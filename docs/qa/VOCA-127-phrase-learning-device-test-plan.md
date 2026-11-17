@@ -1,9 +1,9 @@
 # VOCA-127 真机验证用例集：条目 3 词组自学习（VOCA-124）
 
 > 关联：VOCA-127（本 issue）、VOCA-124（实现）、VOCA-65 条目 3
-> 被测代码：`origin/feat/voca-124-phrase-learning` @ `7ed1230`（PR #4 head，`OPEN` / `MERGEABLE` / `CLEAN`，base `fa57a07`）
+> 被测代码：PR #4 head **`8ab0a88`**（`OPEN` / `MERGEABLE` / `CLEAN`，base `fa57a07`；VOCA-124 已 `done`，**但尚未合入 `main`**）。`8ab0a88` 相对 `7ed1230` 只动两个文档，`app/`、`tools/` 两树字节相同（PM 与质检专员 11-17 双向复核）——判定 SHA 一律用 `8ab0a88`，`48f91ea` / `8015e80` / `7ed1230` 全部作废。
 > 验收依据：`docs/requirements/VOCA-65-acceptance.md` **v1.1.2** @ `b8e8d40`（分支 `agent/ba/voca-122`，AC-3.7 / AC-3.10 / AC-3.12 已按 VOCA-185 候选条形态回写；**尚未落 `main`**）
-> 手册依据：`docs/voice-phrase-learning-verify.md` @ `7ed1230`（§0 logcat 白名单含 `UserDictStore:I`，即质检打回项 R-1 的修复）
+> 手册依据：`docs/voice-phrase-learning-verify.md` @ **`8ab0a88`**（§0 新增「日志发射点清单」6 行、§1 ② 加 ≥500 ms 宽限窗等待、③ 降为弱判据；**旧版 `7ed1230` 的 §1 两条期望在代码里没有发射点，照它跑会得到假 fail**）
 > 本文件口径 = 上述三份的并集；与 v1.1 旧文本冲突时，**以 v1.1.2 为准**，旧措辞（「候选第 1 条」「页码 +1」「不再置顶」）一律不再作为门禁。
 
 ## 1. 当前状态：blocked（等上游，非等本单）
@@ -12,24 +12,26 @@
 
 | # | 等待项 |  owner | 到期 | 自证信号（成立即推进本单） |
 |---|---|---|---|---|
-| ① | VOCA-124 解冲突 + rebase 到 VOCA-185 形态并收口 | 前端工程师（VOCA-124 `in_progress`） | 2026-11-18 12:00 CST | `gh pr view 4 --json mergeable,mergeStateStatus` = `MERGEABLE` / `CLEAN`（**11-17 本单实测已成立**，head `7ed1230`，22:49Z） |
-| ② | PR #4 合入 `main` + 重新出官方包 | 项目经理 → 人类批准（项目规程第五、六条） | 2026-11-18 | `git merge-base --is-ancestor 7ed1230 origin/main` 返回 `0` |
+| ① | VOCA-124 解冲突 + rebase 到 VOCA-185 形态并收口 | 前端工程师 | ~~2026-11-18 12:00 CST~~ **11-17 已闭环** | `gh pr view 4` = `OPEN`/`MERGEABLE`/`CLEAN`，head `8ab0a88`；第四轮质检 **PASS-WITH-CAVEAT**，VOCA-124 状态 `done`（11-17 04:39Z）。C-1 已并入本文件 §4.1 |
+| ② | PR #4 合入 `main` + 重新出官方包 | 项目经理出合并清单 → **人类批准**（项目规程第五、六条） | 合并窗口 11-18 12:00 CST | `git merge-base --is-ancestor 8ab0a88 origin/main` 返回 `0`（11-17 12:40 CST 实测 **exit=1**，`origin/main` 仍 `fa57a07`、`versionName="1.5"`） |
 | ③ | 包自证 + 真机接入 | 人类（qiaozhou）提供设备 | 2026-11-19 | 装机包 `versionName` ≠ `1.5` **且** `adb shell dumpsys package com.ispeech.ime` 可见；APK 内 `strings`/`dexdump` 能捞到日志 tag `phrase_learn`；`adb devices -l` 出现目标真机 serial `23F0224224000950` 为 `device` |
 
-②与③**必须同时成立**：只有②而拿旧包装机，验的是空对象；只有③而包里没有条目 3 的代码，同样验空。①已成立，不必再等。
+②与③**必须同时成立**：只有②而拿旧包装机，验的是空对象；只有③而包里没有条目 3 的代码，同样验空。①已闭环，不再等。
 
-本单 2026-11-17 实测（Mac Studio，adb 1.0.41 / 37.0.1）：
+本单 2026-11-17 12:40 CST（wakeup 定时复核）实测（Mac Studio，adb 1.0.41 / 37.0.1）：
 
 ```text
 $ adb devices -l
 List of devices attached
-（空 —— 本机连 emulator 都没有，与督导员那台 `emulator-5554` 不是同一主机）
+emulator-5554   device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:1
+（★ 目标真机 serial 23F0224224000950 不在列表；这条 emulator 是 12:40 前后新出现的，
+   上一次本单实测是空列表 —— 它是模拟器，按本 issue 明文不能冒充真机，也不满足③）
 
 $ timeout 5 adb mdns services
 List of discovered mdns services
 （空 —— 无无线调试设备）
 
-$ system_profiler SPUSBDataType | grep -iE "android|23F02|samsung|xiaomi|huawei|oneplus"
+$ system_profiler SPUSBDataType | grep -iE "android|23F02|samsung|xiaomi|huawei|oneplus|oppo|vivo"
 （空 —— USB 上无 Android 设备）
 ```
 
@@ -89,25 +91,29 @@ adb install -r <官方包路径>
 
 - **步骤**：`klge` → 选「喂」上屏 → 1~3 s 内 `qtal` → 选「猫」上屏。重复 10 次，每次换不同字对
 - **期望**：每次 `phrase_learn commit code=… text=…`；全程**不出现** `skipped reason=interrupt`；词库 +1 条四列（TAB 分隔）`klqt`、`喂猫`、`1`、`wb`
-- **判据**：10/10 且 0 次误中断。出现任一 `reason=interrupt` 且能排除「用户确实移动了光标」→ **F1 成立，记 fail**
+- **判据**：10/10 且 0 次误中断。出现任一**光标路径**的 `reason=interrupt` 且能排除「用户确实移动了光标」→ **F1 成立，记 fail**
 - **skip reason 分类（N-3，不得混进 F1）**：`window` / `existing` / `repeat` / `clock_backwards` / `undecidable` 属**字对选错**，换对字对重跑并把 reason 记进报告；换对后仍凑不满 10 条，才计入 F1
+- **`reason=interrupt` 有两个发射点，必须分开计数**（VOCA-124 质检 C-1，`8ab0a88` 代码实测）：`:1178`（`onUpdateSelection` 判出他因光标移动，日志**不带 `count=`**）才是 F1 要看的那个；`:1126`（上屏来源非单字 / 码点长度 ≠ 1，日志**带 `count=`**）说明这一轮里混进了一次词组或联想上屏，**重跑该次拼接，不计 F1**。判别式：`grep 'reason=interrupt' | grep -vc 'count='`
 
 ### 4.2 AC-3.4 ② 拼完首字后移动宿主光标
 
-- `klge` → 「喂」→ 系统手势/方向键把光标移开 → 1~3 s 内 `qtal` → 「猫」
-- **期望**：`phrase_learn skipped reason=interrupt`；词库无 `klqt 喂猫` 新增
+- `klge` → 「喂」→ **等 ≥ 500 ms**（越过 §4.1 的 300 ms 自因宽限窗）→ 系统手势/方向键把光标移开 → 1~3 s 内 `qtal` → 「猫」
+- **期望**：`phrase_learn skipped reason=interrupt`（**不带 `count=`** 的那条，即 `:1178` 光标路径）；词库无 `klqt 喂猫` 新增
+- **归因**：若打出 `commit code=klqt` → 是移光标落在宽限窗里，**不是功能 fail**，加等到 ≥ 500 ms 重跑；只有加了等待仍学出词才计入 fail
 
 ### 4.3 AC-3.4 ③ 拼首字后切短语面板再切回
 
 - 同 4.2，中间开「快捷短语」面板再关
-- **期望**：同 4.2
+- **期望（弱判据，`8ab0a88` 更正）**：只断两条 —— ① `user_dict.txt` 没有 `klqt 喂猫` 新增；② 日志里**没有** `phrase_learn commit code=klqt`（正控：没有 commit 恰恰证明中断生效）。
+- **不要求任何 `skipped` 日志**：面板开合（`:1316`/`:1356`）只清状态、没有日志发射点，照旧版手册判「出现 `reason=interrupt`」是**必然 0 命中的假 fail**。
+- **②③ 之间清一次词库**（`pm clear com.ispeech.ime` 或 设置→用户词库→清空）：② 的最后一步「猫」会留在状态机里当新的第一跳，与 ③ 的「喂」凑成 `qtkl 猫喂` 并打出 commit（预期行为，但污染计数）。本组判定只看 `klqt 喂猫` 与 `commit code=klqt`，不受该噪声影响。
 
 ### 4.4 F1 专项探测（记录行为，不计 fail）
 
 残余风险 `SELF_WRITE_GRACE_MILLIS = 300`：上屏后 300 ms 内移动光标可能落在自因宽限窗内而**漏判**中断。
 
 - **A 组**（上屏后 <300 ms 移动光标）5 次；**B 组**（500 ms~1 s 后移动）5 次
-- **记录**：每组 5 次各自是否出现 `reason=interrupt`、是否写库
+- **记录**：每组 5 次各自是否出现 `reason=interrupt`（**只数不带 `count=` 的 `:1178`**，同 §4.1）、是否写库
 - **判定**：A 组漏判属已知行为，只记录；**B 组漏判 → 升级为缺陷**（`selectionTolerance` 或自因判定有缺陷）
 
 ### 4.5 AC-3.7 学后 index 0
@@ -177,13 +183,15 @@ adb install -r <官方包路径>
 
 ## 7. 待确认 / 已收敛
 
-1. **真机**：期望 serial `23F0224224000950`（人类在 wakeup 指令里给出）。本主机 `adb devices -l` 空、无 mdns、USB 无 Android 设备，需人类接入（USB 或无线调试）或在有设备的机器上执行本用例集。
-2. **出包**：PR #4 合入后需重出官方包；现有 v1.6 内测包基于当时的 `main`，不含条目 3，不可用于本单。
+1. **真机**：期望 serial `23F0224224000950`（人类在 wakeup 指令里给出）。本主机 11-17 12:40 实测只有 `emulator-5554`，目标 serial 不在 `adb devices -l`、无 mdns、USB 无 Android 设备；需人类接入（USB 或无线调试）或在有该 serial 的机器上执行本用例集。
+2. **出包**：PR #4 head `8ab0a88` 合入 `main` 后需重出官方包；现有 v1.6 内测包与 `origin/main`（`fa57a07`，`versionName="1.5"`）都不含条目 3，不可用于本单。`scripts/qa/voca127-device-capture.sh pre` 会在开工前当场拒绝这两类包。
 3. **N-1 回写**：验收文件 v1.1.2 的 AC-3.7 Given（L238）仍缺「无命中 `klqt` 的单字词条」这半句，`agent/ba/voca-122` 上未补。本单按 §4 通用前置第 2 条自挡（判「不适用」），不卡 11-19，归属仍是 BA。
-4. **多机型**：本用例集按单机设计，跨 ROM 兼容矩阵需另立 issue 与排期。
+4. **C-1（11-17 第四轮质检的非阻塞项）已在本文件收敛**：`reason=interrupt` 的两个发射点（`:1178` 无 `count=` / `:1126` 带 `count=`）已在 §4.1、§4.2、§4.4 与取证脚本里分计。**同一处盲区在验收文件 §3.5 AC-3.4 真机行原文里**（写的是「无 `skipped{reason=interrupt}`」，未区分两类），归 BA 下次回写，本单不改需求口径。
+5. **多机型**：本用例集按单机设计，跨 ROM 兼容矩阵需另立 issue 与排期。
 
 ## 8. 旁证（不等同真机验证）
 
-- 本单 11-17 实测：PR #4 head `7ed1230` / `OPEN` / `MERGEABLE` / `CLEAN`（`gh pr view 4` 原文）；`git merge-base --is-ancestor` 对 `48f91ea` / `d317984` / `8015e80` 三者在 `origin/main`（`fa57a07`）上均 `exit=1`，即**仍未合入**；`origin/main` 的 `app/build.gradle.kts` 仍 `versionName = "1.5"`。
+- 本单 11-17 12:40 CST 实测：`gh pr view 4` → `state=OPEN` / `mergeable=MERGEABLE` / `mergeStateStatus=CLEAN` / `headRefOid=8ab0a88210546285…` / `mergedAt=null`；`git merge-base --is-ancestor 8ab0a88 origin/main` → **exit=1**（`48f91ea` / `8015e80` / `7ed1230` 同样 exit=1），即**仍未合入**；`origin/main` 仍 `fa57a07`，`app/build.gradle.kts` 仍 `versionName = "1.5"`，条目 3 一行未入库。
+- C-1 的两个发射点本单自行核对（未照抄质检结论）：`git grep -n "phrase_learn\|phrase_remove" 8ab0a88 -- app/src/main` 得 `IspeechImeService.kt:1124/1126/1140/1143/1178` + `KeyboardViewModel.kt:137`，其中 `:1126` 的文本是 `phrase_learn skipped reason=${…} count=$count`、`:1178` 是 `phrase_learn skipped reason=interrupt`（无 `count=`）——`count=` 判别式成立。
 - JVM 层 `84 tests / 1 failed`（唯一红项 `AgentDispatcherTest`，main 上同样红）、`check_crosscut` 161/0/0：**出自前端交付说明与前端质检的独立复现，本单本轮未重跑**，不计入本单证据。合入后本单会在官方包上重跑一次相关 JVM/静态脚本作为包一致性佐证。
 - 本单本轮只更新用例集与取证脚本（测试资产），未改任何产品代码、未改验收口径、未动 issue 状态之外的平台配置。

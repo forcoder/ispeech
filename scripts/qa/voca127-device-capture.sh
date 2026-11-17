@@ -14,7 +14,8 @@
 #   scripts/qa/voca127-device-capture.sh all             # pre → 人工操作 → post
 #
 # 产物统一落在 ./qa-evidence/voca127-<时间戳>/，不写入仓库其它目录。
-# 口径来源：docs/voice-phrase-learning-verify.md@7ed1230 §0/§2.1、
+# 口径来源：docs/voice-phrase-learning-verify.md@8ab0a88 §0/§1/§2.1（旧版 @7ed1230 的 §1 ②③
+#           两条期望在代码里没有发射点，照它跑会得到假 fail）、
 #           VOCA-65-acceptance.md v1.1.2@b8e8d40（页码类断言已作废，只用 index/角标/高亮/项数）。
 
 set -uo pipefail
@@ -264,27 +265,38 @@ def read(p):
     except FileNotFoundError: return ''
 key = read('phrase-key-lines.txt')
 commits = re.findall(r'phrase_learn commit code=(\S+) text=(\S+)', key)
-skipped = re.findall(r'phrase_learn skipped reason=(\w+)', key)
+skipped = re.findall(r'phrase_learn skipped reason=(\w+)( count=\d+)?', key)
 removes = re.findall(r'phrase_remove code=(\S+) text=(\S+)', key)
-interrupt = skipped.count('interrupt')
+# interrupt 有两个发射点：:1178 光标路径（不带 count=，F1 要看的就是它）
+# 与 :1126 非单字上屏（带 count=，属操作里混进词组/联想，重跑即可）。混计会出假 F1。
+cursor_interrupt = sum(1 for r, c in skipped if r == 'interrupt' and c == '')
+op_interrupt     = sum(1 for r, c in skipped if r == 'interrupt' and c)
+reasons          = [r for r, _ in skipped]
+# UNDECIDABLE 走 :1124 的 WARN，文本形状不同（phrase_learn undecidable first=… count=…），
+# 上面的 skipped reason= 抓不到它，单独计一次，否则 N-3 的字对选错会漏一类。
+reasons += ['undecidable'] * len(re.findall(r'phrase_learn undecidable ', key))
 
 before = {l.strip() for l in read('user_dict-before.txt').splitlines() if l.strip()}
 after  = {l.strip() for l in read('user_dict-after.txt').splitlines() if l.strip()}
 
 print(f"phrase_learn commit : {len(commits)} 条 {commits}")
-print(f"skipped reason 统计 : { {r: skipped.count(r) for r in set(skipped)} }")
+print(f"skipped reason 统计 : { {r: reasons.count(r) for r in set(reasons)} }")
+print(f"  interrupt 光标路径(:1178, 无 count=) {cursor_interrupt} 次 / 非单字上屏(:1126, 带 count=) {op_interrupt} 次")
 print(f"phrase_remove      : {len(removes)} 条")
 print(f"词库新增行          : {len(after - before)} 条")
 for l in sorted(after - before): print(f"  + {l}")
 for l in sorted(before - after): print(f"  - {l}")
 print()
 print("F1 判据（AC-3.4 ① 反向用例）：")
-if interrupt:
-    print(f"  FAIL — 出现 {interrupt} 次 skipped reason=interrupt，且 commit {len(commits)} 次；")
+if cursor_interrupt:
+    print(f"  FAIL — 出现 {cursor_interrupt} 次 :1178 的 skipped reason=interrupt（不带 count=），且 commit {len(commits)} 次；")
     print("         若能排除『用户确实移动了光标』，即为 F1 成立，本项记 fail。")
 else:
-    print("  未见 reason=interrupt，符合 AC-3.4 ① 期望（需与人工操作记录交叉核对）。")
-other = [r for r in set(skipped) if r != 'interrupt']
+    print("  未见 :1178 的 reason=interrupt，符合 AC-3.4 ① 期望（需与人工操作记录交叉核对）。")
+if op_interrupt:
+    print(f"  ⚠ {op_interrupt} 次 interrupt 带 count=（来自 :1126 非单字上屏）：这一条不计 F1，")
+    print("     说明该轮拼接里混进了一次词组/联想上屏，重跑那一次并把次数记进报告。")
+other = sorted({r for r in reasons if r != 'interrupt'})
 if other:
     print(f"  非 interrupt 的 skip（{other}）属字对选错（N-3）：换对字对重跑并把 reason 记进报告，")
     print("  换对后仍凑不满 10 条才计入 F1，不要混进本项 fail。")
