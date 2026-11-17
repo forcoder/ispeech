@@ -11,6 +11,15 @@
 
 err（互相关残差）> 5 的读数按 README 测量纪律 3 记 unverifiable，不进入步长结论。
 
+前提不成立时不再统一退 4：每种失效各有退出码，GATE 行同时打 `reason=` 与该前提的实测字段，
+否则「键↔方向对调」（证伪档，期望行为）和「宿主缓冲有残留」（环境未复位，跑一次就好）在第三人
+眼里长得一模一样，会把「工装没跑起来」读成「证伪成立」。
+  rc=4 reason=probe_zero      左端按 fwd 无位移 = 键↔方向对调 / 候选池 ≤1 条
+  rc=5 reason=host_buffer     宿主文本不是 'shi'（上一次 run 的残留、或键根本没进 IME）
+  rc=6 reason=bg_low          候选带底色命中率 < 50%（键盘没画在 ime inset 上）
+  rc=7 reason=frame_none      读不到 type=ime frame（键盘没弹出 / inset 已回收）
+  rc=8 reason=host_not_ready  宿主输入框起不来 / 拿不到焦点
+
 用法：python3 ac47.py <apk> [dpi] [--fwd 70] [--rev 69] [--n 8] [--settle 0.75]
 """
 import os, subprocess, sys, time
@@ -43,6 +52,15 @@ N = int(OPT.get("n", 8))
 SETTLE = float(OPT.get("settle", 0.75))
 DENS = POS[1] if len(POS) > 1 else "440"
 FR = ["_ac47_a.png", "_ac47_b.png"]
+# 每种前提失效一个退出码；rc=4 固定留给 probe_zero，与已入库的 ev_ac47_falsify.txt 保持一致
+GATE_RC = {"probe_zero": 4, "host_buffer": 5, "bg_low": 6, "frame_none": 7, "host_not_ready": 8}
+GATE_WHAT = {
+    "probe_zero": "左端按 fwd 方向无位移：键↔方向对调，或候选池 ≤1 条（IspeechImeService.kt:613 的 size<=1 直接 return false）",
+    "host_buffer": "宿主文本不等于预热串：上一次 run 的残留没清掉，或键根本没进 IME —— 按 §10-4b 复位后重跑",
+    "bg_low": "候选带底色命中率低于下限：ime inset 有值但键盘没画在那儿（别的 run 把键盘收掉了）",
+    "frame_none": "读不到 type=ime frame：键盘没弹出",
+    "host_not_ready": "宿主输入框起不来 / 拿不到焦点",
+}
 
 
 def name(kc):
@@ -73,23 +91,29 @@ def diff_bbox(a, b):
 
 
 def scrollable():
-    """把 IME 置回干净可滚态：清宿主、打 shi（候选 >1 条，否则 :613 的 size<=1 直接 return false）。"""
+    """扫清出数前提，返回 (ok, reason, fields)。reason 必须打进 GATE 行——两种完全不同的前提
+    失效退同一个码，第三人就没法把「证伪成立」和「工装根本没跑起来」分开。"""
     st = F.host_ready()
     D.log("HOST", **{k: v for k, v in st.items()})
     if not st.get("ok"):
-        return False
+        return False, "host_not_ready", {}
     D.clear(22)
     time.sleep(0.5)
     D.type_str("shi", gap=0.09)
     time.sleep(1.3)
     top, bot, h = D.ime_frame()
     bg = band_bg(top)
-    D.log("PREP", host=repr(D.focused_text()), frame=h, band_top=top, bg_match_pct=bg, ime=F.cur_ime())
+    host = D.focused_text()
+    D.log("PREP", host=repr(host), frame=h, band_top=top, bg_match_pct=bg, ime=F.cur_ime())
     # 底色闸门：ime inset 报 988 不代表键盘画在那儿。别的 run 把键盘收掉后 inset 会残留，
     # 此时截屏该区域是宿主自己的像素，滚动键全部读 0。
-    if D.focused_text().strip() != "shi" or top is None or bg < BG_MIN_PCT:
-        return False
-    # 可滚性探针：停在左端按一次 fwd 方向的键必须动一档。读 0 = 候选池 ≤1 条（CandidateView.kt:613
+    if top is None:
+        return False, "frame_none", dict(host=repr(host))
+    if host.strip() != "shi":
+        return False, "host_buffer", dict(host=repr(host), expect="shi", frame=h, bg_match_pct=bg)
+    if bg < BG_MIN_PCT:
+        return False, "bg_low", dict(host=repr(host), bg_match_pct=bg, bg_min_pct=BG_MIN_PCT, frame=h)
+    # 可滚性探针：停在左端按一次 fwd 方向的键必须动一档。读 0 = 候选池 ≤1 条（IspeechImeService.kt:613
     # 的 size<=1 直接 return false）或缓冲根本没进 IME —— 这两种情况下整场 sweep 会恒 0，
     # 看起来像「到端钳制」，其实是前提不成立。
     a = shot(0)
@@ -100,7 +124,10 @@ def scrollable():
           note="左端起步按 fwd 必须动一档；0 且可判 = 前提不成立，不出数")
     D.shell("input keyevent %d" % REV)      # 回左端，维持 sweep 的起点前提
     time.sleep(SETTLE)
-    return not (s is not None and e is not None and e <= ERR_MAX and abs(s) < 1)
+    if s is not None and e is not None and e <= ERR_MAX and abs(s) < 1:
+        return False, "probe_zero", dict(host=repr(host), probe_shift=s, probe_err=e,
+                                         bg_match_pct=bg, frame=h)
+    return True, None, dict(probe_shift=s, probe_err=e, bg_match_pct=bg, host=repr(host))
 
 
 def band_bg(top):
@@ -165,9 +192,12 @@ if __name__ == "__main__":
     D.log("KEYMAP", fwd=name(FWD), rev=name(REV), step_dp=72, step_px_expect=round(72 * int(DENS) / 160),
           source="IspeechImeService.kt:612-614 + CandidateView.kt:90-92,199",
           sign_conv="drive.shift(): 正=候选内容左移=视口向右=看后面的候选")
-    if not scrollable():
-        D.log("GATE", blocked="前提不成立：缓冲不是 'shi'，或左端按 fwd 无位移（键↔方向对调 / 候选池≤1 条 / 键盘没画在 inset 上）", host=repr(D.focused_text()))
-        sys.exit(4)
+    ok, reason, fields = scrollable()
+    if not ok:
+        D.log("GATE", reason=reason, rc=GATE_RC[reason], blocked=GATE_WHAT[reason],
+              action="按 §10-4b 复位设备状态后重跑" if reason != "probe_zero" else "预期行为：参数对调就该拒绝出数",
+              **fields)
+        sys.exit(GATE_RC[reason])
     base = shot(0)
     top, bot, h = D.ime_frame()
     D.log("START", frame=h, top=top, band="[%d,%d]" % (top + BAND_OFF[0], top + BAND_OFF[1]), host=repr(D.focused_text()))

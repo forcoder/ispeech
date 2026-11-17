@@ -50,21 +50,32 @@
    否则写「不可判」，不得把 `err=5.05 / 8.19 / 24.73` 那几行的数值当位移引用。
    尤其：手势一旦把候选上屏，`CandidateView.kt:81` 的 `scrollTo(0,0)` 会整体重置候选池，
    before/after 两帧比的已是不同内容，这种「位移」天然是相关假象（上一轮 `-870` 就是这么来的，已作废）。
-4. **inset 在位 ≠ 键盘画在那儿**：别的 run 收掉键盘后 `InsetsSource type=ime` 会残留（实测 frame 仍报 988，截屏那块区域却是宿主 Settings 的文字）。`ac47.py` 因此加了两道闸门，跑之前不用肉眼核对：
-   - 底色闸门 `bg_match_pct`：候选带采样点落在本包 `#F4F5F7`（`paths.BG`）±6 的比例，<50% 直接 `GATE blocked=前提不成立…` rc=4；正常在位时是 77.5（`ev_ac47_probe.txt`）。
-   - 可滚性探针 `PRE_PROBE`：停在左端按一次 fwd 方向的键，位移必须是 +198。读 0 且 err≤5 就拒绝出数——这条同时是**反向证伪档**：`--fwd 69 --rev 70` 跑出来就是 rc=4（`ev_ac47_falsify.txt`），说明方向判据长在数据上而不是长在我写的注释上。没有这道闸门时，13:06 那次对调跑产出的是一份 40 档全 0 的「假到端钳制」sweep，看着像 PASS，其实是前提不成立。
-5. 每个采信窗口都要有安装身份双端校验：逐条目比对设备上 `base.apk` 与本地构建的 `classes*.dex` + `resources.arsc` SHA256；整包 APK 哈希不可比。
-6. 判定类用例（双击空格这类有开关的）必须把**开关实际态**打进同一份 stdout：
+4. **inset 在位 ≠ 键盘画在那儿**：别的 run 收掉键盘后 `InsetsSource type=ime` 会残留（实测 frame 仍报 988，截屏那块区域却是宿主 Settings 的文字）。`ac47.py` 因此加了三道前提闸门，跑之前不用肉眼核对，而且**每种失效一个 `reason=` + 一个退出码**——上一版三种前提全退 rc=4，第三人照 §10 复跑时把「工装没跑起来」读成「证伪成立」：
+
+   | `reason=` | rc | 触发条件 | 该怎么处理 |
+   |---|---|---|---|
+   | `probe_zero` | 4 | 左端按 fwd 方向的键位移 0 且 err≤5 = 键↔方向对调 / 候选池 ≤1 条（`IspeechImeService.kt:613`） | 对调档（`--fwd 69 --rev 70`）出这个 = **预期行为**，就是反向证伪档 |
+   | `host_buffer` | 5 | 预热后宿主文本 ≠ `shi`：上一次 run 的残留、或键漏进了宿主而不是 IME | 按下面第 6 条复位后重跑，**不是**测出不符 |
+   | `bg_low` | 6 | 候选带底色命中率 < 50%（正常在位实测 77.5~98.3） | 键盘没画在 inset 上，复位重跑 |
+   | `frame_none` | 7 | 读不到 `type=ime` frame | 键盘没弹出，复位重跑 |
+   | `host_not_ready` | 8 | 宿主输入框起不来 / 拿不到焦点 | 复位或直接换宿主，复位重跑 |
+
+   `GATE` 行同时打该前提的实测字段（`host=` / `probe_shift=` / `bg_match_pct=` / `frame=`），所以只看 stdout 就能分清是哪种。可滚性探针本身仍是**反向证伪档**：`--fwd 69 --rev 70` 跑出来就是 `reason=probe_zero`（`ev_ac47_falsify.txt`（没打 reason 的那次）、`ev_ac47_gate_probe_zero.txt`（补 reason 后的复跑）），说明方向判据长在数据上而不是长在我写的注释上。没有这道闸门时，13:06 那次对调跑产出的是一份 40 档全 0 的「假到端钳制」sweep，看着像 PASS，其实是前提不成立。
+
+5. **跑 `ac47.py` 前把宿主状态复位**（共享 AVD 上必做，否则大概率吃 `reason=host_buffer`）：
+   `adb shell input keyevent KEYCODE_MOVE_END` + 30× `adb shell input keyevent 67`，或直接 `adb shell pm clear com.ispeech.ime`（后者会连开关态一起清掉，判据依赖开关态的用例要重新置位）。
+6. 每个采信窗口都要有安装身份双端校验：逐条目比对设备上 `base.apk` 与本地构建的 `classes*.dex` + `resources.arsc` SHA256；整包 APK 哈希不可比。
+7. 判定类用例（双击空格这类有开关的）必须把**开关实际态**打进同一份 stdout：
    开关态没标注的阴性结果不能算测过。`ac2.py` 直接读
    `run-as com.ispeech.ime cat files/datastore/ispeech_settings.preferences_pb` 的原始字节
    （**路径是 `files/datastore/`，不是 `datastore/`** —— 走错目录会永远读到「文件不存在」，
    于是把真正的 `true` 判成代码默认 `false`），文件/键不存在=从未写过=代码默认 `false`（`KeyboardSettings.kt:29`）；
    键名后面跟 `12 02 08 01`=true、`12 02 08 00`=false。
-7. 注入键的间隔要用同一份 stdout 里的 `wall_between_ms` 自证：两次独立 `adb shell input keyevent`
+8. 注入键的间隔要用同一份 stdout 里的 `wall_between_ms` 自证：两次独立 `adb shell input keyevent`
    之间隔着 adb 往返，慢的时候超出 300ms 判定窗口；对照组用单进程多键码 `input keyevent 62 62`（几乎 0 间隔）。
-8. 装包前先 `pm clear com.ispeech.ime`：设备里那份 DataStore 可能是别人更高版本构建写的，
+9. 装包前先 `pm clear com.ispeech.ime`：设备里那份 DataStore 可能是别人更高版本构建写的，
    它会让「开关默认 false」这类判据的前提不成立，也会让报告 §3.1 D2 的崩溃必现。
-9. 手势类用例必须同时打 `ime_gone`（这次手势后 `ime_frame()` 是否为 `None`）和宿主文本：
+10. 手势类用例必须同时打 `ime_gone`（这次手势后 `ime_frame()` 是否为 `None`）和宿主文本：
    起点落在候选带外的滑动会把键盘收掉，宿主焦点也没了（`after='<NONE>'`），
    这种帧**不能读成「上屏」**——上一轮「带外 215px 竖滑同样上屏」就是这么误判的，已撤回。
    `vswipe.py` 的 `committed` 判据要求 `ime_gone=False` 且宿主文本确实变了。
