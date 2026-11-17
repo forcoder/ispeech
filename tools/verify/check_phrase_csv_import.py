@@ -668,12 +668,22 @@ def quick_trigger_limits() -> tuple[int, int]:
 #
 #  按 token 一刀切有两个方向的错：C1-6b 允许的「按长度把 PREFIX/CONTAINS 收严为 EXACT」
 #  会被误判成违规（并集树实测 45/1）；而真正的「按长度判死条目」换个等价写法反而测不到。
-#  这里只看语句的效果 —— 长度判定有没有连着丢弃 / 截断条目；唯一豁免是返回值类型为
-#  QuickMatchMode 的判定函数，它按构造只能改匹配方式，改不了条目的去留。
+#  这里只看语句的效果，两条锚点各自独立成立：
+#    ① 长度判据（`.length` / `*LENGTH`）与「丢弃 / 截断」语句落在同一个缩进块；
+#    ② 定长截断 `take(<字面量>)` / `drop(<字面量>)` / `substring(<字面量>…)`，它不写长度 token，
+#       锚点 ① 天生看不见（VOCA-454 质检打回项 1 实测：`fields[0].take(4)` 在 ① 下报绿）。
+#  豁免只有一条，按构造划：返回值类型为 QuickMatchMode 的判定函数只能改匹配方式，改不了条目去留。
+#  承认抓不到的两种间接写法（兜它的是 C1-5 的行为单测，不是本脚本）：把长度判定抽成独立布尔
+#  函数再 `if (helper(t)) continue`；把阈值先存进小写局部变量再 `take(n)` —— 阈值是变量时，
+#  锚点 ② 与候选条数上限 `out.take(limit)` 无法区分，硬判会误伤。
 # ──────────────────────────────────────────────────────────────
 
 MODE_GUARD_DEF_RE = re.compile(r"\bfun\s+\w+\s*\([^)]*\)\s*:\s*QuickMatchMode\b")
 LENGTH_TEST_RE = re.compile(r"\.length\b|\b[A-Z][A-Z_]*LENGTH\b")
+# 锚点 ②：把字段裁到字面量长度。参数是变量（`out.take(limit)` = 候选条数上限）不判，避免误伤。
+LITERAL_TRUNCATE_RE = re.compile(
+    r"\.(?:take|drop)\(\s*\d+\s*\)|\.substring\(\s*\d+(?:\s*,\s*\d+)?\s*\)"
+)
 DISCARD_RE = re.compile(
     r"\bcontinue\b|\bbreak\b|\breturn@\w*|\bdrop(?:While)?\(|\btake(?:While)?\(|\bsubstring\(|"
     r"\bremoveAt\(|\bremoveAll\(|\bfilterNot\(|\breturn\s+(?:null\b|emptyList\(|listOf\(|buildList\()"
@@ -728,8 +738,10 @@ def mode_guard_lines(lines: list[str]) -> set[int]:
 def length_drops_entries(name: str, src: str) -> list[str]:
     """读盘侧「按长度丢弃 / 截断条目」的语句，返回出处列表（空 = 契约没被破坏）。
 
-    判到语句层：换写法（`fields[0].length`）躲不掉，把长度判定提取成另一个函数再
-    `if (helper(t)) continue` 则躲得掉 —— 那种间接写法留给 C1-5 的单测兜，脚本不假装会做跨函数污点分析。
+    两条锚点见本节段首注释：①「长度判据 + 同一缩进块里的丢弃语句」，②「定长截断字面量」。
+    判到语句层：换写法（`fields[0].length`、`fields[0].take(4)`）躲不掉；把长度判定提取成
+    `if (helper(t)) continue`、或把阈值存进小写变量再 `take(n)` 则躲得掉 —— 这两种间接写法
+    留给 C1-5 的行为单测兜，脚本不假装会做跨函数污点分析。
     """
     lines = src.splitlines()
     exempt = mode_guard_lines(lines)
@@ -738,7 +750,12 @@ def length_drops_entries(name: str, src: str) -> list[str]:
         if i in exempt:
             continue
         code = strip_kotlin_comment(raw)
-        if not code or not LENGTH_TEST_RE.search(code):
+        if not code:
+            continue
+        if LITERAL_TRUNCATE_RE.search(code):
+            hits.append(f"{name}:{i + 1} 定长截断 {code}")
+            continue
+        if not LENGTH_TEST_RE.search(code):
             continue
         body = [code]
         base = len(raw) - len(raw.lstrip())
@@ -756,9 +773,12 @@ def length_drops_entries(name: str, src: str) -> list[str]:
 
 
 def function_body(src: str, signature: str) -> str:
-    """从 `signature` 所在行起，取到缩进回到同一层级为止 —— 只看这个函数自己写了什么。
+    """取一个函数自己的原文 —— 只看这个函数写了什么。
 
-    不这么收窄的话，「函数体里没启用守卫」会被紧随其后的下一条声明里的同名 token 蒙过去。
+    两种收口：函数体出现过 `{` 就按大括号配平（`private fun parse(` 的签名跨行，闭合的
+    `): QuickPhraseEngine? {` 会回到签名的缩进，只按缩进收口会把整张参数表当成整个函数）；
+    没有 `{` 的是表达式体（`fun fromRemoteText(…) = parse(…)`），按缩进回到同级收口，
+    免得窗口吃进紧随其后的下一条声明（VOCA-454 质检打回前那种 400 字符窗口的假阴性）。
     """
     lines = src.splitlines()
     hits = [i for i, line in enumerate(lines) if signature in line]
@@ -766,16 +786,35 @@ def function_body(src: str, signature: str) -> str:
         return ""
     idx = hits[0]
     base = len(lines[idx]) - len(lines[idx].lstrip())
-    body = [lines[idx]]
-    for line in lines[idx + 1:]:
-        if line.strip() and len(line) - len(line.lstrip()) <= base:
-            break
+    body: list[str] = []
+    depth = 0
+    opened = False
+    for j in range(idx, len(lines)):
+        line = lines[j]
+        code = strip_kotlin_comment(line)
+        if (
+            j > idx
+            and not opened
+            and line.strip()
+            and "{" not in line
+            and len(line) - len(line.lstrip()) <= base
+        ):
+            break  # 表达式体：下一条同级的声明不是本函数的一部分
         body.append(line)
+        depth += code.count("{") - code.count("}")
+        opened = opened or "{" in code
+        if opened and depth <= 0:
+            break
     return "\n".join(body)
 
 
 def remote_read_wiring(engine_src: str, locator_src: str) -> list[str]:
-    """C1-6b 的接线断言：守卫必须被云端读取链路调用，否则它只是个没人用的正确函数。"""
+    """C1-6b 的接线断言：守卫必须被云端读取链路调用，否则它只是个没人用的正确函数。
+
+    锁的是「接线」两段（REMOTE → fromRemoteText → parse 用上 guardedRemoteMode），不锁函数体里的
+    判定效果 —— 把 `guardedRemoteMode` 的函数体掏空、改阈值、删 mode 判据都还是绿的，
+    那三层由 `QuickPhraseLegacyRemoteRowTest` 兜（VOCA-454 质检实测，别把它说成静态门禁的能力）。
+    """
     bad: list[str] = []
     remote_body = function_body(engine_src, "fun fromRemoteText(")
     if not remote_body:
@@ -784,6 +823,12 @@ def remote_read_wiring(engine_src: str, locator_src: str) -> list[str]:
         bad.append("fromRemoteText 函数体内没有启用长度守卫 —— 退化成 fromText 的别名")
     if "QuickPhraseEngine.fromRemoteText(" not in locator_src:
         bad.append("QuickLocator.kt 里没有任何 fromRemoteText 调用 —— 云端读取链路不走守卫")
+    # 守卫的调用点有两段：fromRemoteText 把开关传下去，parse 真的拿它去问 guardedRemoteMode。
+    # 只查前一段的话，`val mode = declaredMode`（收下开关却不用）会让守卫变成无人调用的正确函数还报绿。
+    parse_body = function_body(engine_src, "private fun parse(")
+    if "applyTriggerLengthGuard" in parse_body and "guardedRemoteMode(" not in parse_body:
+        bad.append("parse(...) 收了 applyTriggerLengthGuard 却没调用 guardedRemoteMode —— "
+                   "开关是死的，守卫退化成无人调用的正确函数")
     if REMOTE_THEN_BRANCH_UNGUARDED_RE.search(locator_src):
         bad.append("QuickLocator.kt 的 REMOTE 分支走的是 fromText —— 存量 >4 位行的 DEF-3 静默复发")
     if not (REMOTE_THEN_BRANCH_GUARDED_RE.search(locator_src)
@@ -840,14 +885,14 @@ def check_existing_contract_unchanged() -> None:
     check(
         not drop_hits,
         "读取侧从不按长度丢弃 / 截断条目（C1-5；按长度收严匹配方式豁免，C1-6b）",
-        "读取侧出现按长度判死条目的分支，导入 / 同步的历史条目会被静默丢弃：" + "; ".join(drop_hits[:4]),
+        "读取侧出现按长度判死条目的分支（丢弃或定长截断），导入 / 同步的历史条目会被静默丢掉、短一截：" + "; ".join(drop_hits[:4]),
     )
     # ④ 接线断言（C1-6b 不可分割的一部分）：守卫必须挂在云端读取链路上。
     #    ①–⑥ 的单测全部只调函数，守卫退化成「无人调用的正确函数」时只有这条会红。
     wiring = remote_read_wiring(engine_src, locator_src)
     check(
         not wiring,
-        "云端读取链路接在 fromRemoteText 上（C1-6b 读盘守卫的调用点，REMOTE 分支 / openRemote 两种形态都认）",
+        "云端读取链路接在 fromRemoteText 上、parse 真的调用 guardedRemoteMode（C1-6b 接线，REMOTE 分支 / openRemote 两种形态都认）",
         "C1-6b 的读盘守卫失去调用点，升级前落盘的 >4 位 CONTAINS / PREFIX 行按原样生效，DEF-3 静默复发："
         + "；".join(wiring),
     )
