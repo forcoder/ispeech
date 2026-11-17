@@ -68,6 +68,41 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 长度不符 / 不支持 Range），**不联网**验证判定逻辑双向准确；判定逻辑改动后先跑它。
 处置流程见 `docs/model-host-runbook.md`。
 
+## check_voca167.py —— VOCA-167 文档指位（AC-1）与输入法列表完整性（AC-2）
+
+VOCA-167 的机检与回归口径。**结论按「被验的那棵树」出**，不是按当前工作目录出：
+`--tree <rev>` 用 `git archive` 把该提交导出到临时目录后再解析，每行输出前缀
+`<tree-oid>:<label>`，所以 main / 出包分支 / PR head 的结论不会互相冒名。
+不写 `check_crosscut.py` 是为了避开 9 个在跑的 PR 对同一文件的冲突（ADR VOCA-398 §4.3）。
+
+```bash
+python3 tools/verify/check_voca167.py --tree main                      # 主干
+python3 tools/verify/check_voca167.py --tree fa57a07 --tree pr20       # 多棵树逐个出结论
+python3 tools/verify/check_voca167.py --tree <rev> \
+    --package dist/ispeech-internal-v1.6.apk --package-sha256 <摘要>   # 带上被验安装包
+python3 tools/verify/check_voca167.py --tree <rev> --device emulator-5554 --exclusive-device
+python3 tools/verify/check_voca167.py --self-test                      # 不读仓库，验证断言本身
+```
+
+| # | 断言 | 说明 |
+|---|------|------|
+| AC1-1 | 键数 | 文档写「工具栏（N 键）」必须等于该树 `toolbarKeys()` 解析出的键数 |
+| AC1-2 | 「第 N 键」指位 | 按 `KeyAction.*` > `「」`内称呼 > 别名 > 键面 的顺序定指位对象，再比该树实际位置；解析不出/多义只 `WARN`，不猜 |
+| AC1-3 | 键序 | 键名清单与反引号键序行逐位比对；个别称呼在该树解析不出时降级人工核对，但**错位就是红** |
+| AC1-5 | 内嵌摘录 | `SoftKeyboardView.kt:起-止` 必须覆盖该树实际跨度；摘录的键面/`weight`/`iconRes` 逐字段与代码一致 |
+| AC1-6 | 权重 | 权重序列与「权重和」声明都按该树实际值算 |
+| AC1-7 | 机检文案 | `tools/verify/check_*.py` 里硬编码的键面称呼必须与该树键面同源（注释不算声明） |
+| AC1-8 | 口径腐烂 | 文档承诺「不嵌源码摘录」的**那一节**里不许回潮摘录 |
+| AC2-1 | `<queries>` | `android.view.InputMethod` intent 必须在清单里 —— 缺陷 D（Android 11+ 包可见性裁掉 `enabledInputMethodList`）的根因门禁 |
+| AC2-2/2-3 | 同源与截断 | 「共 N 个」与列表行同源；不允许 `take/drop/slice/filter` 截断 |
+| AC2-4 | 滚动阈值 | 从面板源码符号链（`makeMeasureSpec` → 构造参数 → `dp(SYM)`）算出可视行数，据此把「≥6 条需滚动」标为**条件用例** |
+| AC2-5/2-6 | 取列表 | `enabledInputMethodList` 存在且未被过滤 |
+| AC2-8/2-9 | 分类计数 | 解析 `ImeListVisibility.kt` 的判据并移植到 Python 跑向量：被框架裁掉的项 ≠ 系统里就不存在 |
+| AC2-D | 真机取证 | 行数 == `|ENABLED|`、每个 id 有行、「共 N 个」== `|ENABLED|`；**仅在 `--exclusive-device` 时执行**，否则 `SKIP` |
+| PRE-0/1/2 | 被验对象署名 | 安装包字节的 sha256 与声称摘要、与该树 `dist/SHA256SUMS` 条目三者对齐；对不上就不许按这份清单谈结论 |
+
+输出除 `PASS/FAIL/WARN` 外还有 `SKIP`：`SKIP` **不计入通过**，也不许在汇报里写成绿。
+
 ## 局限（这些脚本覆盖不到的东西）
 
 - **不能替代编译**：Kotlin 类型推断、泛型、签名匹配、import 缺失、Compose API
