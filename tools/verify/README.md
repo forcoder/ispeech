@@ -22,6 +22,8 @@ python3 tools/verify/check_input_logic.py
 ```bash
 python3 tools/verify/check_model_host.py                    # 探测 build.gradle.kts 的默认源
 python3 tools/verify/check_model_host.py <url> --sha256     # 指定源并整包校验摘要
+python3 tools/verify/check_model_host.py --samples 3 \
+        --sample-interval 5                                 # 多次采样取严格多数（定时任务用这个）
 python3 tools/verify/check_model_host.py --self-test        # 不联网验证判定逻辑
 ```
 
@@ -64,8 +66,10 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 | 6 | `Range: bytes=16780-` → 206 且总长一致 | 断点续传前提 |
 | 7 | `--sha256` 整包摘要 == `da92b3db…b1450` | 内容替换 / 镜像不同步 |
 
-`--self-test` 在 127.0.0.1 上伪造 6 类源（正常 / 200+HTML / 假二进制 / 拦截跳转 /
-长度不符 / 不支持 Range），**不联网**验证判定逻辑双向准确；判定逻辑改动后先跑它。
+`--self-test` 共 11 例、**不联网**：前 6 例在 127.0.0.1 上伪造 6 类源（正常 / 200+HTML / 假二进制 /
+拦截跳转 / 长度不符 / 不支持 Range），验证判定逻辑双向准确；后 5 例直接判多数采样本身
+（含 `[True, False]` 平局按不可用），验证间歇故障不会被单次结果误读。判定逻辑改动后先跑它，
+`SUMMARY: self-test cases=11 unexpected=0` 才算过。
 处置流程见 `docs/model-host-runbook.md`。
 
 ## 局限（这些脚本覆盖不到的东西）

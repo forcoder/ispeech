@@ -67,8 +67,10 @@ python3 tools/verify/check_model_host.py --samples 3 --sample-interval 5
 退出码：`0` 全绿；`1` 任一断言失败（含 DNS/TCP/TLS 失败）。可直接接 CI / cron。
 
 **采样纪律（2026-11-18 定死，VOCA-475）**：判断源可用性**必须多次采样取多数**，不能拿单次结果
-下结论。旧默认源 `cvm.agentai0.com` 在被拦截期间有 **10~17% 请求返回 502**（migration log §2 的
-复测记录）—— 单次采样会把「抖一下」读成「源挂了」，也会把「运气好的一跳」读成「源恢复了」。
+下结论。旧默认源 `cvm.agentai0.com` 在被拦截期间有 **约 10~17% 请求返回 502** —— 这个数字出自
+**VOCA-33 项目经理 2026-11-09 的评论**（原文：单次采样误判成「故障已变成 502」，复测 12 次才确认原形态没变）。
+migration log §2 的独立复测记的是另一组样本：**4 次采样 `302 → 拦截页` ×3、`502` ×1**，只能证明「502 是间歇的」，
+不能拿来当 10~17% 的出处。无论按哪一组，单次采样都会把「抖一下」读成「源挂了」，也把「运气好的一跳」读成「源恢复了」。
 规则：`--samples N` 取**严格多数**（`ok*2 > N` 才判可用），平局（偶数样本）判不可用 ——
 宁可多一条告警，不漏一次真故障。出现 `2/3` 这类结果时脚本额外打 `WARN: 采样结果不一致`，
 那是**降级（P3）**信号，不是「已经恢复」。
@@ -90,17 +92,47 @@ python3 tools/verify/check_model_host.py --samples 3 --sample-interval 5
 | 层 | 触发时机 | 落点 |
 |---|---|---|
 | 发布前门禁（**强制**） | 每次出包前 | 人工跑一次；红则 no-go，不许发版 |
-| 定时探测（**未接 · 卡在人类答复**） | 每 30 分钟（目标） | 脚本可用且已在境内出口实跑（见下方「首次实跑记录」）；**没有调度器**。问过的记录：2026-11-09 提出 → 未答；2026-11-18 在 VOCA-33 / VOCA-475 再问 → 限期 2026-11-20。答复「不接」就在本行改写为「决定不接 · 决定人 · 日期 · 理由」，不接受继续挂着 |
+| 定时探测（**未接 · 卡在人类答复**） | 每 30 分钟（目标） | 脚本可用且已在境内出口实跑（见下方「首次实跑记录」）；**没有调度器**。问过的记录：2026-11-09 提出 → 未答；2026-11-18 在 VOCA-33 / VOCA-475 再问 → 限期 2026-11-20。答复「不接」就在本行改写为「决定不接 · 决定人 · 日期 · 理由」，不接受继续挂着。**接上调度器不等于闭环**：还差 crontab 顶部的 `ALERT_WEBHOOK`（未配置 = 无告警，见下方「接法候选」前置条件 1） |
 | 用户侧信号 | 持续 | logcat `FunAsrModelStore` 出现 `HTTP_4xx` / `NOT_MODEL_PAYLOAD`；源站日志 404 突增；`R.string.voice_model_failed` 相关反馈 |
 
 **接法候选（执行环境需人类确认后再接）**：
 
 ```bash
-# ① 境内常驻机器 crontab —— 建议项。改动最小，探测链路即国内用户链路。
+# crontab -e 的完整片段（定稿）。三处前置条件是这条链能响的前提，缺一个就是哑的：
+#   1) ALERT_WEBHOOK 必须在 crontab 顶部显式赋值。cron **不继承登录 shell 的环境变量**，
+#      没定义时它是空串，`curl -s ""` 直接静默失败（实测 curl exit 3）—— 探测判红、日志有记录，
+#      但没有任何人收到。**未配置 = 无告警**，不是「接上就会响」。
+#      这一行只在部署机上填真实机器人地址，属凭据，**不要提交进仓库**。
+#   2) PATH 同理要显式给，cron 的默认 PATH 常常找不到 python3。
+#   3) 告警分支无论成不成都往 alert 日志写一行（含 curl 退出码），这样「红了但没人收到」
+#      事后能从日志查出来，而不是等到用户投诉。
+ALERT_WEBHOOK=https://REPLACE-ME-on-the-deploy-host
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# ① 境内常驻机器 crontab —— 建议项，改动最小。要求是**境内出口**（优先与用户同省 / 同 ISP），
+#    但机房出口不等于用户出口：43.136.44.72 与构建机同机，出网到源站的链路和手机侧用户不同，
+#    所以**落地前要与住宅或办公网出口各做一次对照**，两边结论一致才算数（理由同下方 ③ 排除
+#    GitHub Actions 那一条 —— 出口不等于用户链路，只是方向反过来：境内机房「绿」不保证用户侧「绿」）。
 #    注意 crontab 里 `%` 必须写成 `\%`（否则被解析成换行）；用 `;` 而非 `&&` 串接，
 #    这样 `cd` 失败时 python 也会失败并触发告警，而不是静默跳过。
-*/30 * * * * cd ~/workspace/ispeech; { date '+\%F \%T \%z'; python3 tools/verify/check_model_host.py --samples 3 --sample-interval 5 --quiet; } >> ~/logs/model-host.log 2>&1; RC=$?; [ $RC -eq 0 ] || curl -s "$ALERT_WEBHOOK" -d '{"text":"ASR 模型源不可用（3 次采样多数判红）"}'
+*/30 * * * * cd ~/workspace/ispeech; { date '+\%F \%T \%z'; python3 tools/verify/check_model_host.py --samples 3 --sample-interval 5 --quiet; } >> ~/logs/model-host.log 2>&1; RC=$?; [ $RC -eq 0 ] || { date '+\%F \%T \%z'; echo "PROBE_RED rc=$RC webhook=$([ -n "$ALERT_WEBHOOK" ] && echo SET || echo UNSET)"; curl -sS --max-time 15 -X POST "$ALERT_WEBHOOK" -d '{"text":"ASR 模型源不可用（3 次采样多数判红）"}'; echo "curl_exit=$?"; } >> ~/logs/model-host-alert.log 2>&1
 ```
+
+空环境实测（2026-11-18 04:03 +0800）：用 `env -i HOME=<临时目录> PATH=/usr/bin:/bin:/usr/sbin` 起 `sh -c`
+跑上面这条命令（只把 `cd` 换成 worktree、日志根换成临时 HOME；`date` 的格式串在 shell 里不需要 `\%`，
+crontab 里才需要 —— 见上方注释），红路用旧源 `cvm.agentai0.com`，实际输出：
+
+```
+临时HOME/logs/model-host.log        → MAJORITY: 0/3 次可用 -> 判不可用 / RESULT: 源不可用（exit 1）
+临时HOME/logs/model-host-alert.log  → 2026-11-18 04:03:16 +0800
+                                      PROBE_RED rc=1 webhook=UNSET
+                                      curl: option : blank argument where content is expected
+                                      curl_exit=2
+```
+
+结论：**没配 `ALERT_WEBHOOK` 时告警确实发不出去（curl exit 2），但不再是无声的** —— rc、webhook 是否配置、
+curl 退出码全部落在 alert 日志里，值守一眼能看出「探测器在跑、告警是哑的」。旧写法把 curl 直接丢给 cron，
+报错只进没人收的 cron 邮件，才是真哑。填上真实 `ALERT_WEBHOOK` 后，同一行才真正把消息推出去。
 
 ② 阿里云函数计算定时触发：境内 region、常驻、按量成本近零（一次探测只有 3 个请求头 + 16 字节），
 不依赖任何一台机器开着。需要人类确认是否允许为此开函数 —— 属新付费资源，未确认前不接。
@@ -123,7 +155,12 @@ runner 在境外，探测结论不代表国内用户链路；VOCA-33 那次「�
 | 旧源 `cvm.agentai0.com` | `check_model_host.py <url> --samples 3` | `3/3` 均 `302 → dnspod webblock` 拦截页，`MAJORITY: 0/3` | `1` |
 | 判定逻辑本身 | `check_model_host.py --self-test` | `cases=11 unexpected=0` | `0` |
 
-绿红两路都跑通过，说明「接上就会响」；缺的只是那个调度器。
+绿红两路跑通证明的是**判定逻辑与退出码**双向正确（`0` / `1`），不要读成「接上调度器就会有人被叫醒」：
+告警那一段还要求 crontab 顶部显式配好 `ALERT_WEBHOOK`（见上方前置条件 1，未配置时 curl exit 2、只在日志留痕）。
+所以缺的是两样 —— 一个执行环境（调度器）+ 一个 webhook 值。
+
+> 出口对照的基准就在上面：本轮实跑那台机器的出口是**住宅 / 移动**（`ipinfo.io` → Guangzhou、AS9808 China Mobile），
+> 不是机房。若最终落点选机房常驻机，接上后要拿这台住宅出口的结果做一次对照，两边一致才算「用户链路已覆盖」。
 
 同一批命令于 **03:31 +0800 原样复跑一次，结果逐项相同**（默认源 3/3 → `passed=21 failed=0` exit 0；
 旧源 3/3 拦截页 → `passed=3 failed=3` exit 1）—— 上表不是只有一次运气的观测。原始日志（含时间戳与
@@ -391,3 +428,4 @@ python3 tools/verify/check_model_host.py --samples 3
 | 2026-11-09 | 新建；实测 `cvm` 被备案拦截、官方源可用、探测脚本上线 | 见 §1 与 issue VOCA-35 评论 |
 | 2026-11-09 | **默认源切到阿里云 OSS**；§1 复测 `cvm`（302 → dnspod 拦截页后 502 / 166 B）；新增 §5.1 落地配置、§6 OSS 行为差异、§7 成本与恢复、§8 检查表 OSS 项 | `check_model_host.py --sha256` 9/9 全绿、无参数探测 7/7 全绿、`check_static` 6/6、`check_crosscut` 138/138；见 VOCA-35 评论 |
 | 2026-11-18 | VOCA-475 收口：§1 复核行；§2.1 采样纪律 + `--samples`；§2.2 「待接」改为「未接 · 卡在人类答复（限期 11-20）」并给出首次实跑记录、排除 GitHub Actions、补监控盲区；§2.4 阈值收紧为「单次多数判红」+ 新增 Flaky/Silent 两条告警；§5.2/§5.3/§5.4 异地留档落地与复验；§7.1 恢复改为先取留档；§8/§9 补留档与探测落点 | 默认源 `--samples 3` → 3/3 可用 exit 0、`--sha256` 9/9；旧源 3/3 拦截页 exit 1；`--self-test` 11 项 unexpected=0；备份对象 `GET 200/77920048`、`Range 206`、重下载后 sha256 与权威值一致、ETag/MD5/CRC64 与主源逐项相同 |
+| 2026-11-18 | VOCA-475 质检打回项 1–5 整改：§2.1 采样纪律的 10~17% 出处改指 VOCA-33 项目经理 11-09 评论（并注明 migration log §2 记的是 4 次采样 302×3 / 502×1，不是该百分比的出处）；§2.2 接法候选的 crontab 定稿补 `ALERT_WEBHOOK` / `PATH` 顶部显式赋值与告警留痕分支，「境内常驻机 = 用户链路」改为「境内出口 + 落地前与住宅或办公网各做一次对照」；「接上就会响」改为「判定与退出码已双向验证，告警还要配 webhook」；§2.2 状态行补「接上调度器不等于闭环」。migration log §6 状态表 VOCA-474 改 `done`（附 PR #31 仍未合的说明）、§8.1 复跑判据 pathspec 修正、§7 探测落点补出口对照要求。`tools/verify/README.md` 补 `--samples` 用法与 11 例 self-test 口径 | `env -i`（只给 HOME/PATH）跑定稿命令走红路：probe 日志 `MAJORITY: 0/3 次可用`、alert 日志 `PROBE_RED rc=1 webhook=UNSET` + `curl_exit=2`；§8.1 五条 `git` 判据逐条复跑输出非空；`--self-test` `cases=11 unexpected=0`、`check_static` 6/6、`check_crosscut` 151/151、`py_compile` OK |

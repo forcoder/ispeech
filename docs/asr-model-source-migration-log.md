@@ -129,15 +129,22 @@ git branch -r | grep voca-3                     # origin/agent/agent/voca-34、o
 
 ## 6. 状态
 
-> 2026-11-18 按 Multica 平台核对后重写。原表把 VOCA-34 记成 `in_review`、VOCA-35 记成 `in_progress`，
-> 两者早已 `done`。状态是快照，**权威值以平台为准**，不要拿本节当实时看板。
+> 2026-11-18 按 Multica 平台核对后重写；同日二次核对又抓到一行脱节（VOCA-474 记成 `qa_be`，
+> 平台早已 `done`）。原表还把 VOCA-34 记成 `in_review`、VOCA-35 记成 `in_progress`，两者早已 `done`。
+> 状态是快照，**权威值以平台为准**，不要拿本节当实时看板；改这张表前先跑一次下面这条命令逐行对：
+>
+> ```bash
+> multica issue children 01a1bfa9-9508-7999-bbba-0bba096cc903 --output json \
+>   | jq -r '.. | objects | select(has("identifier") and has("status")) | "\(.identifier) \(.status) \(.updated_at)"' | sort
+> # 2026-11-18 二次核对输出（UTC）：34/35/474 done、475 in_progress、476/477/478 backlog
+> ```
 
 | Issue | 状态（2026-11-18 快照） | 说明 |
 |---|---|---|
 | VOCA-34 | `done` | 下载校验与 `.part` 自愈已进 `main`（`3d62d9d`）。注：`done` 早于项目规则 §四 要求的真机回归，该缺口现由 VOCA-476 承接 |
 | VOCA-35 | `done` | 换源 + 探测脚本 + Runbook 已进 `main`（`61eb974`） |
-| VOCA-33 | `in_progress` | 父单。验收口径 A1–A4：A1 达成；A2 待 PR #6 合并；A3（VOCA-474）、A4（VOCA-476）未闭合 —— 详见 §8 |
-| VOCA-474 | `qa_be` | `main` 活链路 `VoskModelStore` 下载零校验 + zip-slip |
+| VOCA-33 | `in_progress` | 父单。验收口径 A1–A4：A1 达成；A2 待 PR #6 合并；**A3（VOCA-474）已闭合**、A4（VOCA-476）仍未闭合 —— 详见 §8 |
+| VOCA-474 | `done` | `main` 活链路 `VoskModelStore` 下载零校验 + zip-slip，平台 2026-11-17 19:24Z 置 `done`。**注意**：`done` 是单子状态，不代表代码已落地 —— 承载修复的 PR #31（head `fix/voca-474-vosk-download-hardening`）此刻仍 `OPEN`、`mergedAt=null`，`origin/main` 仍是 `fa57a07`。合 main 属生产操作，要人类确认；在合并前从 `main` 出包仍无该校验 |
 | VOCA-475 | `in_progress` | 本文件所在的收口单：文档状态同步 + 定时探测 + OSS 对象异地留档 |
 | VOCA-476 | `backlog` | 真机回归证据，前置 = PR #6 合并出包 + 人类接上设备 |
 | VOCA-477 | `backlog` | `keystore/keystore.properties` 明文凭据 |
@@ -150,9 +157,11 @@ git branch -r | grep voca-3                     # origin/agent/agent/voca-34、o
 
 1. **月外网流出预算上限**：建议先按 ¥100/月（约 2,500 次下载）设流量告警，用到 70% 预警。
    未答复期间阿里云控制台没有任何流量告警，账单是唯一的事后信号。
-2. **定时探测落在哪**：探测**必须跑在境内出口的常驻机器**上，境外探测不代表用户链路
+2. **定时探测落在哪**：探测要跑在**境内出口**的常驻机器上，境外探测不代表用户链路
    （VOCA-33 用一次误判换来的教训，详见 `docs/model-host-runbook.md` §2.2）。
-   - 可选：远端构建机 crontab（境内、常驻，建议项）；阿里云函数计算定时触发（境内 region、常驻、成本近零）。
+   - 可选：远端构建机 crontab（境内机房、常驻，建议项）；阿里云函数计算定时触发（境内 region、常驻、成本近零）。
+   - **两个候选都是机房出口**，与用户住宅/移动出口不同链路，所以落点定了之后**还要在本机（住宅/移动）或办公网各跑一次做对照**，
+     两边结论一致才算数。理由同下面「不可选」那条：出口不等于用户链路，只是方向反过来 —— 境内机房「绿」也不保证用户侧「绿」。
    - **不可选**：GitHub Actions —— runner 在境外，链路结论不成立，本条已从候选里划掉，不是等人二选一。
    - 未答复期间脚本不接任何调度 → 见 §8.3。
 
@@ -172,15 +181,28 @@ git branch -r | grep voca-3                     # origin/agent/agent/voca-34、o
 | 2026-11-17 | VOCA-33 质检 FAIL（打回项 3「监控仍为零」/ 4「文档与事实矛盾」/ 残余风险 3「OSS 对象只有一份」）→ 拆 VOCA-474 / 475 / 476 |
 | 待发生 | PR #6（VOCA-190，base `main`、head `76491b9`、`OPEN` / `MERGEABLE`、6 files +208−21）恢复 FunASR 接线，排在 11-19 统一合并窗口；写 `main` 属生产操作，需人类确认，agent 不自行合并 |
 
-复跑判据（2026-11-18 实测，全部本地 `git` 断言）：
+复跑判据（2026-11-18 实测，全部本地 `git` 断言；每条都已逐条跑通、输出非空）：
 
 ```bash
 git show origin/main:app/src/main/java/com/ispeech/settings/store/AsrSettings.kt | grep -n "SYSTEM\|CUSTOM\|VOSK"
-git grep -n "FunAsrSpeechEngine" origin/main -- app/src      # 只有自身声明，无调用点
-git grep -n "VoskModelStore.ensureModel" origin/main -- app/src # 活链路
-git grep -n "FunAsrSpeechEngine(" origin/release/voca-186-v1.6 -- app/src/input/IspeechImeService.kt  # :284 接了
-git ls-tree -r --name-only origin/release/voca-186-v1.6 | grep -c VoskModelStore.kt   # 0
+#   :6 SYSTEM、:14 CUSTOM、:22 VOSK —— 没有 FUNASR
+
+git grep -n "FunAsrSpeechEngine" origin/main -- app/src
+#   只有 FunAsrSpeechEngine.kt:44 类声明 + :344 TAG 两处自身引用，无调用点
+
+git grep -n "VoskModelStore.ensureModel" origin/main -- app/src
+#   origin/main:.../com/ispeech/input/IspeechImeService.kt:1630 —— 这就是 main 的活链路
+
+git grep -n "FunAsrSpeechEngine(" origin/release/voca-186-v1.6 -- app/src/main/java/com/ispeech/input/IspeechImeService.kt
+#   :284 funasrVoice = FunAsrSpeechEngine(applicationContext) —— 发布线接了
+
+git ls-tree -r --name-only origin/release/voca-186-v1.6 | grep -c VoskModelStore.kt
+#   0 —— 该分支没有这个文件；注意 grep -c 计数为 0 时退出码是 1，不是断言失败
 ```
+
+> 路径备忘：`IspeechImeService.kt` 在 `app/src/main/java/com/ispeech/input/`，**不是** `app/src/input/`。
+> 上一版这里写的源相对路径 `app/src/input/IspeechImeService.kt` 不存在，`git grep` 直接 exit 1 零输出，
+> 判据跑不通（VOCA-475 质检打回项 2）。写判据时先跑一遍再贴。
 
 ### 8.2 准确定性
 
@@ -201,3 +223,6 @@ git ls-tree -r --name-only origin/release/voca-186-v1.6 | grep -c VoskModelStore
    `docs/model-host-runbook.md` §5.4 与 §7.1。
 
 **仍未闭合的一条**：定时探测没有调度器 —— 卡在 §7.2 的人类答复（限期 11-20），不卡脚本。
+落点定了之后闭环还差一步：crontab 顶部要显式配 `ALERT_WEBHOOK`（cron 不继承登录 shell 环境，
+空值时 curl exit 2、只有日志痕迹，Runbook §2.2 前置条件 1），并按 §7.2 的要求与住宅或办公网出口
+做一次对照。答复到达前，本单覆盖的是「脚本 + 采样口径 + 定稿接法 + 境内一次实跑证据」，不是「已有告警」。
