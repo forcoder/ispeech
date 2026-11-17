@@ -1,32 +1,54 @@
 # VOCA-127 真机验证用例集：条目 3 词组自学习（VOCA-124）
 
-> 关联：VOCA-127（本 issue）、VOCA-124（实现，`origin/feat/voca-124-phrase-learning@8015e80`）、VOCA-65 条目 3
-> 被测构建：`app-debug.apk`（`com.ispeech.ime`，versionCode=5 / versionName=1.5），源码 `8015e80`
-> 验收依据：`docs/requirements/VOCA-65-acceptance.md` v1.1（AC-3.4/3.7/3.8/3.10/3.11/3.12）
-> 手册依据：`docs/voice-phrase-learning-verify.md@8015e80`
+> 关联：VOCA-127（本 issue）、VOCA-124（实现）、VOCA-65 条目 3
+> 被测代码：`origin/feat/voca-124-phrase-learning` @ `7ed1230`（PR #4 head，`OPEN` / `MERGEABLE` / `CLEAN`，base `fa57a07`）
+> 验收依据：`docs/requirements/VOCA-65-acceptance.md` **v1.1.2** @ `b8e8d40`（分支 `agent/ba/voca-122`，AC-3.7 / AC-3.10 / AC-3.12 已按 VOCA-185 候选条形态回写；**尚未落 `main`**）
+> 手册依据：`docs/voice-phrase-learning-verify.md` @ `7ed1230`（§0 logcat 白名单含 `UserDictStore:I`，即质检打回项 R-1 的修复）
+> 本文件口径 = 上述三份的并集；与 v1.1 旧文本冲突时，**以 v1.1.2 为准**，旧措辞（「候选第 1 条」「页码 +1」「不再置顶」）一律不再作为门禁。
 
-## 1. 当前状态：blocked（无真机）
+## 1. 当前状态：blocked（等上游，非等本单）
 
-`adb devices -l` 返回空列表；`system_profiler SPUSBDataType` 无 Android 设备；`adb mdns services` 无无线调试设备。
-本机仅存在 AVD `ispeech_test`（pixel_5 / android-34 / google_apis / arm64-v8a）。
+本单不再自己推进任何验证，等的是三段上游链路，全部可自证：
 
-**按 VOCA-127 明文要求，不接受模拟器结果冒充真机。** 因此本用例集已就绪但**未执行**，
-6 项必验项状态见 §6。解除阻塞需要：一台已开启 USB 调试（或无线调试）的 Android 真机，
-`adb devices` 出现 `device` 状态。提供方待确认（见 §7）。
+| # | 等待项 |  owner | 到期 | 自证信号（成立即推进本单） |
+|---|---|---|---|---|
+| ① | VOCA-124 解冲突 + rebase 到 VOCA-185 形态并收口 | 前端工程师（VOCA-124 `in_progress`） | 2026-11-18 12:00 CST | `gh pr view 4 --json mergeable,mergeStateStatus` = `MERGEABLE` / `CLEAN`（**11-17 本单实测已成立**，head `7ed1230`，22:49Z） |
+| ② | PR #4 合入 `main` + 重新出官方包 | 项目经理 → 人类批准（项目规程第五、六条） | 2026-11-18 | `git merge-base --is-ancestor 7ed1230 origin/main` 返回 `0` |
+| ③ | 包自证 + 真机接入 | 人类（qiaozhou）提供设备 | 2026-11-19 | 装机包 `versionName` ≠ `1.5` **且** `adb shell dumpsys package com.ispeech.ime` 可见；APK 内 `strings`/`dexdump` 能捞到日志 tag `phrase_learn`；`adb devices -l` 出现目标真机 serial `23F0224224000950` 为 `device` |
+
+②与③**必须同时成立**：只有②而拿旧包装机，验的是空对象；只有③而包里没有条目 3 的代码，同样验空。①已成立，不必再等。
+
+本单 2026-11-17 实测（Mac Studio，adb 1.0.41 / 37.0.1）：
+
+```text
+$ adb devices -l
+List of devices attached
+（空 —— 本机连 emulator 都没有，与督导员那台 `emulator-5554` 不是同一主机）
+
+$ timeout 5 adb mdns services
+List of discovered mdns services
+（空 —— 无无线调试设备）
+
+$ system_profiler SPUSBDataType | grep -iE "android|23F02|samsung|xiaomi|huawei|oneplus"
+（空 —— USB 上无 Android 设备）
+```
+
+本地存在 AVD `ispeech_test`、`qa166_test`，**按本 issue 明文要求不用模拟器冒充真机**。
+`$ANDROID_HOME=/opt/homebrew/share/android-commandlinetools` 可用，构建链路不是阻塞项。
 
 ## 2. 测试范围
 
 | 在范围 | 不在范围 |
 |---|---|
-| AC-3.4 真机三组（含反向用例与 F1 专项探测） | AC-3.1~3.3、3.5、3.6、3.9 的 JVM 段（已由 `testDebugUnitTest` 覆盖） |
-| AC-3.7 学后候选置顶 | 拼音态学习、3 字及以上词组（二期，ADR 已声明） |
+| AC-3.4 真机三组（含反向用例与 F1 专项探测） | AC-3.1~3.3、3.5、3.6、3.9 的 JVM 段（`testDebugUnitTest` 已覆盖） |
+| AC-3.7 index 0 门禁 | 拼音态学习、3 字及以上词组（二期，ADR 已声明） |
 | AC-3.8 开关关闭不写库 | `com.ispeech.agent.AgentDispatcherTest`（main 上既存失败，非本 PR 回归） |
-| AC-3.10 设置页词库治理 | VOICE/ASR、快捷短语、键盘样式等条目 1/2/4 功能 |
+| AC-3.10 设置页治理（序列断言） | VOICE/ASR、快捷短语、键盘样式等条目 1/2/4 功能 |
 | AC-3.11 连续学习无 ANR | 性能压测、多机型兼容矩阵（本轮单机） |
-| AC-3.12 同码候选共存 | 线上真实用户数据 |
+| AC-3.12 同码候选共存（前/后两次快照） | 线上真实用户数据 |
+| — | 召回路径 `related()`、候选条分组顺序（裁决明确不改，需变更另开 issue） |
 
-**风险排序**（先打高风险）：① AC-3.4 反向用例（F1 若成立则词组永远学不到，功能整体不可用）→
-② AC-3.11 ANR / 主线程写盘（崩溃类）→ ③ AC-3.8 开关失效（隐私/信任）→ ④ AC-3.7/3.12 候选正确性 → ⑤ AC-3.10 治理。
+**风险排序**：① AC-3.4 反向用例（F1 成立则功能整体不可用）→ ② AC-3.11 ANR / 主线程写盘 → ③ AC-3.8 开关失效（隐私）→ ④ AC-3.7 / 3.12 候选正确性 → ⑤ AC-3.10 治理。
 
 ## 3. 环境与数据准备
 
@@ -34,125 +56,134 @@
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 
-# 0) 确认设备（必须是 device，不能是 offline/unauthorized）
+# 0) 设备（必须 device，不能 offline/unauthorized），期望 serial 23F0224224000950
 adb devices -l
 
-# 1) 从 8015e80 构建（本 issue 实测可通过；沙箱下需把 gradle home / tmpdir / android home 指向可写目录）
-./gradlew --offline assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+# 1) 装「合并后重新出的官方包」，过 §1 ③ 的两条自证再开始；不接受分支包、不接受现有 v1.6 包
+adb install -r <官方包路径>
 
-# 2) 干净起点：清空用户词库（设置 → 用户词库 → 清空），或重装
-adb shell pm clear com.ispeech.ime
+# 2) 干净起点：adb shell pm clear com.ispeech.ime（或 设置 → 用户词库 → 清空）
 
-# 3) 切到五笔态：设置 → 键盘 → 中文输入法 → 五笔
-#    注意：换输入态会 phraseTracker.reset()，两组验证之间不要切中/英
+# 3) 切五笔态：设置 → 键盘与输入 → 中文输入法 → 五笔
+#    换输入态会 phraseTracker.reset()，两组验证之间不要切中/英
 ```
 
-测试数据（词库无污染，全部自造，不依赖生产数据）：
+测试数据（自造，不依赖生产数据）：
 
 | 词组 | 首字码 | 次字码 | 合并码 | 说明 |
 |---|---|---|---|---|
-| 喂猫 | `klge` | `qtal` | `klqt` | 主用词，`klqt` 同码已有「中国银行」「喂猪」→ AC-3.12 |
-| 加班 | `lkg` | `gytg` | `lkgytg` | 4 码限制外的对照组，用于确认超长码不误学 |
-| 其余 8 对 | 见 §4.1 | | | 每次换不同字，避免 `existing`/`repeat` 跳过 |
+| 喂猫 | `klge` | `qtal` | `klqt` | 主用向量。`klqt` 全库仅 中国银行(62857) / 喂猪(54507) 两条整码词、无单字 → AC-3.12 受控向量 |
+| 加班 | `lkg` | `gytg` | `lkgytg` | 系统库已有 `lkgy` → AC-3.5 反例，只作对照不作门禁 |
+| 其余字对 | 每次换不同字对 | | | 避免 `existing` / `repeat` 跳过导致样本不足 |
 
-## 4. 用例集
+## 4. 用例集（门禁逐字对齐 v1.1.2）
+
+**通用前置（不满足判「用例不适用」，不判 fail）**
+1. 测试机无命中 `klqt` 的快捷短语 / 快速应用；
+2. 设置里**没有启用中的五笔码词库含 `code` 以 `klqt` 开头的单字条目**（VOCA-122 质检 N-1 caveat，验收文件 L238 Given 尚未回写）——分类 / 细胞词库经 `CellDictEngine` 的 `startsWith` 分支可在满码引入单字候选（tier 1）压过「喂猫」（tier 2），此时 index 0 会变单字。命中即记「不适用 + 原因」，不判实现失败。
+
+**可观察锚点（只用这四个，来自 main 的代码）**：`candidate_items` 直接子 View 序列（唯一权威「第几条」观察量）、数字角标 `(index+1)`、首选高亮 `index == 0`、刷新末尾 `scrollTo(0,0)`。
+**页码、翻页箭头、来源标签、齿轮已在 `fa57a07` 删除 —— 任何页码类断言一律不写。**
 
 ### 4.1 AC-3.4 ① 反向用例：连续拼两字不动光标（最高优先级）
 
-- **前置**：干净词库，五笔态，`user_dict.txt` 无 `klqt` 行
-- **步骤**：`klge` → 选「喂」上屏 → 1~3 s 内 `qtal` → 选「猫」上屏。重复 10 次，每次换不同的字对
-- **期望**：每次出现 `phrase_learn commit code=… text=…`；**全程不出现** `phrase_learn skipped reason=interrupt`；`user_dict.txt` 实际 +1 条 `klqt 喂猫 1 wubi`
-- **判据**：10/10 成功且 0 次误中断。**出现任一 `reason=interrupt` 即 F1 成立 → fail**
-- **对应验收**：AC-3.4（反向）、AC-3.3
+- **步骤**：`klge` → 选「喂」上屏 → 1~3 s 内 `qtal` → 选「猫」上屏。重复 10 次，每次换不同字对
+- **期望**：每次 `phrase_learn commit code=… text=…`；全程**不出现** `skipped reason=interrupt`；词库 +1 条四列（TAB 分隔）`klqt`、`喂猫`、`1`、`wb`
+- **判据**：10/10 且 0 次误中断。出现任一 `reason=interrupt` 且能排除「用户确实移动了光标」→ **F1 成立，记 fail**
+- **skip reason 分类（N-3，不得混进 F1）**：`window` / `existing` / `repeat` / `clock_backwards` / `undecidable` 属**字对选错**，换对字对重跑并把 reason 记进报告；换对后仍凑不满 10 条，才计入 F1
 
 ### 4.2 AC-3.4 ② 拼完首字后移动宿主光标
 
-- **步骤**：`klge` → 选「喂」上屏 → 用系统手势/方向键把光标移到别处（如点输入框开头）→ 1~3 s 内 `qtal` → 选「猫」
-- **期望**：出现 `phrase_learn skipped reason=interrupt`；`user_dict.txt` **无** `klqt 喂猫` 新增
-- **对应验收**：AC-3.4（光标分支，ADR 标注「仅真机可覆盖」）
+- `klge` → 「喂」→ 系统手势/方向键把光标移开 → 1~3 s 内 `qtal` → 「猫」
+- **期望**：`phrase_learn skipped reason=interrupt`；词库无 `klqt 喂猫` 新增
 
 ### 4.3 AC-3.4 ③ 拼首字后切短语面板再切回
 
-- **步骤**：`klge` → 选「喂」→ 打开「快捷短语」面板 → 关闭 → 1~3 s 内 `qtal` → 选「猫」
-- **期望**：出现 `skipped reason=interrupt`；词库无新增
-- **对应验收**：AC-3.4（面板分支）
+- 同 4.2，中间开「快捷短语」面板再关
+- **期望**：同 4.2
 
 ### 4.4 F1 专项探测（记录行为，不计 fail）
 
-已知残余风险：`SELF_WRITE_GRACE_MILLIS = 300`（`IspeechImeService.kt:130`）。上屏后 300 ms 内立刻移动光标，
-可能落在自因宽限窗内而被当成「自己写的那一笔」，从而**漏判**真实中断。
+残余风险 `SELF_WRITE_GRACE_MILLIS = 300`：上屏后 300 ms 内移动光标可能落在自因宽限窗内而**漏判**中断。
 
-- **A 组（300 ms 内移动）5 次**：`klge` → 选「喂」→ **立即**（<300 ms）移动光标 → `qtal` → 选「猫」
-- **B 组（300 ms 后移动）5 次**：同上，但移动光标放在上屏后 500 ms~1 s
-- **记录**：每组 5 次各自「是否出现 `skipped reason=interrupt`」「是否写了库」
-- **判定**：A 组漏判属**已知行为**，只记录不判 fail；B 组若漏判则说明 `selectionTolerance` 或自因判定有缺陷 → 升级为缺陷
+- **A 组**（上屏后 <300 ms 移动光标）5 次；**B 组**（500 ms~1 s 后移动）5 次
+- **记录**：每组 5 次各自是否出现 `reason=interrupt`、是否写库
+- **判定**：A 组漏判属已知行为，只记录；**B 组漏判 → 升级为缺陷**（`selectionTolerance` 或自因判定有缺陷）
 
-### 4.5 AC-3.7 学后候选置顶
+### 4.5 AC-3.7 学后 index 0
 
-- **步骤**：已学「喂猫」→ 打开**新的输入框**（重要：学习后当前候选不即时刷新是设计口径）→ 输入 `klqt`
-- **期望**：候选第 1 条为「喂猫」，可直接上屏
-- **对应验收**：AC-3.7
+- **步骤**：已学「喂猫」→ **新输入框**（五笔态）输入整码 `klqt`（学习后当前候选不即时刷新是设计口径）
+- **期望（v1.1.2 判定列）**：候选条**序列 index 0** = 「喂猫」，锚点 = 数字角标「1」+ 首选高亮底色 + 刷新后必在首屏最左（无需滑动即可一次点选）；点选后输入框以「喂猫」结尾、编码缓冲清空
+- **注意**：「词组组内第 1」与「全局 index 0」同一结果是裁决的**推论**，不是可替代的弱门禁；门禁仍按 index 0 判
+- **取证**：`scripts/qa/voca127-device-capture.sh cand before` + `cand after` + `gate`
 
 ### 4.6 AC-3.8 开关关闭不写库
 
-- **步骤**：设置 → 键盘 → 关闭「用户词频学习」→ 按 4.1 方式拼「喂」「猫」
-- **期望**：出现 `phrase_learn skipped reason=disabled`；`user_dict.txt` 无新增
-- **补充**：重新打开开关后再拼一次应能学到（证明只是不落盘，不是判定失效）
-- **对应验收**：AC-3.8
+- 设置 → 键盘 → 关「用户词频学习」→ 按 4.1 拼「喂」「猫」
+- **期望**：`phrase_learn skipped reason=disabled`；词库无新增
+- **补充**：重开开关后再拼一次应学到（证明只是不落盘，不是判定失效）
 
-### 4.7 AC-3.10 设置页词库治理
+### 4.7 AC-3.10 设置页治理（序列断言，不写「不再置顶」）
 
-- **步骤**：设置 → 用户词库 → 可见「喂猫」→ 单条删除 → 回输入框输入 `klqt`；再整体清空 → 输入 `klqt`
-- **期望**：可见 / 可单条删除 / 可整体清空；删除后 `klqt` 候选不再置顶
-- **取证**：删除时 logcat 出现 `phrase_remove code=klqt text=喂猫`
-- **对应验收**：AC-3.10
+- **步骤**：设置 → 用户词库 → 可见「喂猫」→ 单条删除 → 输入 `klqt` 抓快照 → 再整体清空 → 输入 `klqt` 抓快照
+- **期望**：可见 / 可单条删除 / 可整体清空；删除后序列中**不再出现「喂猫」**，其余同码候选一条不少，**「中国银行」回到 index 0**；清空后项数回到 §4.9 学习前快照的 2
+- **取证**：日志 `phrase_remove code=klqt text=喂猫`，**tag 是 `UserDictStore`、级别 `I`**（发射点 `KeyboardViewModel.removeUserWord`，不是 `IspeechIme`）。§0 白名单已列 `UserDictStore:I`；抓不到先用事后补抓式 `adb logcat -d | grep -E "phrase_learn|phrase_remove"` 复核，**再**判 fail（漏列白名单造成的 0 命中是文档错，不是功能错——即质检打回项 R-1）
 
 ### 4.8 AC-3.11 连续 10 次学习无 ANR
 
-- **步骤**：按 4.1 连续学习 10 对不同的词，期间保持 `adb logcat` 抓取
-- **期望**：`adb logcat -d | grep -E "ANR in com.ispeech.ime|Input dispatching timed out"` 无命中；键盘无卡顿；写盘在 `Dispatchers.IO`（主线程无 `File.writeText` 调用栈）
-- **对应验收**：AC-3.11
+- 按 4.1 连续学 10 对不同词，全程保持抓取
+- **期望**：`adb logcat -d | grep -E "ANR in com.ispeech.ime|Input dispatching timed out"` 命中 0；键盘无卡顿
+- **线程口径（不写绝对句）**：学习**写盘**在 `Dispatchers.IO`（`learnPhrase` 的 `store.record(...)`）。同函数取 `AppContainer.userDict(this)` 仍在调用线程，`user_dict.txt` 缺失时会同步 `writeText`，但该冷路径实际不可达（`onCreate` 已建好文件）——AC-3.11 按「学习写盘不在主线程」判，冷建文件属既有行为、非本 PR 引入
 
-### 4.9 AC-3.12 同码候选共存
+### 4.9 AC-3.12 同码候选共存（学习前 / 后两次快照，同一次会话内、不重启不清词库）
 
-- **步骤**：已学「喂猫」→ 输入 `klqt`
-- **期望**：新词排第 1，原有「中国银行」「喂猪」2 条仍在候选内，页码与总数各 +1
-- **对应验收**：AC-3.12
+- **学习前**：干净词库 → 新输入框 `klqt` → `cand before`。干净机预期 项数 **2**、序列 `[中国银行, 喂猪]`（相对顺序即比较基准）
+- **学到「喂猫」**（§4.1）后 → 新输入框 `klqt` → `cand after`
+- **三条门禁**：
+  - ① **不丢失**：学习前 2 条学习后全部仍在且相对顺序不变（后快照减掉新词后与前置序列逐项相等）
+  - ② **数量**：`candidate_items` 直接子 View 数 = 学习前 + 1（干净机 2 → 3）
+  - ③ **优先级**：「喂猫」在 index 0（与 AC-3.7 同一观察量交叉校验）
+- **不得写成断言的三件事**：① 「页码 +1」「第 N 页」（控件已删）；② 「项数 == 用户词库 + 系统词库同码条目总数」（被 `candidatePoolLimit = 9 × 3 = 27` 截断且按 display 去重）；③ 「学习词必须首屏可见」**不推广**——短码（<4）有单字在前、快捷短语组 tier 0 也在前，那些场景需滑动属预期
+- **适用边界（必须留在用例注释里）**：② 只在 `klqt` 这个受控向量成立；通用形式是集合包含 `S ⊂ S′` 且 `|S′| = |S| + 1`，引擎层由 `PhraseRankingTest` 佐证；**① 不受 27 上限影响**，任何同码冲突场景都必须成立
+- 部分 ROM 的 IME 窗口不进 `uiautomator dump`：拿不到 `candidate_items` 时**不改判据**，改用 `adb exec-out screencap -p > cand_after.png`，按「角标 1 + 首选高亮 + 从左第 1 项」目视判定并附图
 
 ## 5. 取证要求（每项必附）
 
 | 项 | 内容 |
 |---|---|
-| 机型 / ROM / 构建号 | `adb shell getprop ro.product.model`、`ro.build.display.id`、`ro.build.version.release` |
-| APK 来源 | `./gradlew --offline assembleDebug` 产物；sha256 = `92f05fe78c3e98d8ddb52ae877da37f5f738a0873a312665a65de82bea00bb5c` |
-| logcat 原文 | `phrase_learn commit` / `phrase_learn skipped reason=…` / `phrase_remove`，说明过滤命令 |
-| 截图 | 候选条（学之前 / 学之后 / 删除之后）、设置页用户词库 |
+| 机型 / ROM / 构建号 | `adb shell getprop ro.product.model` / `ro.build.display.id` / `ro.build.version.release` |
+| **包准入自证** | `adb shell dumpsys package com.ispeech.ime` 的 `versionName`（必须 ≠ `1.5`）+ 从该 APK `strings`/`dexdump` 捞到 tag `phrase_learn`，两条并列才算「验的是有被测代码的包」 |
+| logcat 原文 | 前台：`adb logcat -s IspeechIme:D IspeechIme:I IspeechIme:W UserDictStore:I \| grep -E "phrase_learn\|phrase_remove"`；事后补抓：`adb logcat -d \| grep -E "phrase_learn\|phrase_remove"`（两个 tag 都必须列，见 §4.7） |
+| 候选条快照 | `cand before` / `cand after` 的 `uiautomator` XML + `cand_seq` 解析输出（AC-3.7 / 3.10 / 3.12 共用），拿不到 XML 时附 `screencap` 图 |
+| 截图 | 学之前 / 学之后 / 删除之后 候选条、设置页用户词库 |
 | 词库落盘 | `adb shell run-as com.ispeech.ime cat files/user_dict.txt` 前后对照 |
+| 复现步骤 | 每条 fail 附机型 + 命令原文 + logcat 原文 + 操作序列 |
 
-一键取证脚本：`scripts/qa/voca127-device-capture.sh`（本 issue 交付，需真机执行）。
+一键取证：`scripts/qa/voca127-device-capture.sh`（`pre` / `cand` / `gate` / `dict` / `anr` / `post`），产物落 `./qa-evidence/voca127-<时间戳>/`。
 
 ## 6. 当前判定
 
 | # | 必验项 | 状态 |
 |---|---|---|
-| 1 | AC-3.4 真机三组（含反向 + F1 探测） | **blocked** — 无真机 |
-| 2 | AC-3.7 | **blocked** — 无真机 |
-| 3 | AC-3.8 | **blocked** — 无真机 |
-| 4 | AC-3.10 | **blocked** — 无真机 |
-| 5 | AC-3.11 | **blocked** — 无真机 |
-| 6 | AC-3.12 | **blocked** — 无真机 |
+| 1 | AC-3.4 真机三组（含反向 + F1 探测） | **blocked** — 无真机、无含条目 3 的官方包 |
+| 2 | AC-3.7（index 0） | 同上 |
+| 3 | AC-3.8 | 同上 |
+| 4 | AC-3.10（序列断言） | 同上 |
+| 5 | AC-3.11 | 同上 |
+| 6 | AC-3.12（①②③） | 同上 |
 
 **go / no-go：no-go（blocked，非实现失败）。** 真机层 0/6 有证据，不具备发布条件。
-**不得**据此判定 VOCA-124 实现有问题——本 issue 没有产生任何 fail 证据。
+**不得**据此判定 VOCA-124 实现有问题——本单至今没有产生任何真机 fail 证据。
 
-## 7. 待确认
+## 7. 待确认 / 已收敛
 
-1. **谁提供真机**：本轮环境无任何 adb 设备。需人类（@qiaozhou）确认可用机型与接入方式（USB / 无线调试），或指定由谁执行本用例集。
-2. 是否需要**多机型**覆盖：本用例集按单机设计，若要求跨 ROM 兼容需追加机型矩阵与排期。
+1. **真机**：期望 serial `23F0224224000950`（人类在 wakeup 指令里给出）。本主机 `adb devices -l` 空、无 mdns、USB 无 Android 设备，需人类接入（USB 或无线调试）或在有设备的机器上执行本用例集。
+2. **出包**：PR #4 合入后需重出官方包；现有 v1.6 内测包基于当时的 `main`，不含条目 3，不可用于本单。
+3. **N-1 回写**：验收文件 v1.1.2 的 AC-3.7 Given（L238）仍缺「无命中 `klqt` 的单字词条」这半句，`agent/ba/voca-122` 上未补。本单按 §4 通用前置第 2 条自挡（判「不适用」），不卡 11-19，归属仍是 BA。
+4. **多机型**：本用例集按单机设计，跨 ROM 兼容矩阵需另立 issue 与排期。
 
-## 8. 附：本轮已完成的旁证（不等同真机验证）
+## 8. 旁证（不等同真机验证）
 
-- `assembleDebug` 从 `8015e80` 构建**成功**，产物可安装（`aapt2 dump badging` 确认 `com.ispeech.ime` v1.5）。
-- `testDebugUnitTest`：**86 用例 / 1 失败**，唯一失败为既存 `AgentDispatcherTest`（`AndroidJUnit4` delegate runner 缺失，main 上即失败，不属本 PR 回归）；词组相关 39 条 **全部通过**（`PhraseLearningTrackerTest` 17、`PhraseCodeDeriverTest` 10、`PhraseDictCompatibilityTest` 4、`PhraseRankingTest` 3、`SelectionSelfCausedTest` 5）。
-- 上述仅覆盖 JVM 层，**真机层 AC 一条都未验**。
+- 本单 11-17 实测：PR #4 head `7ed1230` / `OPEN` / `MERGEABLE` / `CLEAN`（`gh pr view 4` 原文）；`git merge-base --is-ancestor` 对 `48f91ea` / `d317984` / `8015e80` 三者在 `origin/main`（`fa57a07`）上均 `exit=1`，即**仍未合入**；`origin/main` 的 `app/build.gradle.kts` 仍 `versionName = "1.5"`。
+- JVM 层 `84 tests / 1 failed`（唯一红项 `AgentDispatcherTest`，main 上同样红）、`check_crosscut` 161/0/0：**出自前端交付说明与前端质检的独立复现，本单本轮未重跑**，不计入本单证据。合入后本单会在官方包上重跑一次相关 JVM/静态脚本作为包一致性佐证。
+- 本单本轮只更新用例集与取证脚本（测试资产），未改任何产品代码、未改验收口径、未动 issue 状态之外的平台配置。
