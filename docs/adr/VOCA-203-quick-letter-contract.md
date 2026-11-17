@@ -1,7 +1,7 @@
 # ADR-0002：快捷字母长度、本地-远端同 trigger 所有权、同步回写安全线（VOCA-203/S1）
 
-- **状态**：Accepted（人类 qiaozhou 于 2026-11-15 在 VOCA-206 批示「合并」；§11 的 6 项按本文推荐口径执行，如有异议以评论为准。进入 main 仍走统一合并窗口。阶段 2 实现 VOCA-207 以本文唯一输入为准）
-- **决策日期**：2026-11-14（2026-11-15 修订：补 §7.3 与 C1-2 的 `check_phrase_csv_import.py` 口径）
+- **状态**：Accepted（人类 qiaozhou 于 2026-11-15 在 VOCA-206 批示「合并」；§11 的 6 项按本文推荐口径执行，如有异议以评论为准。进入 main 仍走统一合并窗口。阶段 2 实现 VOCA-207 以本文唯一输入为准。）**第二次修订（C3-5′ / C3-11）状态 = Proposed**：由架构师在 VOCA-207 评审中裁决，随实现一并在合并窗口由人类确认；若人类否决，退回原文（同码被占时走 create）并在 §11 记录理由。
+- **决策日期**：2026-11-14（2026-11-15 第一次修订：补 §7.3 与 C1-2 的 `check_phrase_csv_import.py` 口径；2026-11-15 第二次修订：应答 VOCA-207 实现追问，C3-5 改为「映射失效即视同无映射」（C3-5′），新增 C3-11 软删集合口径与 §7.1 两条脚本断言）
 - **决策人**：架构师（agent `e7ea905a-48f9-4dc9-86d5-32346dc237da`，代 VOCA-203 用户 4 张标注截图）
 - **关联 issue**：VOCA-206（本 ADR）→ VOCA-203（父）；下游 VOCA-207（实现）、VOCA-208（回归与 go/no-go）
 - **关联既有文档**：`docs/quick-phrase-enhancement.md` 12.3 / 12.4 / 12.5 / 12.6、`docs/adr/VOCA-65-phrase-learning.md`（格式与编号前例）
@@ -236,14 +236,31 @@ when {
 | C3-2 | 无映射 + keyword 命中 + 正文一致 → 只补映射，不推送（现状 `:122-123` 保留） |
 | C3-3 | 无映射 + keyword 命中 + 正文不一致 → 判为 **conflict**：不推送、不补映射、不计 `applied`；`RuleSyncReport`（`:30-42`）新增 `conflicts: Int`；冲突条数必须出现在同步文案里，且**不能复用** `quick_synced_partial`（那条语义是「后端不支持修改/删除」，不是「有冲突」） |
 | C3-4 | 有映射 + 指纹变化 → 允许推送更新（这才是「用户改了本地自己拥有的规则」） |
-| C3-5 | 有映射 + 远端已无该 id → 走 create 分支（现状 `remoteById[it.id]` 为 null → `target == null` 已覆盖，保持） |
+| C3-5 | **（2026-11-15 修订，见下节）** 映射指向的 id 已不在远端返回集内 ⇒ 该映射**即失效，视同无映射**，按 C3-1／C3-2／C3-3 重新分类：码无人占用 → create；同码被占且正文一致 → 只把映射改绑到占用者 id、不推送；同码被占且正文不一致 → conflict，**不得新建同码重复规则**。失效映射在任一分支都要改写或清除，表里不留死凭证 |
 | C3-6 | 新建云端规则仍走 `POST api/rules`，拿到非空 id 才登记映射（现状 `:116` 保持） |
 | C3-7 | 「以本地为准并更新云端」只能由**用户显式动作**触发（决策 2 的冲突动作，或本地编辑器保存自己拥有的规则）；`pushLocalRules` 不得自行进入该分支 |
 | C3-8 | `toRuleRequest` / `toPushRule` 不再硬编码 `enabled = true`（`:202`/`:212`），改传 `null`。本地规则文件里没有 enabled 语义，**本地不知道就别写** —— 同一原则的延伸。现状会把远端已禁用的规则悄悄启用 |
 | C3-9 | 冲突清单落盘 `filesDir/quick_phrases_conflicts.txt`（`trigger \t remoteId \t remoteFingerprint \t detectedAt`），使冲突跨多次同步可追踪；正文一致后该条自动移出 |
+| C3-11 | **（2026-11-15 新增）** 参与身份判定的远端集合 = `listRules` 返回中 `deleted == false` 的条目；`remoteById` 与 `remoteByKeyword` 必须由这一个集合构建，软删条目既不占码也不算所有权 |
 
 **能否不依赖后端改动闭环**：能。C3-1…C3-9 全部只用现有 `listRules` / `sync/push` / `api/rules` 与本地映射表，
 不需要 csBaby 提供新字段或新路由。后端能改进的两点（`updated_at`/版本号、可用的 PUT/DELETE）列为**建议但不阻塞**，见 §11 项 3。
+
+### 修订（2026-11-15）：映射失效 + 同码被占怎么判（VOCA-207 追问，原 C3-5 未覆盖）
+
+**背景**：原 C3-5 把「映射 id 消失」等价于「码空闲」，直接 create。实现方追问的组合是 —— id 消失**且**云端存在别人建的同码规则。该分支不写别人的 id（安全线没破，单测已锁），但代价是云端留下两条同 `keyword` 规则。
+
+**决策**：判 **conflict，不上传、不新建重复码**（下表 C3-5 即修订后口径，评审中引用作 **C3-5′**）。理由按权重：
+
+1. **设备表达不了「同码两条规则」**。C2-1 把归一化 trigger 定成本地唯一主键，`QuickPhraseCodec.parse` 同 trigger 只留一条；`remoteByKeyword` 用 `associateBy` 建索引，同码时**后者覆盖前者**，命中哪条取决于服务端返回顺序。用 create「解决」冲突，只是把它从「可发现的冲突」换成「按顺序二义的静默数据」——本节目的正是让前者发生。
+2. **映射是一条会失效的凭证，不是永久产权**。远端不再返回该 id 时，「我有映射」携带的信息量为 0，剩下的事实与「无映射 + 同码被占」逐字相同，因此走同一条分类路径；C3-1 的保护面不缩（把「无映射记录」改述为「无有效映射」）。
+3. **不损失任何能力**。conflict 之后用户仍有出口：弹窗里的「采用云端正文」/「以本地为准并更新云端」（决策 2 的两个动作），以及在编辑器里手动把本地条目的触发词改成别的码 —— 改完这条就变成「无人占用」，下一轮同步自然走 create。三条出口的代价各不相同，但**由用户选**，而不是由服务端返回顺序选。
+
+**否决的备选**：A 保持 create（原文）—— 见理由 1，且把取舍推给了返回顺序；C 同步路径里自动换码 create —— 静默改用户肌肉记忆里的触发词，而该能力已经是冲突弹窗里的显式选项，不该在后台替用户做。
+
+**代价**：该 trigger 在用户处置前不会上云（安全线一律是「少做事」的变更），界面必须把它算进冲突计数并给文案（C3-3 已具备）。
+
+**重新考虑的条件**：csBaby 提供 `keyword` 唯一约束，或提供 `updated_at`/版本号使同码两条可排序裁决（§11 项 3）时，A 才重新可行。
 
 ### 回滚方式
 
@@ -324,12 +341,13 @@ when {
 | C3-2 | 无映射 + 正文一致 → 只补映射 | 单测：`created == 0`、`updates.isEmpty()`、映射表新增该 trigger |
 | C3-3 | 冲突计入 `conflicts`，不计 `applied`，不复用 partial 文案 | `RuleSyncReport` 有 `conflicts`；`quick_synced_conflict` 新文案存在（中英）；`syncTip` 冲突分支优先于 partial 分支 |
 | C3-4 | 有映射 + 指纹变化 → 允许更新 | 单测：`known[trigger] = (id, oldFp)`、正文已改 → `updates.size == 1` |
-| C3-5 | 有映射 + 远端无该 id → create | 单测：`known` 有 id 但 `remoteById` 无 → 走 create |
+| C3-5 | 映射指向的 id 已不在远端返回集内 ⇒ 视同无映射，按 C3-1／C3-2／C3-3 分类（§3 修订节） | 单测三条：①`known` 有 id、`remoteById` 无、该码无人占用 → create；②同上但云端有别人建的同码规则且正文不一致 → `creates.isEmpty()` 且 `conflicts == 1` 且 `updates.none { it.remoteId == 占用者id }`；③同上但正文一致 → `bindings` 命中占用者 id、`creates.isEmpty()` |
 | C3-6 | 只有 `rule.id` 非空才登记映射 | 现状 `:116` 的 `if (rule.id.isNotBlank())` 保持 |
 | C3-7 | 「以本地为准覆盖云端」只能由显式用户动作触发 | `pushLocalRules` 内不存在「冲突未解决即推送」的可达路径；显式动作有独立入口与单测 |
 | C3-8 | 不硬编码 `enabled = true` | `toRuleRequest` / `toPushRule` 的 `enabled` 传 `null`；`SyncRepository.kt` 内不再出现 `enabled = true` |
 | C3-9 | 冲突清单落盘且跨同步可追踪 | `quick_phrases_conflicts.txt` 格式为 `trigger \t remoteId \t remoteFingerprint \t detectedAt`；正文一致后该 trigger 移出 |
 | C3-10 | 覆盖条目绝不被当作新规则推送 | 现状 `filterNot { QuickOverride.matchesAny(...) }`（`:90-91`）保持，判定按 C2-2（trigger） |
+| C3-11 | 身份判定只看未软删的远端条目 | 单测：占码规则 `deleted = true` → 不算占用 → create 且不报冲突；映射指向软删 id 且本地正文已改 → 不进 `updates`（按软删 id 推送永远复核不过，用户会卡在「未同步」），走 create |
 
 ### 5.4 挂载与可见性
 
@@ -402,6 +420,7 @@ when {
 | `:488` | `"QuickLocator.buildQuickEngines(" in chunk and "includeLocal = enableQuick" in chunk` | 保留；**新增**断言：`loadQuickPhrases` 内 `includeLocal`/`includeRemote` 不引用输入方式（C4-1） |
 | L8 `:855-873` / L9 `:875-887` | 拼音态 5 位命中 / 五笔态打不全 | **不改**（C1-8、C4-3） |
 | 新增 M 节 | — | 冲突与回写安全线：C3-1、C3-3（`conflicts` 字段 + 新文案）、C3-8（无 `enabled = true`）、C2-3（同 trigger 折叠为 1 条）、C2-6（迁移不改写任何一侧）各一条静态断言 |
+| 新增 M 节（2026-11-15 修订追加） | — | C3-5′：`LocalRuleSyncPlan.decide` 内映射有效性判定必须先于 keyword 兜底（`known[...]?.takeIf { 远端仍返回该 id }` 一类写法），且 `creates` 不得在「同码已被占用」时产生条目；C3-11：构建 `remoteById` / `remoteByKeyword` 的列表带 `deleted` 过滤。两条都要有对应 JVM 单测（脚本只锁源码形态，语义由单测锁） |
 
 `tools/verify/check_phrase_usage.py`、`check_input_logic.py`、`check_crosscut.py`：**预期零改动**；
 若因 `MAX_CODE_LENGTH` 同名混淆被改动，视为回归，VOCA-208 需拦。
@@ -507,3 +526,4 @@ F 节的自我声明正是决策 1 要废止的那条不变量。漏改它，`to
 5. C1-7 的「禁用原因可见」是否覆盖三个弹窗 + 远端简写入口共 4 处？（是，见 6.1）
 6. C1-9 的误弹警示是否在 mode 与 trigger 长度都变化时实时重算？（是，纯计算，不读盘）
 7. `UNGUARDED_MODES`（脚本 `:70`）与 Kotlin 侧 C1-6 的判定，谁是权威？（Kotlin 侧 `QuickTrigger` 为权威，脚本断言与之对齐，不得反向让脚本定义语义）
+8. 映射指向的 id 已从远端消失、**且**同码被别的规则占用时怎么判？（2026-11-15 裁决：判冲突、不上传、不新建同码重复规则 —— 见 §3 修订节与 C3-5′。原 C3-5 的「→ create」只覆盖「该码无人占用」）

@@ -1,6 +1,6 @@
 # 快捷短语 / 快速应用 规则表（Tab 分隔，# 开头为注释）
 # 字段: trigger <TAB> label <TAB> content [<TAB> mode] [<TAB> weight] [<TAB> kind]
-#   trigger : 触发码（小写 a-z，1-5 位；拼音态组合串上限 12 位、五笔态 4 位，5 位码只在拼音态能打全）
+#   trigger : 触发码（小写 a-z；编辑器允许 2–12 位；≤4 位两态可敲全，>4 位仅拼音态/英文态可敲全（五笔态走面板筛选））
 #   label   : 候选面板显示的简称
 #   content : 选中后真正贴入输入框的详细内容（快速应用）
 #   mode    : exact | prefix | contains | regex （默认 prefix）

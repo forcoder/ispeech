@@ -115,19 +115,27 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 上传结果文案：pending > 0 说明远端没生效（后端不支持修改 / 删除），如实说明。 */
-    private fun uploadMessage(report: SyncRepository.RuleSyncReport): String =
-        if (report.pending > 0) {
-            app.getString(
-                R.string.sync_upload_partial,
-                report.created,
-                report.updatedApplied,
-                report.deletedApplied,
-                report.pending,
-            )
-        } else {
-            app.getString(R.string.sync_upload_success, report.pushed)
-        }
+    /**
+     * 上传结果文案：pending > 0 说明远端没生效（后端不支持修改 / 删除），如实说明。
+     *
+     * 冲突优先于 pending 且不复用 `sync_upload_partial`（ADR-0002 C3-3）：
+     * 冲突是「这条没上传，等人选」，pending 是「推了但后端没改」。
+     */
+    private fun uploadMessage(report: SyncRepository.RuleSyncReport): String = when {
+        report.conflicts > 0 -> app.getString(
+            R.string.sync_upload_conflict,
+            report.conflicts,
+            report.created,
+        )
+        report.pending > 0 -> app.getString(
+            R.string.sync_upload_partial,
+            report.created,
+            report.updatedApplied,
+            report.deletedApplied,
+            report.pending,
+        )
+        else -> app.getString(R.string.sync_upload_success, report.pushed)
+    }
 
     /** 登出：清空本地登录凭证。 */
     fun logout() {
