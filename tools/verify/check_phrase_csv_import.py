@@ -22,8 +22,9 @@
     D. 落盘回读：224 条内容经 `QuickPhraseCodec` 转义 / 反转义后逐字相等；
     E. 源码接线：解码 / 解析 / ViewModel / 屏幕入口 / 中英文案都在；
     F. 导入不破坏既有约束：手动录入口径与 QuickTrigger 同源（2–12 位小写，单一校验函数），
-       导入路径不放宽读取侧（不截断、不按长度校验，ADR-0002 C1-5）；`QuickPhraseCodec`
-       仍只转义 `\\r \\n \\t`。
+       导入路径不放宽读取侧（不按长度丢弃 / 截断条目，ADR-0002 C1-5；按长度把云端存量行的
+       `PREFIX`/`CONTAINS` 收严为 `EXACT` 属 C1-6b，只改匹配方式、不丢条目，因此按语义判而不是按 token 判）；
+       `QuickPhraseCodec` 仍只转义 `\\r \\n \\t`。
 
 用法：``python3 tools/verify/check_phrase_csv_import.py [csv路径]``
       默认读 ``tools/verify/fixtures/general_phrases.csv``（真实导出文件的基线，随仓库提交）；
@@ -43,6 +44,8 @@ IMPORTER = ROOT / "app/src/main/java/com/ispeech/data/PhraseCsvImport.kt"
 QUICK_VM = ROOT / "app/src/main/java/com/ispeech/settings/quick/QuickPhrasesViewModel.kt"
 QUICK_SCREEN = ROOT / "app/src/main/java/com/ispeech/settings/QuickPhrasesScreen.kt"
 QUICK_TRIGGER = ROOT / "app/src/main/java/com/ispeech/engine/QuickTrigger.kt"
+QUICK_ENGINE = ROOT / "app/src/main/java/com/ispeech/engine/QuickPhraseEngine.kt"
+QUICK_LOCATOR = ROOT / "app/src/main/java/com/ispeech/engine/QuickLocator.kt"
 QUICK_ENTRY = ROOT / "app/src/main/java/com/ispeech/engine/QuickEntry.kt"
 QUICK_TEST = ROOT / "app/src/test/java/com/ispeech/data/PhraseCsvImportTest.kt"
 STRINGS_ZH = ROOT / "app/src/main/res/values/strings.xml"
@@ -660,8 +663,119 @@ def quick_trigger_limits() -> tuple[int, int]:
     return found[0], found[1]
 
 
+# ──────────────────────────────────────────────────────────────
+#  C1-5 / C1-6b 的语义判定（VOCA-454：门禁按意图判，不按 token 判）
+#
+#  按 token 一刀切有两个方向的错：C1-6b 允许的「按长度把 PREFIX/CONTAINS 收严为 EXACT」
+#  会被误判成违规（并集树实测 45/1）；而真正的「按长度判死条目」换个等价写法反而测不到。
+#  这里只看语句的效果 —— 长度判定有没有连着丢弃 / 截断条目；唯一豁免是返回值类型为
+#  QuickMatchMode 的判定函数，它按构造只能改匹配方式，改不了条目的去留。
+# ──────────────────────────────────────────────────────────────
+
+MODE_GUARD_DEF_RE = re.compile(r"\bfun\s+\w+\s*\([^)]*\)\s*:\s*QuickMatchMode\b")
+LENGTH_TEST_RE = re.compile(r"\.length\b|\b[A-Z][A-Z_]*LENGTH\b")
+DISCARD_RE = re.compile(
+    r"\bcontinue\b|\bbreak\b|\breturn@\w*|\bdrop(?:While)?\(|\btake(?:While)?\(|\bsubstring\(|"
+    r"\bremoveAt\(|\bremoveAll\(|\bfilterNot\(|\breturn\s+(?:null\b|emptyList\(|listOf\(|buildList\()"
+)
+# 云端读取链路的两种已知形态：合并后的 addGroup(input, source)，与 PR #26 独立形态的 openRemote
+REMOTE_THEN_BRANCH_GUARDED_RE = re.compile(
+    r"source\s*==\s*QuickSource\.REMOTE\s*\)\s*\{\s*[\w\s./]*QuickPhraseEngine\.fromRemoteText\("
+)
+REMOTE_THEN_BRANCH_UNGUARDED_RE = re.compile(
+    r"source\s*==\s*QuickSource\.REMOTE\s*\)\s*\{\s*[\w\s./]*QuickPhraseEngine\.fromText\("
+)
+FIRST_PARSE_AFTER_OPEN_REMOTE_RE = re.compile(
+    r"openRemote\([^)]*\)[\s\S]{0,400}?QuickPhraseEngine\.from(Remote)?Text\("
+)
+
+
+def strip_kotlin_comment(line: str) -> str:
+    """去掉注释，免得文档里引用常量的句子被当成代码。字符串里的 // 不裁剪。"""
+    text = line.strip()
+    if text.startswith("//") or text.startswith("*") or text.startswith("/*"):
+        return ""
+    cut = text.find("//")
+    if cut > 0 and text.count('"', 0, cut) % 2 == 0:
+        text = text[:cut]
+    return text.strip()
+
+
+def mode_guard_lines(lines: list[str]) -> set[int]:
+    """返回值是 QuickMatchMode 的判定函数所占的行号（C1-6b 守卫的合法容身处）。"""
+    exempt: set[int] = set()
+    for i, line in enumerate(lines):
+        if not MODE_GUARD_DEF_RE.search(strip_kotlin_comment(line)):
+            continue
+        depth = 0
+        opened = False
+        for j in range(i, len(lines)):
+            code = strip_kotlin_comment(lines[j])
+            depth += code.count("{") - code.count("}")
+            opened = opened or "{" in code
+            exempt.add(j)
+            if opened and depth <= 0 and j > i:
+                break
+        if not opened:  # 表达式体（= if (…) {…}）：往下扫到第一个回到同缩进的行
+            base = len(lines[i]) - len(lines[i].lstrip())
+            for j in range(i + 1, len(lines)):
+                if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) <= base:
+                    break
+                exempt.add(j)
+    return exempt
+
+
+def length_drops_entries(name: str, src: str) -> list[str]:
+    """读盘侧「按长度丢弃 / 截断条目」的语句，返回出处列表（空 = 契约没被破坏）。"""
+    lines = src.splitlines()
+    exempt = mode_guard_lines(lines)
+    hits: list[str] = []
+    for i, raw in enumerate(lines):
+        if i in exempt:
+            continue
+        code = strip_kotlin_comment(raw)
+        if not code or not LENGTH_TEST_RE.search(code):
+            continue
+        body = [code]
+        base = len(raw) - len(raw.lstrip())
+        for follow in lines[i + 1:]:
+            if not follow.strip():
+                continue
+            if len(follow) - len(follow.lstrip()) <= base:
+                break
+            body.append(strip_kotlin_comment(follow))
+        for stmt in body:
+            if DISCARD_RE.search(stmt):
+                hits.append(f"{name}:{i + 1} {code}")
+                break
+    return hits
+
+
+def remote_read_wiring(engine_src: str, locator_src: str) -> list[str]:
+    """C1-6b 的接线断言：守卫必须被云端读取链路调用，否则它只是个没人用的正确函数。"""
+    bad: list[str] = []
+    if "fun fromRemoteText(" not in engine_src:
+        bad.append("QuickPhraseEngine.kt 没有 fromRemoteText —— C1-6b 守卫的入口被删")
+    else:
+        head = engine_src.split("fun fromRemoteText(", 1)[1][:400]
+        if "applyTriggerLengthGuard = true" not in head and "guardedRemoteMode(" not in head:
+            bad.append("fromRemoteText 不再启用长度守卫 —— 退化成 fromText 的别名")
+    if "QuickPhraseEngine.fromRemoteText(" not in locator_src:
+        bad.append("QuickLocator.kt 里没有任何 fromRemoteText 调用 —— 云端读取链路不走守卫")
+    if REMOTE_THEN_BRANCH_UNGUARDED_RE.search(locator_src):
+        bad.append("QuickLocator.kt 的 REMOTE 分支走的是 fromText —— 存量 >4 位行的 DEF-3 静默复发")
+    if not (REMOTE_THEN_BRANCH_GUARDED_RE.search(locator_src)
+            or FIRST_PARSE_AFTER_OPEN_REMOTE_RE.search(locator_src)):
+        bad.append("找不到「REMOTE → fromRemoteText」的接线（addGroup 的 REMOTE 分支 / openRemote 两种形态都不成立）")
+    for m in FIRST_PARSE_AFTER_OPEN_REMOTE_RE.finditer(locator_src):
+        if m.group(1) is None:
+            bad.append("openRemote(...) 解析走的是 fromText —— 那条云端链路没有守卫")
+    return bad
+
+
 def check_existing_contract_unchanged() -> None:
-    """导入路径不放宽**读取侧**（不截断、不校验长度，C1-5），手动录入口径与 QuickTrigger 同源。"""
+    """导入路径不放宽**读取侧**（不按长度丢弃 / 截断条目，C1-5；云端文件按长度收严匹配方式属 C1-6b），
+    手动录入口径与 QuickTrigger 同源。"""
     screen = read(QUICK_SCREEN)
     lo, hi = quick_trigger_limits()
     # ① 设置页不再写死旧的 2..4 区间（C1-2：校验只剩 QuickTrigger 一个实现）
@@ -683,21 +797,37 @@ def check_existing_contract_unchanged() -> None:
         f"手动录入校验定义处 == 1（QuickTrigger），口径 {lo}–{hi} 位小写字母（导入路径独立，不放宽 UI 校验）",
         f"校验函数被复制或多处定义：{defs}；或长度常量不在 QuickTrigger.kt",
     )
-    # 读取侧契约（C1-5）：解析与匹配从不按长度筛条目，编辑器校验器不得被读取侧调用
+    # ③ 读取侧契约（C1-5）拆成两条按意图判的断言：
+    #    正向 —— 编辑器校验器不得被读取侧调用（这条 token 判是准的，读取侧真的不该出现它）；
+    #    语义 —— 不得出现「按长度丢弃 / 截断条目」的分支（C1-6b 的 mode 收严不在此列）。
     vm_text = read(QUICK_VM)
-    read_side = " ".join(
-        read(path)
-        for path in (ROOT / "app/src/main/java/com/ispeech/engine/QuickPhraseEngine.kt",
-                     ROOT / "app/src/main/java/com/ispeech/engine/QuickLocator.kt")
-    )
+    engine_src = read(QUICK_ENGINE) if QUICK_ENGINE.exists() else ""
+    locator_src = read(QUICK_LOCATOR) if QUICK_LOCATOR.exists() else ""
     codec_parse = vm_text.split("fun parse(text: String)", 1)[1][:1500] if "fun parse(text: String)" in vm_text else ""
+    read_side = " ".join((engine_src, locator_src, codec_parse))
     check(
         "QuickPhraseCodec.parse(" in vm_text and codec_parse != ""
-        and not any(token in read_side + codec_parse for token in (
-            "isValidShortcutTrigger", "MIN_TRIGGER_LENGTH", "MAX_TRIGGER_LENGTH", "trigger.length",
-        )),
-        "读取侧（QuickPhraseCodec.parse / QuickPhraseEngine / QuickLocator）不调用编辑器校验器、不按长度判死（C1-5）",
-        "读取侧引用了快捷字母长度校验，导入的超 4 位历史条目会被静默丢弃",
+        and "isValidShortcutTrigger" not in read_side,
+        "读取侧（QuickPhraseCodec.parse / QuickPhraseEngine / QuickLocator）不调用编辑器校验器（C1-5）",
+        "读取侧引用了编辑器校验器 isValidShortcutTrigger，导入的超 4 位历史条目会被静默丢弃",
+    )
+    drop_hits: list[str] = []
+    for name, src in (("QuickPhraseEngine.kt", engine_src), ("QuickLocator.kt", locator_src),
+                      ("QuickPhraseCodec.parse", codec_parse)):
+        drop_hits += length_drops_entries(name, src)
+    check(
+        not drop_hits,
+        "读取侧从不按长度丢弃 / 截断条目（C1-5；按长度收严匹配方式豁免，C1-6b）",
+        "读取侧出现按长度判死条目的分支，导入 / 同步的历史条目会被静默丢弃：" + "; ".join(drop_hits[:4]),
+    )
+    # ④ 接线断言（C1-6b 不可分割的一部分）：守卫必须挂在云端读取链路上。
+    #    ①–⑥ 的单测全部只调函数，守卫退化成「无人调用的正确函数」时只有这条会红。
+    wiring = remote_read_wiring(engine_src, locator_src)
+    check(
+        not wiring,
+        "云端读取链路接在 fromRemoteText 上（C1-6b 读盘守卫的调用点，REMOTE 分支 / openRemote 两种形态都认）",
+        "C1-6b 的读盘守卫失去调用点，升级前落盘的 >4 位 CONTAINS / PREFIX 行按原样生效，DEF-3 静默复发："
+        + "；".join(wiring),
     )
     entry = read(QUICK_ENTRY)
     check("fun matchesAny(" in entry and "QuickTrigger.normalize" in entry,

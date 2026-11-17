@@ -137,7 +137,7 @@ main `tools/verify/check_quick_trigger.py:70` 有 `UNGUARDED_MODES = {"exact", "
 ### 回滚方式
 
 长度上限是单一常量 + 一处文案，回滚 = 把 `MAX_TRIGGER_LENGTH` 改回 4 并还原 `quick_trigger_error`。
-**已保存的 >4 位条目不会被回滚删除**（读取侧从不校验长度，C1-5），回滚只影响新建/编辑入口，无数据风险。
+**已保存的 >4 位条目不会被回滚删除**（读取侧从不按长度丢弃条目，C1-5；云端存量行只按 C1-6b 收严匹配方式，条目本身不删），回滚只影响新建/编辑入口，无数据风险。
 
 ---
 
@@ -314,9 +314,9 @@ when {
 | C1-2 | 校验只有**一个**实现，Screen / ViewModel / SyncRepository 都委托它 | `app/src/main/java/**` 内 `in 2..4` 字面量出现次数 == 0；`isValidShortcutTrigger` 定义处 == 1。`tools/verify/**` 里的 `2..4` 只允许出现在断言**文案**中，不得充当判定值（否则 `check_phrase_csv_import.py:641` 自己就把这条断言判红，见 §7.3） |
 | C1-3 | `setRemoteShortcut` 非法输入不静默 return | main `:309` 的 `return` 改为可呈现的错误（或调用方先校验），有对应单测 |
 | C1-4 | 长度不改变 mode：编辑器不因 >4 位改写用户选的匹配方式 | 输入 5 位 trigger 后 mode 字段值不变（单测） |
-| C1-5 | 读取侧从不校验长度、从不截断 | 13 位 trigger 的规则行仍完整解析、完整参与匹配（`QuickPhraseEngine.fromText` 单测） |
+| C1-5 | 读取侧从不按长度**丢弃 / 截断**条目：不丢行、不截 `trigger`、不截正文。唯一例外是 C1-6b —— 对云端落盘文件可以按长度把 `PREFIX` / `CONTAINS` **收严为 `EXACT`**，那是重新解释匹配方式，不是校验长度判死；`trigger` 本身仍不校验、不截断，`trigger` / `label` / `content` / `weight` / `kind` 一律原样 | 13 位 trigger 的规则行仍完整解析、完整参与匹配（`QuickPhraseEngine.fromText` 单测）；`fromRemoteText` 对同一行只改 mode，trigger 长度与正文逐字不变；`check_phrase_csv_import.py` 按语义断言读盘侧没有「按长度 `continue` / 丢弃 / 截断」的分支（不是按 token 一刀切，否则 C1-6b 的合法收严会被误判成 C1-5 违规） |
 | C1-6 | 覆盖条目（`setRemoteShortcut` 新建）mode 规则：`len ≤ 4 → PREFIX`，`len > 4 → EXACT` | 5 位简写生成的覆盖条目 `mode == EXACT`；4 位的仍 `== PREFIX`。与 main `UNGUARDED_MODES = {exact, regex}` 同口径 |
-| C1-6b | **读盘侧同源守卫（2026-11-17 VOCA-423 追加）**：解析 `filesDir/quick_phrases_remote.txt` 时，`len > 4` 且声明 `PREFIX` / `CONTAINS` 的行按 `EXACT` 生效。C1-6 的降级只做在拉取侧，对「装上新包后再点一次立即同步」的设备才有效，升级前的存量行不回写；读盘侧不兜住，最初抱怨的那台设备升级后行为一切照旧。守卫只重解释匹配方式，`trigger` / `label` / `content` / `weight` / `kind` 原样，磁盘文件不回写。作用域限**云端落盘文件**：C1-5 保护的是项目自己或用户写的数据（内置 assets、`quick_phrases_user.txt`、CSV 导入），云端文件是同步产物，其 mode 口径由本节定义 | 单测 `QuickPhraseLegacyRemoteRowTest`：①存量 `dtwsl\t…\tCONTAINS` 行走 `fromRemoteText` 后五笔态敲 `dtws` 无快捷候选；②敲满 `dtwsl` 仍命中 245 字正文；③`dtws` 及以内的 `PREFIX`/`CONTAINS` 行为不变；④`fromText` 仍原样返回声明的 mode（C1-5 不回归）|
+| C1-6b | **读盘侧同源守卫（2026-11-17 VOCA-423 追加；同日 VOCA-454 按质检打回项改稿）**：解析 `filesDir/quick_phrases_remote.txt` 时，**规则文件第 1 字段的原样长度**（不 trim、不小写折叠）`> 4` 且**生效 mode** ∈ `{PREFIX, CONTAINS}` 的行按 `EXACT` 生效。「生效 mode」指 `QuickMatchMode.parse` 之后的值，故声明 `contains` / `fuzzy` / `~` 与缺省第 4 字段（→ `PREFIX`）都在守卫内；`EXACT` / `REGEX` 不受守卫，与 `check_quick_trigger.py` 的 `UNGUARDED_MODES = {exact, regex}` 同口径。阈值 4 与 `IspeechImeService.MAX_CODE_LENGTH` 同值（该常量 `private`，引擎侧引用不到，故 `QuickPhraseEngine.WUBI_REACHABLE_TRIGGER_LENGTH` / `CsBabyClient` / `QuickTrigger.WUBI_REACHABLE_LENGTH` 三处各写字面 4；复审条件②：该值任何变动重审本条）。口径与拉取侧 `CsBabyClient.remoteMatchMode`（VOCA-391 / PR #19）等价且幂等 —— **两边都按原样字段长度计**，已落盘的 `EXACT` 再读仍是 `EXACT`。把 `guardedRemoteMode` 改为委托 `QuickTrigger.mayMisfire`（归一化口径）**列为待确认，不是等价改写**：带尾随空格的畸形行 `"dtws \t…"` 归一化后长度 4 会逃出守卫，而 `QuickPhraseEngine` 的 PREFIX 是双向 `startsWith`，敲 `dtws` 仍能顶出长正文；写侧 `SyncRepository` 不 trim，这种行可以落盘。要收成归一化口径必须先改代码 + 补一条带尾随空格的单测，再动本条文字。守卫只重解释匹配方式，`trigger` / `label` / `content` / `weight` / `kind` 原样，磁盘文件不回写。作用域限**云端落盘文件**：用户文件的 mode 是用户在编辑器里选的（C1-4 / C1-9），CSV 导入写的也是用户文件（`PhraseCsvImport.kt:189`，`len==1→EXACT`、其余 `PREFIX`），内置 assets 的 `>4 位 + prefix` 是已裁封闭例外（C1-10，实测 `sogou_phrases.txt` 25 行、18 条 5 位 `prefix`），三者都不受本条约束；只有云端文件的 mode 由客户端映射决定、无独立语义。**已知偏差**：设置页卡片仍按磁盘声明的 mode 展示（`QuickPhraseCodec.parse`），归口 VOCA-207 的 C1-6 / C1-7 同批改，**需该 issue owner 认领**，未认领即视为无人负责的偏差；本条只约束引擎生效口径与快捷短语面板 | 单测 `QuickPhraseLegacyRemoteRowTest`：①存量 `dtwsl\t…\tCONTAINS` 行走 `fromRemoteText` 后五笔态敲 `dtws` 无快捷候选；②敲满 `dtwsl` 仍命中 245 字正文；③`dtws` 及以内行为不变；④`fromText` 仍原样返回声明的 mode（C1-5 不回归）；⑤缺省与 `fuzzy` 同样降级；⑥`exact` / `regex` 行不受守卫。**接线断言（C1-6b 不可分割的一部分）**：`tools/verify/check_phrase_csv_import.py` 断言云端读取链路的解析调用是 `fromRemoteText` —— PR #26 独立形态锁「`openRemote(...)` 的解析走 `fromRemoteText`」，并入 VOCA-207 的 `ruleGroups()` / `addGroup(input, source)` 形态后锁「`source == QuickSource.REMOTE` 分支不得走 `fromText`」；①–⑥ 只调函数，守卫退化成无人调用的正确函数时**只有这条会红** |
 | C1-7 | >4 位时 UI 给可达性提示（非阻断）；确认按钮禁用时必须显示禁用原因 | 存在 `quick_trigger_reachable_hint` 中英文案；`enabled == false` 时弹窗内可见「还差什么」（修 §0 修正 5 的归因错位） |
 | C1-8 | `MAX_CODE_LENGTH = 4`、`MAX_PINYIN_LENGTH = 12` 不变 | `check_quick_trigger.py` L8 / L9 缓冲区断言原样通过 |
 | C1-9 | 用户为 >4 位 trigger 显式选 PREFIX/CONTAINS 时允许保存，但显示误弹警示 | 存在 `quick_trigger_prefix_long_content_warn` 文案；`len(trigger) > 4 && mode ∈ {PREFIX, CONTAINS}` 时可见；与脚本 `:159` 的 warn 同级 |
@@ -448,9 +448,10 @@ F 节的自我声明正是决策 1 要废止的那条不变量。漏改它，`to
 | 位置（行号取 main `f728231`） | 现状 | 调整为 |
 |---|---|---|
 | `:24`（模块 docstring F 项） | 「导入不破坏既有约束：手动录入仍是 2–4 位小写…」 | 口径改 2–12、单一来源 `QuickTrigger`；后半句「落盘转义仍只 CR/LF/TAB」保留不变 |
-| `:637`（`check_existing_contract_unchanged` docstring） | 「导入不能放宽手动录入的 2–4 位约束」 | 改为「导入路径不放宽**读取侧**（不截断、不校验长度，C1-5），手动录入口径与 `QuickTrigger` 同源」 |
+| `:637`（`check_existing_contract_unchanged` docstring） | 「导入不能放宽手动录入的 2–4 位约束」 | 改为「导入路径不放宽**读取侧**（不按长度丢弃 / 截断条目，C1-5；对云端文件允许按长度把 `PREFIX`/`CONTAINS` 收严为 `EXACT`，C1-6b），手动录入口径与 `QuickTrigger` 同源」 |
 | `:640-642` | 断言 `internal fun isValidShortcutTrigger(...)` 与 `"trigger.length in 2..4"` 同时存在于 `QuickPhrasesScreen.kt` | 改为 ①`QuickPhrasesScreen.kt` 内不再出现 `2..4` 字面量；②校验定义处 == 1（C1-2）。若该函数迁出 Screen，断言目标同步改指 `QuickTrigger.kt`，**不得**靠删掉整段 F 节来「通过」 |
 | `:646-647` | 断言 `QuickEntry.kt` 内 `fun matchesAny(` 存在，文案「QuickOverride 覆盖判定未被改动」 | 断言**保留**（C3-10 要求 `matchesAny` 仍在用）；文案改为「覆盖判定按归一化 trigger（C2-2）」——阶段 2 改的就是它的判定基准，写「未被改动」会在下一轮把正确修复判成回归 |
+| C1-5 读取侧断言的**判定方式**（2026-11-17 VOCA-454 追加，合并窗口门禁 DEF-4） | 按 token 一刀切：`QuickPhraseEngine.kt` + `QuickLocator.kt` + `QuickPhraseCodec.parse` 里出现 `isValidShortcutTrigger` / `MIN_TRIGGER_LENGTH` / `MAX_TRIGGER_LENGTH` / `trigger.length` 任一即 fail | 拆成两条语义断言：①**禁止**「按 trigger 长度 `continue` / 丢弃 / 截断条目」的分支，唯一豁免是返回值类型为 `QuickMatchMode` 的判定函数（C1-6b 的 mode 收严）；②**必须**有接线断言 —— `source == QuickSource.REMOTE` 的读取链路调用 `fromRemoteText`，PR #26 独立形态则锁 `openRemote(...)` → `fromRemoteText`。按 token 判会把 C1-6b 允许的收严误判成 C1-5 违规（并集树实测 `passed=45 failed=1`），而真正的「判死条目」换个等价写法反而测不到 —— 门禁要判的是意图，不是字面 |
 
 新增一条跨脚本口径断言（防第三次「编辑器与校验器分裂」，即修正 4 的同一类病）：`check_quick_trigger.py` 与 `check_phrase_csv_import.py` 对快捷字母长度不得各说一套，长度判定值只从 `QuickTrigger` 取，脚本侧不再抄第二份常量。
 
@@ -483,7 +484,7 @@ F 节的自我声明正是决策 1 要废止的那条不变量。漏改它，`to
 **回滚顺序**（最小代价路径）：
 ① C3 不可单独回滚 —— 若必须回滚则整个 PR 一起回滚，并在发布说明标注数据风险；
 ② C4 可单独回滚，只影响可见性（且 main 现状已是修复态，回滚等于退回 `2a1883e` 的缺陷）；
-③ C1 可单独回滚为 4，>4 的已存条目继续有效（读取侧不校验），只是不能编辑；
+③ C1 可单独回滚为 4，>4 的已存条目继续有效（读取侧不按长度丢弃条目，C1-5），只是不能编辑；
 ④ C2 回滚需同时清掉冲突文件，否则冲突徽标会指向已不存在的判定口径。
 
 ## 10. 可观测性（新增，必须实现）
