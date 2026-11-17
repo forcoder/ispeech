@@ -242,6 +242,7 @@ tools/deploy/deploy.sh --target emulator                  # 从 main 出包并�
 ## 文档
 
 - `docs/sogou-feature-matrix.md` — 搜狗五笔功能对照表（已实现 / 差异 / Roadmap）
+- `docs/keyboard-ui.md` — 键盘界面规格（字号 / 配色 / 间距 / 换行键，含搜狗同机实测像素）
 - `docs/t9-and-symbols.md` — 九宫格 T9、颜文字 / 更多符号、输入法切换（键位设计与服务侧接线）
 - `docs/stats-and-hanconversion.md` — 输入统计与简繁转换（数据来源、许可、接线）
 - `docs/quick-phrase-enhancement.md` — 快捷短语收藏 / 最近使用
@@ -252,15 +253,17 @@ tools/deploy/deploy.sh --target emulator                  # 从 main 出包并�
 全部为纯 Python3 静态检查（无第三方依赖、不联网、不编译），改动后本地直接跑：
 
 ```bash
-for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger; do
+for s in static input_logic t9 stats phrase_usage pinyin crosscut quick_trigger keyboard_ui; do
   python3 tools/verify/check_$s.py
 done
 ```
 
 当前状态（v1.5）：`check_static 5/5`、`check_input_logic 40/40`、`check_t9 87/87(+1 known warn)`、
 `check_stats 53/53`、`check_phrase_usage 31/31`、`check_pinyin 64/64`、`check_crosscut 80/80`、
-`check_quick_trigger 5/5(+1 known warn)`。
+`check_quick_trigger 5/5(+1 known warn)`、`check_keyboard_ui 19/19`。
 另外 `tools/verify/check_crosscut.py` 专门做「接线体检」（枚举 / 资源 / 服务分支 / 设置闭环是否一致）；
+`tools/verify/check_keyboard_ui.py` 锁 VOCA-30 的键面规格取值（字号 / 键间距 / 圆角 / 字母页栅格 / 底行权重 /
+换行键图标）—— 这份规格 11-10 合进 main 后被 `07214d6` 用陈旧分支整体覆盖过，靠断言而不是靠人记得；
 `tools/verify/check_quick_trigger.py` 校验快捷短语「简写（触发码）」规则 —— 尤其防止**单字母简写误用
 prefix 模式导致静默失效**（见 `docs/quick-phrase-enhancement.md` 的「简写」一节）。
 
