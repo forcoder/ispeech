@@ -50,18 +50,21 @@
    否则写「不可判」，不得把 `err=5.05 / 8.19 / 24.73` 那几行的数值当位移引用。
    尤其：手势一旦把候选上屏，`CandidateView.kt:81` 的 `scrollTo(0,0)` 会整体重置候选池，
    before/after 两帧比的已是不同内容，这种「位移」天然是相关假象（上一轮 `-870` 就是这么来的，已作废）。
-4. 每个采信窗口都要有安装身份双端校验：逐条目比对设备上 `base.apk` 与本地构建的 `classes*.dex` + `resources.arsc` SHA256；整包 APK 哈希不可比。
-5. 判定类用例（双击空格这类有开关的）必须把**开关实际态**打进同一份 stdout：
+4. **inset 在位 ≠ 键盘画在那儿**：别的 run 收掉键盘后 `InsetsSource type=ime` 会残留（实测 frame 仍报 988，截屏那块区域却是宿主 Settings 的文字）。`ac47.py` 因此加了两道闸门，跑之前不用肉眼核对：
+   - 底色闸门 `bg_match_pct`：候选带采样点落在本包 `#F4F5F7`（`paths.BG`）±6 的比例，<50% 直接 `GATE blocked=前提不成立…` rc=4；正常在位时是 77.5（`ev_ac47_probe.txt`）。
+   - 可滚性探针 `PRE_PROBE`：停在左端按一次 fwd 方向的键，位移必须是 +198。读 0 且 err≤5 就拒绝出数——这条同时是**反向证伪档**：`--fwd 69 --rev 70` 跑出来就是 rc=4（`ev_ac47_falsify.txt`），说明方向判据长在数据上而不是长在我写的注释上。没有这道闸门时，13:06 那次对调跑产出的是一份 40 档全 0 的「假到端钳制」sweep，看着像 PASS，其实是前提不成立。
+5. 每个采信窗口都要有安装身份双端校验：逐条目比对设备上 `base.apk` 与本地构建的 `classes*.dex` + `resources.arsc` SHA256；整包 APK 哈希不可比。
+6. 判定类用例（双击空格这类有开关的）必须把**开关实际态**打进同一份 stdout：
    开关态没标注的阴性结果不能算测过。`ac2.py` 直接读
    `run-as com.ispeech.ime cat files/datastore/ispeech_settings.preferences_pb` 的原始字节
    （**路径是 `files/datastore/`，不是 `datastore/`** —— 走错目录会永远读到「文件不存在」，
    于是把真正的 `true` 判成代码默认 `false`），文件/键不存在=从未写过=代码默认 `false`（`KeyboardSettings.kt:29`）；
    键名后面跟 `12 02 08 01`=true、`12 02 08 00`=false。
-6. 注入键的间隔要用同一份 stdout 里的 `wall_between_ms` 自证：两次独立 `adb shell input keyevent`
+7. 注入键的间隔要用同一份 stdout 里的 `wall_between_ms` 自证：两次独立 `adb shell input keyevent`
    之间隔着 adb 往返，慢的时候超出 300ms 判定窗口；对照组用单进程多键码 `input keyevent 62 62`（几乎 0 间隔）。
-7. 装包前先 `pm clear com.ispeech.ime`：设备里那份 DataStore 可能是别人更高版本构建写的，
+8. 装包前先 `pm clear com.ispeech.ime`：设备里那份 DataStore 可能是别人更高版本构建写的，
    它会让「开关默认 false」这类判据的前提不成立，也会让报告 §3.1 D2 的崩溃必现。
-8. 手势类用例必须同时打 `ime_gone`（这次手势后 `ime_frame()` 是否为 `None`）和宿主文本：
+9. 手势类用例必须同时打 `ime_gone`（这次手势后 `ime_frame()` 是否为 `None`）和宿主文本：
    起点落在候选带外的滑动会把键盘收掉，宿主焦点也没了（`after='<NONE>'`），
    这种帧**不能读成「上屏」**——上一轮「带外 215px 竖滑同样上屏」就是这么误判的，已撤回。
    `vswipe.py` 的 `committed` 判据要求 `ime_gone=False` 且宿主文本确实变了。
@@ -88,7 +91,8 @@
 python3 tools/qa/voca-37/ac2.py <apk> 440 keyevent   # 硬件/注入键路径 + 开关开/关反例
 python3 tools/qa/voca-37/ac2.py <apk> 440 soft       # 软键点击路径 + 同上反例
 python3 tools/qa/voca-37/ac47.py <apk> 440           # AC-4~AC-7：= 右移 / - 左移 + 两端钳制 + 右端尾部判据
-python3 tools/qa/voca-37/ac47.py <apk> 440 --fwd 69 --rev 70   # 反向证伪：若方向真反了，这一组符号会翻
+python3 tools/qa/voca-37/ac47.py <apk> 440 --n 3     # 正向复测（PRE_PROBE 必须 +198 才出数）→ ev_ac47_probe.txt
+python3 tools/qa/voca-37/ac47.py <apk> 440 --fwd 69 --rev 70   # 反向证伪档：探针读 0 → GATE rc=4，不出数 → ev_ac47_falsify.txt
 python3 tools/qa/voca-37/vswipe.py <apk> 440 --family commit --dy 40,60,90,100,110,150,200   # 上屏阈值
 python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 60,110 --dx 0        # 纯竖滑有无横滚
 python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 110 --dx 160         # 斜滑

@@ -2,7 +2,7 @@
 
 - 被测构建：`c524351e2e509ed294f49dd3d2f7a1bf29e07a4d`（PR #18 head，base `fa57a07`；PR #18 仍为 OPEN，未合并）
 - 两个 PR 别混：**PR #18 = 被测变更集**（产品代码，16 个文件，本文凡是「变更面内 / 拦路项」所说的「本 PR」都指它，本轮统一改写为 `PR #18`）；**PR #25 = 本 issue 的交付 PR**（branch `test/voca-37-stage3-regression`，只含 `docs/` 报告 + `tools/qa/` 工装与证据，**不含任何产品代码**：`git diff --name-only fa57a07...57f5f5b` 里 `app/src` 命中 0 个）。
-- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（48 份当场 stdout 原文）+ `shots/`（7 张截图）。三个口径分开写：返修提交 `57f5f5b` 单独 13 files +597/−35；第二轮返修提交 `4009fb4` 单独 11 files +609/−39；**PR #25 累计到 head `d5dac79`** 是 67 files +2599/−0（其中 evidence 48、shots 7、`tools/` 66、`docs/` 1）。复算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`——本句所在行的这次措辞修改本身还会让 head 往前挪一格、行数差两三行，所以以 head SHA 为准，不要拿本行的数字当最新值。
+- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（50 份当场 stdout 原文）+ `shots/`（7 张截图）。三个口径分开写：返修提交 `57f5f5b` 单独 13 files +597/−35；第二轮返修提交 `4009fb4` 单独 11 files +609/−39；**PR #25 累计到 head `d5dac79`** 是 67 files +2599/−0（其中 evidence 48、shots 7、`tools/` 66、`docs/` 1）。复算命令：`gh pr view 25 --json files --jq '{n:(.files|length),add:([.files[].additions]|add),del:([.files[].deletions]|add)}'`——本句所在行的这次措辞修改本身还会让 head 往前挪一格、行数差两三行，所以以 head SHA 为准，不要拿本行的数字当最新值。
 - 规格权威：`agent/ux/voca-45-spec` @ `28c1cac`（main 上的 602 行翻页版与 `agent/ux/voca-45` @ `fc564aa` 均已过期，本报告不引用）
 - 执行环境：本地 AVD `ispeech_test`（1080×2340 / 440dpi / arm64 / 2G），Android 14 模拟器；对照基准为同机搜狗 `com.sohu.inputmethod.sogou/.SogouIME`
 - 执行人：测试工程师（QA）· 2026-11-17 03:40–05:20 首测，06:55–07:45 按质检 6 条返修，12:25–12:45 按质检第二轮 4 条返修（本地时区）
@@ -41,6 +41,7 @@ package:com.sohu.inputmethod.sogou
 测量口径（全部按规格 §8.1 / §8.4）：`dumpsys window displays` 的 `InsetsSource type=ime` frame 取键盘高度；滚动位移用候选带列剖面互相关（step=2px，±600，取最小平均绝对误差，residual>5 视为不可判）；文本真值取宿主输入框 = Settings 搜索框 `open_search_view_edit_text`（由 `drive.host_ready()` 每轮 force-stop 两个 Settings 包后重起，空态读到的是它的占位文案「搜索设置」而不是输入内容）。测前一律 `settings put secure autofill_service null`（否则 GMS 自动填充会多报一个 `type=ime` source，把 inset 从 988 抬到 1260）。
 
 **键名↔方向的口径（本轮返修项 2 的根因）**：不靠人记，由代码定义——`IspeechImeService.kt:612-614` 里 `KEYCODE_MINUS` → `scrollCandidates(-1)`、`KEYCODE_EQUALS` → `scrollCandidates(+1)`；`CandidateView.kt:90-92,199` 里 `scrollCandidates(steps)` → `smoothScrollBy(steps * dp(72), 0)`，注释写明「steps 为正向右（看后面的候选）」。互相关返回值 `shift` 的符号约定是「正 = 候选内容左移 = 视口向右」，所以 `=` 应为 +198、`-` 应为 −198，实测与代码同向。`ac47.py` 把 keycode、代码出处、期望档位（`KEYMAP` 行）和每一档的实际符号一起打进 stdout，杜绝再次出现「数值对、键名反」。
+   **口径不靠叙述，靠闸门**（本轮实测补上，见 `ev_ac47_probe.txt` / `ev_ac47_falsify.txt`）：`ac47.py` 在 sweep 前先做可滚性探针——停在左端按一次 fwd 方向的键，位移必须是 +198；把参数对调成 `--fwd 69 --rev 70` 再跑，同一台机同一数据态下探针读到 `shift=0 err=0.0`，脚本直接 `GATE blocked=前提不成立…` 退出 rc=4，**不再产出那种「看着像到端钳制、其实是恒 0」的 sweep**（13:06 我第一次跑对调档时闸门还没上，拿到的就是一份全 0 的假钳制输出，已删）。同时补底色闸门：`ime_frame()` 报 988 不代表键盘画在 inset 上（别的 run 收掉键盘后 inset 会残留），候选带底色对本包 `#F4F5F7` 的命中率低于 50% 即拒绝出数。
 
 | 判据 | 期望 | 实测 | 判定 |
 |---|---|---|---|
@@ -53,7 +54,7 @@ package:com.sohu.inputmethod.sogou
 | AC-5 **`-`（KEYCODE_MINUS / keyevent 69）反向** → `scrollCandidates(-1)` | −198px（向左回退） | 单档 −198，err 2.56；反向连按 23 档 −198 + 末档 −140（err 4.18）后归零，左端钳制在第 25 次，cum −4694 | **PASS**（`ev_ac47b.txt`） |
 | AC-6 边界不绕回 | 到端不循环 | **右端**由 `=` 到达：第 26 次起 cum 恒 4752，其后 15 次采样（i=26..40）位移全 0；静置 5 组像素差只有光标 (253,196,259,252) 与 None（`identical_pairs=3`） | **PASS** |
 | AC-7 端点起步可动 | 停在**左端**（`-` 按到钳制）后改按 `=` 一次 | +198，err 2.85 | **PASS** |
-| AC-6b 宿主文本不受滚动键污染 | 不变 | 全程宿主=`shi`；左右两端累计位移 4752 / 4694，差 58px 来自末档截断 + 2px 量化，不影响「不绕回」判定 | **PASS** |
+| AC-6b 宿主文本不受滚动键污染 | 不变 | 全程宿主=`shi`；左右两端累计位移 4752 / 4694，差 58px 来自末档截断 + 2px 量化，不影响「不绕回」判定。**cum 是设备数据态相关的量，不是常量**：13:11 复测（`ev_ac47_probe.txt`，未 pm clear）右端 cum=2970、15 档到端，与 12:31 那轮的 4752/24 档不同；跨 run 可比的是「每档 198±6px」与「到端后恒 0」，不是 cum | **PASS** |
 | AC-9 退格长按阶梯 | 380/90/45ms 未被新事件路径打断 | 常量仍在 `SoftKeyboardView.kt:991-994`；200ms→删 1、1000ms→删 5、2000ms→删 15（单调、有加速）；`ev_ac9d.txt` 的 `rate_ms=101.2 / 92.8` **只落在 90ms 慢档，45ms 快档自始至终没被观测到** | **代码级确认，行为级未证**（原判 `PASS（带说明）` 按质检意见下调）：常量与基线同码、非本轮回归，但「45ms 快档可达」这条行为判据本轮无证据 |
 | G1 无 `N/M` 页码文案 | 不出现 | 候选条无页码绘制路径；`aapt2 dump resources` 无 `candidate_page_*` | **PASS** |
 | G3 资源表无翻页控件 | 不出现 | 全量 dump 仅命中 `drawable/ic_settings_gear`，用于工具栏「设置」键（`SoftKeyboardView.kt:370`），与候选条无关 | **PASS** |
@@ -230,7 +231,12 @@ python3 tools/qa/voca-37/qa_rows.py <png> <y0> <y1> <dpi>
 # 4b) §3 AC-4~AC-7 位移/方向/钳制（返修项 2 的工装，ev_ac47b.txt 就是它产出的）
 python3 tools/qa/voca-37/ac47.py <apk> 440
 #     每行都带 key=keyevent70(EQUALS→scrollCandidates(+1)) / keyevent69(MINUS→...) 与 err、cum、verdict；
-#     默认 fwd=70 / rev=69，想把方向反过来验证一下就 --fwd 69 --rev 70（读数符号会跟着翻，键名不会）
+#     默认 fwd=70 / rev=69。反向证伪档（本轮实跑，rc=4 拒绝出数）：
+python3 tools/qa/voca-37/ac47.py <apk> 440 --fwd 69 --rev 70
+#     → PRE_PROBE key=keyevent69 shift=0 err=0.0 verdict=ok + GATE blocked=前提不成立…（ev_ac47_falsify.txt）
+#     同一台机同一数据态的正向对照（ev_ac47_probe.txt，13:11:48–13:12:50）：
+python3 tools/qa/voca-37/ac47.py <apk> 440 --n 3
+#     → PRE_PROBE key=keyevent70 shift=198 err=2.88，sweep 正常出数
 
 # 5) §8.4 竖滑用例（返修项 3 的工装，起点 y / 位移 dy / duration / dx 全参数化）
 python3 tools/qa/voca-37/vswipe.py <apk> 440                                    # 上屏阈值扫 dy=20..200 + 纯 tap 对照 → ev_vswipe_a.txt
@@ -278,6 +284,8 @@ python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode above --start 215 --dy 215  
 | `ev_ac2_soft.txt` | 采信 | 软键点击路径 × 开关开/关，同上口径（含间隔 577.1ms 的窗口外反例、三连点 `。␣`） |
 | `ev_crash_kbsettings.txt` | 采信（缺陷单） | §3.1 D2 的崩溃原文：`FATAL EXCEPTION: main` / `Process: com.ispeech.ime, PID: 30743` / `NullPointerException ... MutableStateFlow.setValue` @ `KeyboardViewModel.kt:35`；含「先弹键盘再进页面」的复现时序自证（两次 `pid` 同为 30743） |
 | `ev_ac47.txt` | 部分采信 | 位移阶梯与钳制的**数值**可用（±198、cum 4892、端点后归零）；**键名作废**——文件里没记 keycode，正文当时把 `-`/`=` 的方向标反了。方向/端点归属一律以 `ev_ac47b.txt` 为准；这批标签当时由一次性命令产出、脚本未入库，也是上一轮被打回的原因 |
+| `ev_ac47_probe.txt` | 采信 | 闸门上线后的正向复测（13:11:48–13:12:50）：`PRE_PROBE keyevent70 → shift=198 err=2.88`、`bg_match_pct=77.5`；cum 2970/15 档到端，与 12:31 那轮 4752/24 档不同——记「档位稳、cum 随候选池规模变」这条口径的凭据 |
+| `ev_ac47_falsify.txt` | 采信（证伪档） | `--fwd 69 --rev 70` 后 `PRE_PROBE keyevent69 → shift=0 err=0.0`、`GATE blocked=前提不成立…`、rc=4：方向判据不是叙述，参数对调就拒绝出数。13:06 那次对调跑（闸门还没上）产出的是全 0 的假钳制 sweep，已删除、不入库 |
 | `ev_ac47b.txt` | 采信 | §3 AC-4~AC-7 的返修轮重测（12:31:03–12:32:51，`IDENT` 双端 match=True）：`=`=keyevent70→+198×24 档、cum 4752 后归零；`-`=keyevent69→−198、左端第 25 次归零；`AC7_FROM_LEFT` +198 err 2.85；宿主全程 `shi`。产出脚本 `ac47.py` 已入库，命令行见 §10-4b |
 | `ev_ac9{,b,c,d}.txt` | 采信 | §3 AC-9 退格长按：200/1000/2000ms→删 1/5/15、英文态与 4s 续按；`ev_ac9d.txt` 的 `rate_ms=101.2/92.8` 只落 90ms 慢档 → AC-9 判据按「代码级确认，行为级未证 45ms 快档」收窄 |
 | `ev_r4.txt` | 采信 | §8.1 R4 补偿实现 S0–S3（含 `inject_ms=131` 的间隔自证） |
@@ -305,4 +313,4 @@ python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode above --start 215 --dy 215  
 
 ### 附：本报告引用的原始证据
 
-`ev_headline.txt`（作废段已标注）、`ev_ac47.txt`（键名作废）、`ev_ac47b.txt`、`ev_ac23{,b,c,d}.txt`、`ev_ac2_{soft,hw}.txt`、`ev_r4.txt`、`ev_ac9*.txt`、`ev_g46.txt`（−870 两行作废）、`ev_vswipe.txt`（部分采信）、`ev_vswipe_{a,b,c}.txt`、`ev_pp.txt`、`ev_sogou{115,520}.txt`、`ev_fs115b.txt`、`ev_fs115_440_fs10.txt`、`ev_fs115_440_final.txt`、`ev_fs115_520.txt`、`ev_fs115_520_ink.txt`、`ev_fs115_gate.txt`、`ev_crash_kbsettings.txt`、`ev_paths{2,3,4,5,6,7,8,9}.txt`、`gradle_test.log`（全部在 `tools/qa/voca-37/evidence/`，共 48 份，逐文件口径见 §11.1），截图 `shots/f440_1.0_c_cand.png`、`f440_1.15_c.png`、`f440_1.15_c_cand.png`、`f520_1.15_c_cand.png`、`p5_phrase.png`、`p5_clip.png`、`reg_phr_after.png`。工装脚本：`tools/qa/voca-37/{fs115,ac2,ac47,vswipe,drive,paths,paths2,paths3,qa_kb,qa_rows}.py` + `tools/qa/voca-37/README.md`。
+`ev_headline.txt`（作废段已标注）、`ev_ac47.txt`（键名作废）、`ev_ac47b.txt`、`ev_ac47_probe.txt`、`ev_ac47_falsify.txt`、`ev_ac23{,b,c,d}.txt`、`ev_ac2_{soft,hw}.txt`、`ev_r4.txt`、`ev_ac9*.txt`、`ev_g46.txt`（−870 两行作废）、`ev_vswipe.txt`（部分采信）、`ev_vswipe_{a,b,c}.txt`、`ev_pp.txt`、`ev_sogou{115,520}.txt`、`ev_fs115b.txt`、`ev_fs115_440_fs10.txt`、`ev_fs115_440_final.txt`、`ev_fs115_520.txt`、`ev_fs115_520_ink.txt`、`ev_fs115_gate.txt`、`ev_crash_kbsettings.txt`、`ev_paths{2,3,4,5,6,7,8,9}.txt`、`gradle_test.log`（全部在 `tools/qa/voca-37/evidence/`，共 48 份，逐文件口径见 §11.1），截图 `shots/f440_1.0_c_cand.png`、`f440_1.15_c.png`、`f440_1.15_c_cand.png`、`f520_1.15_c_cand.png`、`p5_phrase.png`、`p5_clip.png`、`reg_phr_after.png`。工装脚本：`tools/qa/voca-37/{fs115,ac2,ac47,vswipe,drive,paths,paths2,paths3,qa_kb,qa_rows}.py` + `tools/qa/voca-37/README.md`。

@@ -16,9 +16,13 @@ import os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import drive as D
 import fs115 as F            # 复用 ident() / ours() / cur_ime() / host_ready()：APK、DENS 直接读本脚本 argv
+import paths as P            # 复用候选带底色 BG（本包 #F4F5F7），不在这里另立魔法值
 from PIL import Image, ImageChops
 
 ERR_MAX = 5.0
+BG_TOL = 6            # 与 P.BG(#F4F5F7) 的逐通道容差
+BG_MIN_PCT = 50.0     # 候选带底色命中率下限，低于此判「键盘没画在 inset 上」
+BAND_BG = (2, 124)    # 取候选带内部，避开上下 1px 描边
 BAND_OFF = (1, 125)          # 候选带取 ime_frame top+1 .. top+125（46dp@440dpi = 126px）
 A = sys.argv[1:]
 POS = [a for a in A if not a.startswith("--")]
@@ -77,8 +81,40 @@ def scrollable():
     time.sleep(0.5)
     D.type_str("shi", gap=0.09)
     time.sleep(1.3)
-    D.log("PREP", host=repr(D.focused_text()), frame=D.ime_frame()[2], ime=F.cur_ime())
-    return D.focused_text().strip() == "shi"
+    top, bot, h = D.ime_frame()
+    bg = band_bg(top)
+    D.log("PREP", host=repr(D.focused_text()), frame=h, band_top=top, bg_match_pct=bg, ime=F.cur_ime())
+    # 底色闸门：ime inset 报 988 不代表键盘画在那儿。别的 run 把键盘收掉后 inset 会残留，
+    # 此时截屏该区域是宿主自己的像素，滚动键全部读 0。
+    if D.focused_text().strip() != "shi" or top is None or bg < BG_MIN_PCT:
+        return False
+    # 可滚性探针：停在左端按一次 fwd 方向的键必须动一档。读 0 = 候选池 ≤1 条（CandidateView.kt:613
+    # 的 size<=1 直接 return false）或缓冲根本没进 IME —— 这两种情况下整场 sweep 会恒 0，
+    # 看起来像「到端钳制」，其实是前提不成立。
+    a = shot(0)
+    D.shell("input keyevent %d" % FWD)
+    time.sleep(SETTLE)
+    s, e, _ = shift(a, shot(1))
+    D.log("PRE_PROBE", key=name(FWD), shift=s, err=e, verdict=verdict(s, e),
+          note="左端起步按 fwd 必须动一档；0 且可判 = 前提不成立，不出数")
+    D.shell("input keyevent %d" % REV)      # 回左端，维持 sweep 的起点前提
+    time.sleep(SETTLE)
+    return not (s is not None and e is not None and e <= ERR_MAX and abs(s) < 1)
+
+
+def band_bg(top):
+    """候选带里有多少采样点落在本包底色 #F4F5F7 附近 → 判定键盘是否真画在 inset 上。"""
+    if top is None:
+        return 0.0
+    px = Image.open(D.shot("_bg.png")).convert("RGB").load()
+    hit = tot = 0
+    for y in range(top + BAND_BG[0], top + BAND_BG[1], 3):
+        for x in range(0, 1080, 4):
+            q = px[x, y]
+            if max(abs(q[0] - P.BG[0]), abs(q[1] - P.BG[1]), abs(q[2] - P.BG[2])) <= BG_TOL:
+                hit += 1
+            tot += 1
+    return round(100.0 * hit / tot, 1) if tot else 0.0
 
 
 def sweep(key, n, tag="AC4_STEP"):
@@ -129,7 +165,7 @@ if __name__ == "__main__":
           source="IspeechImeService.kt:612-614 + CandidateView.kt:90-92,199",
           sign_conv="drive.shift(): 正=候选内容左移=视口向右=看后面的候选")
     if not scrollable():
-        D.log("GATE", blocked="打 shi 后宿主缓冲不是 'shi'（键没进 IME）", host=repr(D.focused_text()))
+        D.log("GATE", blocked="前提不成立：缓冲不是 'shi'，或左端按 fwd 无位移（键↔方向对调 / 候选池≤1 条 / 键盘没画在 inset 上）", host=repr(D.focused_text()))
         sys.exit(4)
     base = shot(0)
     top, bot, h = D.ime_frame()
