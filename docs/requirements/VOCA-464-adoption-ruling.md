@@ -172,9 +172,20 @@ H=$(gh pr view 17 --json headRefOid --jq .headRefOid)   # 重挂锚点用这一�
 gh pr view 17 --json headRefOid,files --jq '{head:.headRefOid, files:[.files[].path]}'
 git diff 8324b03..$H -- docs/keyboard-ux-spec.md | grep -c '^[+-]'
 # 4. 打回项 2 的一致性：When 与采样右界不许再出现写死的 1080
-git show "$H:docs/keyboard-ux-spec.md" | sed -n '/^### AC-10 /,/^```$/p' | grep -n 'When\|采样区' 
-#    期望：采样区右界 = 面板宽 − round(paddingEnd×density/160)，句内无「1080 −」
+#    取 AC-10 代码块「两个围栏之间」的内容（别用 sed 到第一个 ``` 为止 —— 那是围栏的**开口**，窗口只有 7 行，When 根本进不去）
+git show "${H}:docs/keyboard-ux-spec.md" \
+  | awk '/^### AC-10 /{f=1} f&&/^```/{n++; next} n==1{print} n==2{exit}' \
+  | grep -n 'When\|采样区'
+#    期望：采样区右界 = 面板宽 − round(paddingEnd 6 dp × density ÷ 160)
+#    同一窗口内「1080 −」计数必须为 0（下面这条就是那个计数，跑出来是 0）：
+git show "${H}:docs/keyboard-ux-spec.md" \
+  | awk '/^### AC-10 /{f=1} f&&/^```/{n++; next} n==1{print} n==2{exit}' | grep -c '1080 −'
 #    手算自证：1260 − round(6×520/160) = 1240 ≥ 1185 ⇒ 目标几何第 4 条完整 ⇒ 档1 PASS
+# 5. 闸门未动（让步只在判据侧）：AC-10 的 Given 四条与 8324b03 逐字一致
+P='/^Given  iSpeech 为默认输入法，宿主输入框聚焦/{f=1;print;next} f&&/^[^ ]/{exit} f'   # 只取 Given 那一块
+git show 8324b03:docs/keyboard-ux-spec.md | awk "$P" > /tmp/given_base.txt
+git show "${H}:docs/keyboard-ux-spec.md" | awk "$P" > /tmp/given_head.txt
+diff /tmp/given_base.txt /tmp/given_head.txt && echo "GIVEN 逐字一致（4 行，含 GATE 断言行）"
 ```
 
 **给洞察BA 的可测性检查点**：档1/档2 的分界是**一条可从设备读出的量**（`wm size` × `wm density` 即得逻辑宽度），不依赖词库、不依赖实现；判据行的档位建议在 `AC10` 行加 `tier=1|2` 与 `logical_w_dp=` 两列，`need` 由 4 变 3 时 `verdict` 才能翻。闸门（Given 三条）**不需要改**。**两件事请一并复核**（打回项 1/2 的可测性后果）：**(i)** 采样右界必须跟着帧宽走，否则 1260 面板上会算出 `full_count=3` 的假 FAIL；**(ii)** 347.5 dp 这条线是**派生量**（脚本现算），不进判据行、不需要设备读数 —— 它只用来决定「AC-12 不达标时该派谁」。
