@@ -81,7 +81,7 @@ def p4():
     D.tap_keys("zhongguo", gap=0.11); time.sleep(1.2)
     base = D.shot("p4_base.png")
     for _ in range(4):
-        D.shell("input keyevent 69"); time.sleep(0.35)   # '-' = 右移
+        D.shell("input keyevent 70"); time.sleep(0.35)   # '=' = 右移（IspeechImeService.kt:612-614）；起点在左端，'-' 会原地不动
     moved = D.shot("p4_moved.png")
     top, h = band_top()
     s1, e1 = scroll_px(base, moved, top)
@@ -90,7 +90,7 @@ def p4():
     s2, e2 = scroll_px(moved, after, top)
     s0, e0 = scroll_px(base, after, top)
     D.shell("input keyevent 4"); time.sleep(0.4)
-    D.log("P4_offset_reset", scroll_after_minus4=round(s1, 1), err=round(e1, 1),
+    D.log("P4_offset_reset", scroll_after_eq4=round(s1, 1), err=round(e1, 1),
           back_to_base=round(s0, 1), err0=round(e0, 1), after_commit_delta=round(s2, 1), err2=round(e2, 1),
           host=repr(host_text())[:40])
 
@@ -170,7 +170,7 @@ def p3():
     time.sleep(1.2)
     base = D.shot("p3_t9_base.png")
     t2, h2 = band_top()
-    D.shell("input keyevent 70"); time.sleep(0.4); D.shell("input keyevent 70"); time.sleep(0.4)   # '=' 左移 2 档
+    D.shell("input keyevent 70"); time.sleep(0.4); D.shell("input keyevent 70"); time.sleep(0.4)   # '=' 右移 2 档
     moved = D.shot("p3_t9_eq2.png")
     s, e = scroll_px(base, moved, t2)
     D.log("P3_t9_scroll", step2=round(s, 1), err=round(e, 1), kb_h=h2, code=repr(host_text())[:30])

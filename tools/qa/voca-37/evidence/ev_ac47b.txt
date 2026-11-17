@@ -1,0 +1,116 @@
+# VOCA-37 §3 AC-4~AC-7 位移/方向/端点钳制（返修轮 · 打回项 2）——当场 stdout 原文，未剪辑
+# 被测包：c524351 assembleDebug，sha256=52911cf22393b8292ec705a3dfef7fdf668fa37448bb8bc4d10d3fdb5afb1d5b
+# 设备：ispeech_test 1080x2340/440dpi，font_scale 1.0，default_input_method=iSpeech（装前 pm clear）
+$ adb -s emulator-5554 shell pm clear com.ispeech.ime && adb -s emulator-5554 install -r -d -g <apk>
+$ adb -s emulator-5554 shell ime set com.ispeech.ime/com.ispeech.input.IspeechImeService
+$ python3 tools/qa/voca-37/ac47.py <apk> 440
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=12:31:03	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+KEYMAP	fwd=keyevent70(EQUALS→scrollCandidates(+1))	rev=keyevent69(MINUS→scrollCandidates(-1))	step_dp=72	step_px_expect=198	source=IspeechImeService.kt:612-614 + CandidateView.kt:90-92,199	sign_conv=drive.shift(): 正=候选内容左移=视口向右=看后面的候选
+HOST	ok=True	round=1	taps=1	top=1352	h=988
+PREP	host='shi'	frame=988	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+START	frame=988	top=1352	band=[1353,1477]	host='shi'
+AC4_STEP	i=1	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.85	cum=198	verdict=ok
+AC4_STEP	i=2	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.72	cum=396	verdict=ok
+AC4_STEP	i=3	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.61	cum=594	verdict=ok
+AC4_STEP	i=4	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.58	cum=792	verdict=ok
+AC4_STEP	i=5	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.68	cum=990	verdict=ok
+AC4_STEP	i=6	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.71	cum=1188	verdict=ok
+AC4_STEP	i=7	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.4	cum=1386	verdict=ok
+AC4_STEP	i=8	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.95	cum=1584	verdict=ok
+AC4_STEP	i=9	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.36	cum=1782	verdict=ok
+AC4_STEP	i=10	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.2	cum=1980	verdict=ok
+AC4_STEP	i=11	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.27	cum=2178	verdict=ok
+AC4_STEP	i=12	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.83	cum=2376	verdict=ok
+AC4_STEP	i=13	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.46	cum=2574	verdict=ok
+AC4_STEP	i=14	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.24	cum=2772	verdict=ok
+AC4_STEP	i=15	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.55	cum=2970	verdict=ok
+AC4_STEP	i=16	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.66	cum=3168	verdict=ok
+AC4_STEP	i=17	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=3.05	cum=3366	verdict=ok
+AC4_STEP	i=18	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.42	cum=3564	verdict=ok
+AC4_STEP	i=19	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.63	cum=3762	verdict=ok
+AC4_STEP	i=20	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.95	cum=3960	verdict=ok
+AC4_STEP	i=21	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.68	cum=4158	verdict=ok
+AC4_STEP	i=22	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.34	cum=4356	verdict=ok
+AC4_STEP	i=23	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.97	cum=4554	verdict=ok
+AC4_STEP	i=24	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.59	cum=4752	verdict=ok
+AC4_STEP	i=25	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=140	err=5.05	cum=4752	verdict=unverifiable(err>5.0)
+AC4_STEP	i=26	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=27	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=28	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+CLAMP_AT	press=26	cum_px=4752	key=keyevent70(EQUALS→scrollCandidates(+1))	note=连续 3 次位移为 0 = 到端钳制（不绕回）
+AC4_STEP	i=29	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=30	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=31	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=32	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=33	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=34	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=35	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=36	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=37	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=38	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=39	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+AC4_STEP	i=40	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=0	err=0.0	cum=4752	verdict=ok
+CLAMP_TAIL	press=26	cum_px=4752	reached_by=keyevent70(EQUALS→scrollCandidates(+1))	end=右端（scrollX 到最大，看的是最后一批候选）
+AC6_TAIL	i=1	diff_bbox=(253, 196, 259, 252)
+AC6_TAIL	i=2	diff_bbox=None
+AC6_TAIL	i=3	diff_bbox=None
+AC6_TAIL	i=4	diff_bbox=None
+AC6_TAIL	i=5	diff_bbox=(253, 196, 259, 252)
+AC6_TAIL_SUMMARY	identical_pairs=3
+AC5_REV	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.56	verdict=ok
+AC5_REV_STEP	i=1	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.63	cum=-198	verdict=ok
+AC5_REV_STEP	i=2	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.97	cum=-396	verdict=ok
+AC5_REV_STEP	i=3	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.4	cum=-594	verdict=ok
+AC5_REV_STEP	i=4	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.39	cum=-792	verdict=ok
+AC5_REV_STEP	i=5	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.51	cum=-990	verdict=ok
+AC5_REV_STEP	i=6	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.78	cum=-1188	verdict=ok
+AC5_REV_STEP	i=7	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.98	cum=-1386	verdict=ok
+AC5_REV_STEP	i=8	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.37	cum=-1584	verdict=ok
+AC5_REV_STEP	i=9	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.54	cum=-1782	verdict=ok
+AC5_REV_STEP	i=10	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.61	cum=-1980	verdict=ok
+AC5_REV_STEP	i=11	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.21	cum=-2178	verdict=ok
+AC5_REV_STEP	i=12	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.66	cum=-2376	verdict=ok
+AC5_REV_STEP	i=13	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.72	cum=-2574	verdict=ok
+AC5_REV_STEP	i=14	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.03	cum=-2772	verdict=ok
+AC5_REV_STEP	i=15	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.79	cum=-2970	verdict=ok
+AC5_REV_STEP	i=16	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.89	cum=-3168	verdict=ok
+AC5_REV_STEP	i=17	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.01	cum=-3366	verdict=ok
+AC5_REV_STEP	i=18	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.39	cum=-3564	verdict=ok
+AC5_REV_STEP	i=19	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.8	cum=-3762	verdict=ok
+AC5_REV_STEP	i=20	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.29	cum=-3960	verdict=ok
+AC5_REV_STEP	i=21	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.35	cum=-4158	verdict=ok
+AC5_REV_STEP	i=22	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.92	cum=-4356	verdict=ok
+AC5_REV_STEP	i=23	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.22	cum=-4554	verdict=ok
+AC5_REV_STEP	i=24	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-140	err=4.18	cum=-4694	verdict=ok
+AC5_REV_STEP	i=25	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=26	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=27	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+CLAMP_AT	press=25	cum_px=-4694	key=keyevent69(MINUS→scrollCandidates(-1))	note=连续 3 次位移为 0 = 到端钳制（不绕回）
+AC5_REV_STEP	i=28	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=29	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=30	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=31	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=32	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=33	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=34	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=35	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=36	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=37	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=38	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=39	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=40	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=41	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=42	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=43	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+AC5_REV_STEP	i=44	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-4694	verdict=ok
+LEFT_CLAMP_AT	press=25	cum_from_right=-4694	key=keyevent69(MINUS→scrollCandidates(-1))	end=左端（scrollX=0，回到首批候选）
+AC6_TAIL	i=1	diff_bbox=None
+AC6_TAIL	i=2	diff_bbox=None
+AC6_TAIL	i=3	diff_bbox=(253, 196, 259, 252)
+LEFT_CLAMP_TAIL	identical_pairs=2
+AC7_FROM_LEFT	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.85	verdict=ok	note=端点起步可动：停在左端后按 +1 方向的键应立即一档
+HOSTTEXT	v='shi'	note=全程滚动键不得污染宿主文本
+SUMMARY	right_end_reached_by=keyevent70(EQUALS→scrollCandidates(+1))	right_end_cum_px=4752	left_end_reached_by=keyevent69(MINUS→scrollCandidates(-1))	left_clamp_press=25	fwd_step_expect=198	rev_step_expect=-198
+IDENT	name=end	t=12:32:51	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=8844	h=988

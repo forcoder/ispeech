@@ -13,6 +13,8 @@
 | `drive.py` | 测量底座：ime inset frame、键帽行检测、候选带列剖面互相关位移、宿主文本真值、软键坐标表、联系人/设置宿主拉起 |
 | `fs115.py` | 恒高 × font_scale 取证（含安装身份校验、**测量两端 IME 身份闸门**、候选带墨迹上下留白 → 判截字） |
 | `ac2.py` | 双击空格句号：按「开关态（读 DataStore 原始字节）× 键路径（`keyevent` / 软键点击）」二维取证 |
+| `ac47.py` | AC-4~AC-7 候选条横滚：按 keycode 连按并把**键名、代码出处、期望档位**一起打进 stdout（`KEYMAP` 行），杜绝「数值对、键名反」；`--fwd 70 --rev 69` 可反向证伪 |
+| `vswipe.py` | §8.4 候选带竖滑/斜滑：起点 y、`dy`、`dx`、`dur`、`mode`（inband/above/abs）全参数化，把**「有没有上屏」和「有没有横滚」分成两件事**各打一个判据 |
 | `paths.py` | §9.8 路径 ①④⑤ + 双击空格 + 快捷短语字母进搜索框 |
 | `paths2.py` | 键帽行/列检测辅助（被 `paths3.py` 复用） |
 | `paths3.py` | 带宿主守卫（`-`/`=` 必须进 IME）与联系人弹窗自关的重试版 |
@@ -39,7 +41,15 @@
 
 1. 测前 `settings put secure autofill_service null`，否则自动填充会多报一个 `type=ime` InsetsSource。
 2. 位移一律用硬件 `-`/`=`（198px=72dp 一档，可复现）；触摸 fling 位移不可复现，禁止作为判据。
-3. residual > 5 的相关结果视为不可判（多半是两帧候选内容不同，不是滚动）。
+   **键名↔方向不靠人记**：`IspeechImeService.kt:612-614` 定死 `KEYCODE_MINUS`(69) → `scrollCandidates(-1)`、
+   `KEYCODE_EQUALS`(70) → `scrollCandidates(+1)`，`CandidateView.kt:90-92,199` 是 `smoothScrollBy(steps*72dp,0)`，
+   「steps 为正向右」。互相关 `shift` 的符号约定是「正 = 内容左移 = 视口向右」，所以 **`=` 读 +198、`-` 读 −198**，
+   末端钳制在**右端**且靠 `=` 到达（左端靠 `-` 钳住）。往左端之外滚是 no-op：
+   `ev_paths4/5` 里 `minus4_shift=0` 就是「先按 `-` 再上屏」根本没滚起来的现场，那条路径的脚本已改成按 `=`。
+3. residual > 5 的相关结果视为不可判（多半是两帧候选内容不同，不是滚动）——**横滚结论只在 err ≤ 5 时给出**，
+   否则写「不可判」，不得把 `err=5.05 / 8.19 / 24.73` 那几行的数值当位移引用。
+   尤其：手势一旦把候选上屏，`CandidateView.kt:81` 的 `scrollTo(0,0)` 会整体重置候选池，
+   before/after 两帧比的已是不同内容，这种「位移」天然是相关假象（上一轮 `-870` 就是这么来的，已作废）。
 4. 每个采信窗口都要有安装身份双端校验：逐条目比对设备上 `base.apk` 与本地构建的 `classes*.dex` + `resources.arsc` SHA256；整包 APK 哈希不可比。
 5. 判定类用例（双击空格这类有开关的）必须把**开关实际态**打进同一份 stdout：
    开关态没标注的阴性结果不能算测过。`ac2.py` 直接读
@@ -51,6 +61,10 @@
    之间隔着 adb 往返，慢的时候超出 300ms 判定窗口；对照组用单进程多键码 `input keyevent 62 62`（几乎 0 间隔）。
 7. 装包前先 `pm clear com.ispeech.ime`：设备里那份 DataStore 可能是别人更高版本构建写的，
    它会让「开关默认 false」这类判据的前提不成立，也会让报告 §3.1 D2 的崩溃必现。
+8. 手势类用例必须同时打 `ime_gone`（这次手势后 `ime_frame()` 是否为 `None`）和宿主文本：
+   起点落在候选带外的滑动会把键盘收掉，宿主焦点也没了（`after='<NONE>'`），
+   这种帧**不能读成「上屏」**——上一轮「带外 215px 竖滑同样上屏」就是这么误判的，已撤回。
+   `vswipe.py` 的 `committed` 判据要求 `ime_gone=False` 且宿主文本确实变了。
 
 ## 改开关：走输入法内面板，不要走 App 设置页
 
@@ -73,4 +87,10 @@
 ```bash
 python3 tools/qa/voca-37/ac2.py <apk> 440 keyevent   # 硬件/注入键路径 + 开关开/关反例
 python3 tools/qa/voca-37/ac2.py <apk> 440 soft       # 软键点击路径 + 同上反例
+python3 tools/qa/voca-37/ac47.py <apk> 440           # AC-4~AC-7：= 右移 / - 左移 + 两端钳制 + 右端尾部判据
+python3 tools/qa/voca-37/ac47.py <apk> 440 --fwd 69 --rev 70   # 反向证伪：若方向真反了，这一组符号会翻
+python3 tools/qa/voca-37/vswipe.py <apk> 440 --family commit --dy 40,60,90,100,110,150,200   # 上屏阈值
+python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 60,110 --dx 0        # 纯竖滑有无横滚
+python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 110 --dx 160         # 斜滑
+python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode above --start 215 --dy 215                # 起点在带外
 ```

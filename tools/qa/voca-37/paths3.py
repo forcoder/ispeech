@@ -88,16 +88,16 @@ def main():
     top, h = P.band_top()
     base = D.shot("v3_base.png")
     ink, _ = P.band_ink(top)
-    for _ in range(4):
-        D.shell("input keyevent 69"); time.sleep(0.45)
-    moved = D.shot("v3_minus4.png")
+    for _ in range(4):                      # '=' = 右移 4 档（'-' 在左端是 no-op）
+        D.shell("input keyevent 70"); time.sleep(0.45)
+    moved = D.shot("v3_eq4.png")
     s1, e1 = P.scroll_px(base, moved, top)
     subprocess.run([D.ADB, "-s", D.S, "shell", "input", "tap", "532", "2125"], capture_output=True)
     time.sleep(1.6)
     after = D.shot("v3_after.png")
     s2, e2 = P.scroll_px(moved, after, top)
     s3, e3 = P.scroll_px(base, after, top)
-    D.log("V4_reset", ink=ink, minus4=round(s1, 1), err1=round(e1, 1),
+    D.log("V4_reset", ink=ink, eq4=round(s1, 1), err1=round(e1, 1),
           commit=round(s2, 1), err2=round(e2, 1), base_vs_after=round(s3, 1), err3=round(e3, 1),
           host=repr(D.focused_text())[:40], kb_h=P.band_top()[1])
     # ── ③ T9 ──
@@ -119,7 +119,7 @@ def main():
         t3, h3 = P.band_top()
         b1 = D.shot("v3_t9_base.png")
         D.log("V3_T9_cand", kb_h=h3, ink=P.band_ink(t3)[0] if t3 else None, host=repr(D.focused_text())[:40])
-        for _ in range(2):
+        for _ in range(2):                  # '=' = 右移 2 档
             D.shell("input keyevent 70"); time.sleep(0.45)
         b2 = D.shot("v3_t9_eq2.png")
         ss, ee = P.scroll_px(b1, b2, t3)

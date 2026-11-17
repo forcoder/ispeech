@@ -55,22 +55,22 @@ def main():
     base = D.shot("q4_base.png")
     ink, _ = P.band_ink(top)
     D.log("Q4_state", top=top, kb_h=h, band_ink=ink, host=repr(D.focused_text())[:50])
-    for _ in range(4):
-        D.shell("input keyevent 69"); time.sleep(0.4)
-    moved = D.shot("q4_minus4.png")
+    for _ in range(4):                      # '=' = 右移 4 档（起点在左端，'-' 是 no-op，见 ev_paths5 minus4_shift=0）
+        D.shell("input keyevent 70"); time.sleep(0.4)
+    moved = D.shot("q4_eq4.png")
     s1, e1 = P.scroll_px(base, moved, top)
     subprocess.run([D.ADB, "-s", D.S, "shell", "input", "tap", "532", "2125"], capture_output=True)
     time.sleep(1.5)
     after = D.shot("q4_after_commit.png")
     s2, e2 = P.scroll_px(moved, after, top)
     s3, e3 = P.scroll_px(base, after, top)
-    D.log("Q4_reset", minus4_shift=round(s1, 1), err1=round(e1, 1),
+    D.log("Q4_reset", eq4_shift=round(s1, 1), err1=round(e1, 1),
           commit_shift=round(s2, 1), err2=round(e2, 1), base_vs_after=round(s3, 1), err3=round(e3, 1),
           host=repr(D.focused_text())[:50], kb_h=P.band_top()[1])
-    # 联想态：上屏后候选条是联想词，再右移 2 档后直接点候选，看偏移是否再次归零
+    # 联想态：上屏后候选条是联想词，再右移 2 档（'='）后直接点候选，看偏移是否再次归零
     time.sleep(0.6)
     l1 = D.shot("q4_assoc_a.png")
-    D.shell("input keyevent 69"); time.sleep(0.4); D.shell("input keyevent 69"); time.sleep(0.4)
+    D.shell("input keyevent 70"); time.sleep(0.4); D.shell("input keyevent 70"); time.sleep(0.4)   # '=' 右移 2 档
     l2 = D.shot("q4_assoc_b.png")
     sa, ea = P.scroll_px(l1, l2, P.band_top()[0])
     D.log("Q4_assoc_scroll", shift2=round(sa, 1), err=round(ea, 1), ink=P.band_ink(P.band_top()[0])[0])

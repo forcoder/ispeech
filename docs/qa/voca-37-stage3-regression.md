@@ -1,10 +1,11 @@
 # VOCA-37 · Stage 3 键盘交互回归报告（模拟器口径）
 
 - 被测构建：`c524351e2e509ed294f49dd3d2f7a1bf29e07a4d`（PR #18 head，base `fa57a07`；PR #18 仍为 OPEN，未合并）
+- 交付物范围（计数口径，别和单个提交混）：报告 = 本文件；工装 = `tools/qa/voca-37/*.py` + `README.md`；证据 = `tools/qa/voca-37/evidence/`（48 份当场 stdout 原文）+ `shots/`（7 张截图）。返修提交 `57f5f5b` 单独是 13 files +597/−35，**PR #25 累计**（`gh pr view 25 --json changedFiles,additions,deletions`）是 61 files +2029/−0；本轮返修在其上再加一个提交，累计数以 issue 评论里的当场 `gh pr view` 输出为准。
 - 规格权威：`agent/ux/voca-45-spec` @ `28c1cac`（main 上的 602 行翻页版与 `agent/ux/voca-45` @ `fc564aa` 均已过期，本报告不引用）
 - 执行环境：本地 AVD `ispeech_test`（1080×2340 / 440dpi / arm64 / 2G），Android 14 模拟器；对照基准为同机搜狗 `com.sohu.inputmethod.sogou/.SogouIME`
-- 执行人：测试工程师（QA）· 2026-11-17 03:40–05:20 首测，06:55–07:45 按质检 6 条返修（本地时区）
-- 结论：**no-go**。两条独立理由，任一成立即拦：① 真机口径缺失——「占屏比 ≤1pp」在按真机参数（520dpi / font_scale 1.15）复现时变成 **+7.09pp**，模拟器无权定稿；② 返修轮按「开关态 × 键路径」拆开重测 AC-2 后，**硬件/注入键路径 4 组全阴性**（开关当场读到 `true`、间隔 0ms 仍不出句号），规格 AC-2 未把判据限定在软键 → 记 **P1**；另撞上一条进入设置页「键盘与输入」即崩掉整个输入法进程的 **P1**。门禁：P1 未清零不判 go。
+- 执行人：测试工程师（QA）· 2026-11-17 03:40–05:20 首测，06:55–07:45 按质检 6 条返修，12:25–12:45 按质检第二轮 4 条返修（本地时区）
+- 结论：**no-go**。**本 PR 的拦路项 2 条**，任一成立即拦：① 真机口径缺失——「占屏比 ≤1pp」在按真机参数（520dpi / font_scale 1.15）复现时变成 **+7.09pp**，模拟器无权定稿；② AC-2 按「开关态 × 键路径」拆开重测后，**硬件/注入键路径 4 组全阴性**（开关当场读到 `true`、间隔 0ms 仍不出句号），规格 AC-2 未把判据限定在软键 → 记 **P1**（D1）。此外还有一条 **`fa57a07`（main）既有的 P1** D2：进入设置页「键盘与输入」即 NPE 崩掉输入法进程。缺陷真实且用户可见，但**不是本 PR 引入、本 PR 也未触碰其代码**，是否卡住统一合并窗口属 PM/人类的范围裁决，本报告不替它判，也不计入本 PR 的拦路项。门禁：P1 未清零不判 go。
 
 ---
 
@@ -12,12 +13,13 @@
 
 | 层 | 判定 | 说明 |
 |---|---|---|
-| 模拟器可判面（AC-1/3/4/5/6/7、G1–G7、恒高×1.15、面板路径） | **全绿**（1 项 P2 观察、2 项规格/实现差异记录） | 见 §3–§6 |
+| 模拟器可判面（AC-1/3/4/5/6/7、G1–G7、恒高×1.15、面板路径） | **全绿**（1 项 P2 观察、2 项规格/实现差异记录） | 见 §3–§6；AC-4~AC-7 的键名↔方向在本轮按代码订正（步长/钳制结论不变），见 §3 与 `ev_ac47b.txt` |
 | AC-2 双击空格句号（返修轮按路径拆开） | **软键路径 PASS / 硬件·注入键路径 FAIL** | 开关态当场从 DataStore 读出 `true`；硬件键 4 组全阴性 → P1，见 §3.1 D1 |
 | AC-9 退格长按阶梯 | **代码级确认，行为级未证** | 原判 `PASS（带说明）` 按质检意见下调：只观测到 90ms 慢档，45ms 快档无证据（§3） |
-| 返修轮撞上的产品缺陷 | **1 条 P1（设置页崩溃）** | 进入「键盘与输入」即 NPE 崩掉输入法进程，见 §3.1 D2 |
+| 本 PR 变更面内撞出的产品缺陷 | **1 条 P1（D1 · 硬件键路径）** | 拦路，见 §3.1 |
+| `main`（`fa57a07`）既有缺陷，本 PR 未触碰 | **1 条 P1（D2 · 设置页崩溃）** | 质检在 `fa57a07` 构建上复现到同一 FATAL；不记在本 PR 头上，是否卡合并窗口交 PM/人类，见 §3.1 D2 |
 | 真机可判面（绝对占屏 pp、520dpi 键高观感、真机手指触摸） | **未取证** | 见 §5、§9；按 issue 约束不得写「通过」 |
-| 发布建议 | **no-go** | 门禁：P1 未清零（D1/D2）+ 真机 pp 未定稿 |
+| 发布建议 | **no-go** | 门禁：本 PR 拦路 2 条 = P1 D1 未清零 + 真机 pp 未定稿；D2 另列 |
 
 ## 2. GATE 0（前置门禁）
 
@@ -37,6 +39,8 @@ package:com.sohu.inputmethod.sogou
 
 测量口径（全部按规格 §8.1 / §8.4）：`dumpsys window displays` 的 `InsetsSource type=ime` frame 取键盘高度；滚动位移用候选带列剖面互相关（step=2px，±600，取最小平均绝对误差，residual>5 视为不可判）；文本真值取宿主输入框 = Settings 搜索框 `open_search_view_edit_text`（由 `drive.host_ready()` 每轮 force-stop 两个 Settings 包后重起，空态读到的是它的占位文案「搜索设置」而不是输入内容）。测前一律 `settings put secure autofill_service null`（否则 GMS 自动填充会多报一个 `type=ime` source，把 inset 从 988 抬到 1260）。
 
+**键名↔方向的口径（本轮返修项 2 的根因）**：不靠人记，由代码定义——`IspeechImeService.kt:612-614` 里 `KEYCODE_MINUS` → `scrollCandidates(-1)`、`KEYCODE_EQUALS` → `scrollCandidates(+1)`；`CandidateView.kt:90-92,199` 里 `scrollCandidates(steps)` → `smoothScrollBy(steps * dp(72), 0)`，注释写明「steps 为正向右（看后面的候选）」。互相关返回值 `shift` 的符号约定是「正 = 候选内容左移 = 视口向右」，所以 `=` 应为 +198、`-` 应为 −198，实测与代码同向。`ac47.py` 把 keycode、代码出处、期望档位（`KEYMAP` 行）和每一档的实际符号一起打进 stdout，杜绝再次出现「数值对、键名反」。
+
 | 判据 | 期望 | 实测 | 判定 |
 |---|---|---|---|
 | AC-1 恒高（空态→组合态 Δ） | Δ=0 | 440dpi/fs1.0：988→988 ×3 轮（04:51:56–04:53:13 身份双端校验）；440dpi/fs1.15：988→988；520dpi/fs1.15：1168→1168 | **PASS** |
@@ -44,19 +48,19 @@ package:com.sohu.inputmethod.sogou
 | AC-2 双击空格句号（开关开）**硬件·注入键路径** | 同上 | `ac2.py … keyevent`：`input keyevent 62 62`（单进程，间隔≈0）→`␣␣`；两次 adb 调用（39.1ms）→`␣␣`；569.6ms →`␣␣`；三连发 →`␣␣␣`。同轮 `SWITCH state=True src=datastore raw_hex=12020801`，宿主中文态（`MODE path=keyevent mode=chinese host='中国z'`），身份双端 `IDENT match=True`（07:32:22–07:35:03） | **FAIL（P1）** — 间隔已排除工装因素，根因见 §3.1 D1（`ev_ac2_hw.txt`） |
 | AC-2 反例（开关关，两条路径各一组） | 只出空格 | 软键 `␣␣`、硬件键 `␣␣`，同轮 `SWITCH state=False raw_hex=12020800`（键存在且值为 false，不是「没写过」） | **PASS**（`ev_ac2_soft.txt` / `ev_ac2_hw.txt`） |
 | AC-3 组合非空时首格上屏首选 | 不出「。」 | 打 `shi`→首格=`是`；再按一次=`是疑是地上霜`（继续上屏联想/候选，未插句号） | **PASS** |
-| AC-4 `-` 单档位移 | 198±6px（72dp） | 连按 6 次：198/198/198/198/198/198，residual ≤2.8 | **PASS** |
-| AC-5 反向 `=` | −198px | −198，residual 2.52；左端 clamp 在第 25 次，尾部 3 组完全相同 | **PASS** |
-| AC-6 边界不绕回 | 到端不循环 | 右端第 26 次 cum=4892px 后 5 次采样全部 4892；尾部像素差 bbox 仅 (242,430,248,492)=光标，之后 None | **PASS** |
-| AC-7 端点起步可动 | 左端按 `-` 立即 +198 | +198，residual 2.8 | **PASS** |
-| AC-6b 宿主文本不受滚动键污染 | 不变 | 全程宿主=`shi` | **PASS** |
+| AC-4 **`=`（KEYCODE_EQUALS / keyevent 70）单档位移** → `scrollCandidates(+1)` | +198±6px（+72dp，向右看后面的候选） | `ac47.py`：连按 24 次每档 +198（err ≤3.05，cum 4752）；第 25 次只剩 +140（err 5.05 → 按自家口径记不可判，正是快到位时 `smoothScrollBy` 被截短的形状）；第 26 次起恒 0 | **PASS**（`ev_ac47b.txt`） |
+| AC-5 **`-`（KEYCODE_MINUS / keyevent 69）反向** → `scrollCandidates(-1)` | −198px（向左回退） | 单档 −198，err 2.56；反向连按 23 档 −198 + 末档 −140（err 4.18）后归零，左端钳制在第 25 次，cum −4694 | **PASS**（`ev_ac47b.txt`） |
+| AC-6 边界不绕回 | 到端不循环 | **右端**由 `=` 到达：第 26 次起 cum 恒 4752，其后 14 次采样位移全 0；静置 5 组像素差只有光标 (253,196,259,252) 与 None（`identical_pairs=3`） | **PASS** |
+| AC-7 端点起步可动 | 停在**左端**（`-` 按到钳制）后改按 `=` 一次 | +198，err 2.85 | **PASS** |
+| AC-6b 宿主文本不受滚动键污染 | 不变 | 全程宿主=`shi`；左右两端累计位移 4752 / 4694，差 58px 来自末档截断 + 2px 量化，不影响「不绕回」判定 | **PASS** |
 | AC-9 退格长按阶梯 | 380/90/45ms 未被新事件路径打断 | 常量仍在 `SoftKeyboardView.kt:991-994`；200ms→删 1、1000ms→删 5、2000ms→删 15（单调、有加速）；`ev_ac9d.txt` 的 `rate_ms=101.2 / 92.8` **只落在 90ms 慢档，45ms 快档自始至终没被观测到** | **代码级确认，行为级未证**（原判 `PASS（带说明）` 按质检意见下调）：常量与基线同码、非本轮回归，但「45ms 快档可达」这条行为判据本轮无证据 |
 | G1 无 `N/M` 页码文案 | 不出现 | 候选条无页码绘制路径；`aapt2 dump resources` 无 `candidate_page_*` | **PASS** |
 | G3 资源表无翻页控件 | 不出现 | 全量 dump 仅命中 `drawable/ic_settings_gear`，用于工具栏「设置」键（`SoftKeyboardView.kt:370`），与候选条无关 | **PASS** |
-| G4 带外手势不驱动滚动 | 位移=0 | **仅覆盖键区/工具栏横滑**：键区横滑 shift=0；工具栏横滑 shift=0 | **PASS（范围限定）**：同一份 `ev_g46.txt` 里候选条竖滑/斜滑 shift=−870，属带内手势的另一条问题，见 §8.4 |
+| G4 带外手势不驱动滚动 | 位移=0 | **仅覆盖键区/工具栏横滑**：键区横滑 shift=0（err 0.0）；工具栏横滑 shift=0（err 0.0）；起点在候选带下沿外 23px（y=1500）的竖滑 dy=60 → shift=0、不上屏（`ev_vswipe_c.txt`） | **PASS（范围限定）**。上一轮在这里写的「候选条竖滑/斜滑 shift=−870」按本报告自己定的 residual>5 不可判口径作废：那是**上屏前后两帧**做互相关的产物（候选池被 `scrollTo(0,0)` 重置，内容不同 → err 11.4），本轮在滚动态重测的结论见 §8.4 |
 | G6 编辑后偏移复位 | 归零 | 滚动态 shift=762 → 编辑宿主后 shift=0 | **PASS** |
 | G2 / G7 | 只记用户可见影响 | 见 §8 | 记录 |
 
-### 3.1 缺陷单（返修轮新增，2 条 P1）
+### 3.1 缺陷单（2 条 P1：D1 在本 PR 变更面内，D2 在 main 上就有）
 
 **D1 · P1 · AC-2 双击空格句号在硬件/注入键路径完全不生效**
 
@@ -68,11 +72,15 @@ package:com.sohu.inputmethod.sogou
 - 附带收口：规格开放问题 #10（「keyevent 与触摸等价性未验证」）本轮给出答案——**不等价**。
 - 归属：前端（`IspeechImeService` 空格键路径）修复；UX 需裁定硬件键是否纳入 AC-2 范围（若明确不纳入，要把规格 When 改成「软键盘空格键」并回改本报告判定）。
 
-**D2 · P1 · 进入设置页「键盘与输入」即 NPE 崩掉整个输入法进程**
+**D2 · P1（main 既有，非本 PR 引入）· 进入设置页「键盘与输入」即 NPE 崩掉整个输入法进程**
 
 - 复现序列（关键是先让 DataStore 进进程缓存）：① 弹出键盘（任意宿主输入框）→ ② `am start -n com.ispeech.ime/com.ispeech.settings.MainActivity` → ③ 点「键盘与输入」卡片（bounds `[193,851][423,917]`，中心 308,884）→ ④ `FATAL EXCEPTION: main`，`Process: com.ispeech.ime, PID: 30743`，栈顶 `KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)` ← `SettingsStore$chineseInputMethodFlow$$inlined$map$1$2.emit(Emitters.kt:219)` ← `KeyboardViewModel.<init>(KeyboardViewModel.kt:34)`。证据：`ev_crash_kbsettings.txt`。全新数据态（`pm clear` 后）可复现；冷进程（没弹过键盘直接进设置页）不复现——因为 DataStore 未缓存时首次 emit 走异步读盘，属性已初始化完。
-- 根因：`KeyboardViewModel` 的 `init{}`（`:30-40`）里 launch 了三个 collector，而它们写的 `_chineseInputMethod`（`:107`）、`_spaceLongPressMs`（`:110`）**声明在 `init` 之后**。Kotlin 属性初始化按声明顺序排在 `init` 块之后执行，`viewModelScope.launch` 用 `Dispatchers.Main.immediate` 同步起跑，命中进程缓存的第一次 emit 就打在尚未赋值的 null 字段上。
-- 归属与紧迫性：`fa57a07` 同形（`:35` 已存在），**不是 PR #18 引入的回归**；但 PR #18 在 `:38-39` 新增了第二个同形 collector（`voiceSpaceLongPressMsFlow`，正是 AC-9 的新开关），把暴露面翻倍。用户可见影响是「打字后改键盘设置 → 键盘整个消失（进程重启）」，属核心链路可用性，建议合并前修（把属性声明提到 `init` 之前，或 collector 延后启动）。
+- 根因：`KeyboardViewModel` 的 `init{}`（c524351 的 `:29-39`）里 launch 了三个 collector，而它们写的 `_chineseInputMethod`（`:107`）、`_spaceLongPressMs`（`:110`）**声明在 `init` 之后**。Kotlin 属性初始化按声明顺序排在 `init` 块之后执行，`viewModelScope.launch` 用 `Dispatchers.Main.immediate` 同步起跑，命中进程缓存的第一次 emit 就打在尚未赋值的 null 字段上（崩点 `:35` = `chineseInputMethodFlow` 那个 collector 的 `emit`）。
+- 归属与紧迫性（**本轮按质检打回项 1 订正**）：这是 **`fa57a07`（main）既有的缺陷，本 PR 没有触碰它的代码**。三条依据，都能当场复跑：
+  1. `git diff fa57a07 c524351 -- app/src/main/java/com/ispeech/settings/keyboard/KeyboardViewModel.kt` 只有 **+5 行**，是新增的 `setDoubleSpacePeriod()` setter（`:102-106`），三个 collector 与两个 `MutableStateFlow` 声明一字未动；
+  2. `git blame -L 34,40 fa57a07 -- .../KeyboardViewModel.kt` → 第 37-39 行（`voiceSpaceLongPressMsFlow` 那个 collector）落在 `904a98d`（Mini，2026-11-09 初始提交），不是 PR #18 的提交；
+  3. 质检专员在 `fa57a07` 自己的构建上、同一台模拟器、同一时序复现到**同一行、同一栈**的 `FATAL EXCEPTION`（PID 13926），本报告上一轮写的「PR #18 在 `:38-39` 新增第二个同形 collector，把暴露面翻倍」是**错误归因**，已删除。
+- 定级与去向：崩溃本身是真的、用户可见（「打字后改键盘设置 → 键盘整个消失，进程重启」），P1 定级不变；但它今天就在 main 上，**属 main 既有债**。是否因此卡住统一合并窗口，是 PM/人类的范围裁决，本报告只给事实与影响，不替它判，也不把它记进本 PR 的拦路项（本 PR 拦路 2 条 = D1 + 真机 pp）。修法沿用上一轮的建议：把两个 `MutableStateFlow` 声明提到 `init` 之前，或让 collector 延后启动。
 - 本轮取证影响：AC-2 的开关置位因此改走输入法内配置面板（齿轮键 → `openPanel(Panel.SETTINGS)`，`IspeechImeService.kt:2071`），不再经过会崩的 App 设置页。
 
 ## 4. 命名必证项：恒高 46dp × font_scale 1.15 会不会截字
@@ -105,7 +113,7 @@ package:com.sohu.inputmethod.sogou
 | 路径 | 结果 | 证据 |
 |---|---|---|
 | ① 编码 0 候选 | **PASS**：候选条不塌、不改高。空态（0 候选）带高仍 126px、键盘 988px，墨迹 0 行；`REG_double_space` 空态 kb_h=988 / band_ink=0 | `ev_fs115_440_final.txt`、`ev_paths4.txt` |
-| ② 候选池上限截断 | **代码级确认，未做真机计数**：`candidatePoolLimit = candidatePageSize × CANDIDATE_POOL_FACTOR(3)`（`IspeechImeService.kt:105/187`），默认 9 → 27；用户可设 5/7/9 → 15/21/27。运行侧只证到「滚到端后不再新增内容」（§3 AC-6 cum 恒定 4892px） | 代码 + `ev_ac47.txt` |
+| ② 候选池上限截断 | **代码级确认，未做真机计数**：`candidatePoolLimit = candidatePageSize × CANDIDATE_POOL_FACTOR(3)`（`IspeechImeService.kt:105/187`），默认 9 → 27；用户可设 5/7/9 → 15/21/27。运行侧只证到「滚到端后不再新增内容」（§3 AC-6：本轮 `=` 按到第 26 次起 cum 恒定 4752px，上一轮同现象读数是 4892px，差一档 = 末档被钳制截断） | 代码 + `ev_ac47b.txt` |
 | ③ T9 态 `-`/`=` 滚动 | **未取证**：模拟器上 `123 → 9键` 的软键坐标按权重推算落到了短语面板（kb_h=1885），两轮尝试均未稳定进入九宫格；`check_t9.py` 静态侧 87 项通过可保证键位定义未被本轮改动破坏 | `ev_paths5.txt`、`ev_paths9.txt` |
 | ④ 上屏/联想后偏移归零（G2） | **未取证**：三次尝试的宿主字段分别被 Settings 搜索框吞键、联系人「姓名」框吞键、以及联系人「更改尚未保存」弹窗抢焦点，`-` 未能进 IME，位移数据不可信（已丢弃）。代码侧 `CandidateView.kt:81` 无条件 `scrollTo(0,0)` 仍在 | `ev_paths4/5/6/9.txt` |
 | ⑤ 面板打开时候选条层级 | **PASS（并给出用户可见影响）**：工具栏「快捷短语」「剪贴板」面板会**整体替换输入区**，候选条不再存在；短语面板高 1885px（面板+工具栏+键区，无候选条），剪贴板面板高 727px（仅面板）。截图：`p5_phrase.png`、`p5_clip.png`。**返修轮订正**：工具栏 ⚙ 不是「直接跳设置页、键盘整体收起」——它先在输入法内打开配置面板（`IspeechImeService.kt:2071 openSettings → openPanel(Panel.SETTINGS)`，同样是整块替换输入区，9 个开关 + 中文输入法 + 语音 4 行 + 底部「更多设置」）；只有面板底部「更多设置」才跳 App 设置页（`:2076-2084`），而进入「键盘与输入」会崩（§3.1 D2）。AC-2 的开关置位因此走输入法内面板，`ev_ac2_*.txt` 的 `TOUCH/DS_*` 行就是这条路径的当场记录。 | `ev_paths4.txt`、`ev_ac2_soft.txt` |
@@ -142,7 +150,12 @@ check_t9.py          SUMMARY: passed=87  failed=0 warned=1
 1. **R4 补偿实现**（规格/实现差异）：实现只在「光标前一个字符仍是空格」时才 `deleteSurroundingText(1,0)`，判定入口 `lastSpaceStillBeforeCursor() = lastSpaceCommitAt != null && getTextBeforeCursor(1,0)==" "`（`IspeechImeService.kt:715-780`）。实测在宿主里先删掉空格再双击 → 得到 `␣␣` 而非「。」（`ev_r4.txt` S3、`ev_ac23d.txt` R4_probe=`她她们`），符合「不做破坏性删除」的意图，比规格更保守。
 2. **G2 无条件 `scrollTo(0,0)`**（`CandidateView.kt:81`）：用户可见影响＝每次重绘候选（含联想刷新）都回到最左，滚动位置不保留。本轮未取到运行时证据（§6④），列为待补。
 3. **G7 徽标无入口**：候选来源徽标（短语/AI/学习）仍渲染但没有点击入口，用户可见影响＝只能看不能用。
-4. **P2 观察项（待复现）**：候选带内的竖滑 60px 会把候选上屏（`shi`→`使`），110px 不上屏；起点在候选带外 215px 的竖滑同样上屏（`shi`→`时`）。即竖滑在短位移时被当成点击处理，且手势起点越出候选带仍能命中候选。同一批 `ev_g46.txt` 还量到：**候选条竖滑与斜滑都驱动了 −870px 的横向滚动**（`shift=-870 err=11.4 host='事'`）——带内的纵向手势不该改水平偏移，这条与「上屏」是同一个手势识别问题的两个面。该组用例当时用一次性命令执行、脚本未固化，端点语义需要复核后才能定性，**挂「待复现」**，复现路径见 §10。
+4. **P2 观察项（本轮已固化工装 `vswipe.py`，结论重新定性；不再挂「待复现」）**：
+   - **短竖滑被当成点击**：起点 y=1391（带内）、x=300、duration 120ms、440dpi 扫位移，`dy=20/40/60/80` → 上屏（`shi`→`是`），`dy=110/150/200` → 不上屏；细扫 `dy=90` 上屏、`dy=100` 不上屏（`ev_vswipe_a.txt`、`ev_vswipe_c.txt`）。**上屏阈值在 90–100px（≈33–36dp）之间**，比上一轮写的「60px 上屏 / 110px 不上屏」宽一档：60px 那半句成立，阈值那一档写窄了。质检专员复跑时报 110px 也上屏，本轮用同参数（起点 1390、dy=110、120ms）**连跑 3 次均未上屏**（原始读数在 `ev_vswipe_c.txt`）——这个跨 run 离散没定位，不写成结论，留给真机手指触摸那轮一并判。对照组：纯 `input tap 300 <带内 y>` 同样上屏，所以走的是候选项的点击路径。
+   - **「上屏」与「横滚」分开量**（上一轮把两件事混在一条里是错的）。在滚动态先按 `=` ×4 把 scrollX 推到约 792px、内容稳定后做手势：**纯竖滑（dx=0，dy=110/150）位移 0，err 0.0 → 可判**，即带内纵向手势不驱动横向滚动；**斜滑（dx=160）位移 −264/−272px，err 4.37/4.07 → 可判**，方向与「手指右移 → scrollX 减小」的直接操作语义一致，属正常行为而非缺陷（`ev_vswipe_b.txt`）。
+   - **上一轮 `ev_g46.txt` 里「候选条竖滑/斜滑 shift=−870」作废**，按本报告 §3 自己定的口径（residual>5 不可判）本来就不该出结论：那是拿**上屏前后**两帧做互相关，候选池被 `CandidateView.kt:81` 的 `scrollTo(0,0)` 整体重置，比的是不同内容。本轮 4 个「上屏」case 复现出同形状的假读数 −796 / −832 / −842（err 11.78–12.04），机制坐实。
+   - **「起点越出候选带仍能命中候选」撤回**：起点在带上沿外 215px（y=1137，落在宿主内容区）向下滑 215px，实测是**这一下手势把键盘收掉了、宿主焦点也没了**（`band_top=None`、`after='<NONE>'`、`ime_gone=True`），不能读成上屏。工装同步补口径：`committed` 只在 IME 仍在位且宿主文本可读时才置真，并另打 `ime_gone` 字段。
+   - 工装风险提示：dy=20 那一档在本轮一次复跑里出现过 `ime_gone=True`，说明这条用例对共享 AVD 的环境争用敏感；判据一律以「同参数多次复跑读数一致」为准，单次读数不落表。
 
 ## 9. 未取证清单（真机 / 后续必须补）
 
@@ -154,6 +167,7 @@ check_t9.py          SUMMARY: passed=87  failed=0 warned=1
 | 4 | TalkBack 真机朗读与 600ms 窗口 | 模拟器未装 TalkBack 服务态 | 测试 + UX |
 | 5 | 真机手指触摸的滚动/长按手感（fling 不可复现，本轮一律用 `-`/`=` 与 `input swipe` 固定位移） | 触摸离散度 | 人类评审 |
 | 6 | release 打包 + 真机安装 | 项目规则五：生产操作需人类确认 | 人类确认 |
+| 7 | AC-9 的 45ms 快档到底可达不可达 | **口径要先换**：`adb shell input keyevent --longpress`/注入式长按的实测上限就落在 90ms 慢档（4s→删 40 字→92.8ms/次，`ev_ac9d.txt`），拿注入时长反推永远看不到 45ms 档。下一轮改用 logcat 打点量两次删除的实际间隔，或真机手指长按定性 | 测试（logcat 口径）+ 人类（真机手指） |
 
 ## 10. 复现方式
 
@@ -194,16 +208,34 @@ adb -s emulator-5554 shell am start -n com.ispeech.ime/com.ispeech.settings.Main
 adb -s emulator-5554 shell input tap 308 884          # 「键盘与输入」卡片
 adb -s emulator-5554 logcat -d | grep -A4 "FATAL EXCEPTION"     # KeyboardViewModel.kt:35 NPE
 
+# 2e) D2 归因核对（返修项 1 的验收：证明这不是 PR #18 带的）
+git diff fa57a07 c524351 -- app/src/main/java/com/ispeech/settings/keyboard/KeyboardViewModel.kt
+#     → 只有 +5 行：新增 setDoubleSpacePeriod()；三个 collector 与两个 MutableStateFlow 一字未动
+git blame -L 34,40 fa57a07 -- app/src/main/java/com/ispeech/settings/keyboard/KeyboardViewModel.kt
+#     → 第 37-39 行（voiceSpaceLongPressMsFlow）落在 904a98d（2026-11-09），不是 PR #18 的提交
+# 更强的一条：把 fa57a07 assembleDebug 装到同一台模拟器，跑同样的时序 → 同一行、同一栈的 FATAL
+
 # 3) §9.8 路径与回归面
 python3 tools/qa/voca-37/paths.py  <apk>
 python3 tools/qa/voca-37/paths3.py <apk>     # 带宿主守卫与弹窗自关
+#     本轮按返修项 2 的口径修了这三处脚本的「先滚离左端」：原来按 `-`（=左移，起点已在左端 → no-op，
+#     ev_paths4/ev_paths5 里 minus4_shift=0 就是现场），现改为按 `=`，日志字段跟着改名 eq4/eq4_shift。
+#     ④ 上屏后偏移归零仍记「未取证」——本轮没有重跑这三条 sweep，只修工装，取数留给下一轮。
 
 # 4) 键帽行/位移测量
 python3 tools/qa/voca-37/qa_rows.py <png> <y0> <y1> <dpi>
 
-# 5) 待复现的竖滑用例（§8.4）：起点分别在 带内+60px、带内+110px、带上沿-215px，
-#    终点同 x、y 递增 215px，duration 120ms；每步前把宿主清空并打 shi，读宿主文本变化。
-#    同批还要量候选条竖滑/斜滑后的横向位移（ev_g46.txt 里是 -870px），脚本尚未固化。
+# 4b) §3 AC-4~AC-7 位移/方向/钳制（返修项 2 的工装，ev_ac47b.txt 就是它产出的）
+python3 tools/qa/voca-37/ac47.py <apk> 440
+#     每行都带 key=keyevent70(EQUALS→scrollCandidates(+1)) / keyevent69(MINUS→...) 与 err、cum、verdict；
+#     默认 fwd=70 / rev=69，想把方向反过来验证一下就 --fwd 69 --rev 70（读数符号会跟着翻，键名不会）
+
+# 5) §8.4 竖滑用例（返修项 3 的工装，起点 y / 位移 dy / duration / dx 全参数化）
+python3 tools/qa/voca-37/vswipe.py <apk> 440                                    # 上屏阈值扫 dy=20..200 + 纯 tap 对照 → ev_vswipe_a.txt
+python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode abs --start 1390 --dy 90,100,110,110,110   # 阈值两侧 + 同参数复跑 → ev_vswipe_c.txt
+python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 60,110,150           # 滚动态纯竖滑是否横滚 → ev_vswipe_b.txt
+python3 tools/qa/voca-37/vswipe.py <apk> 440 --family hroll --pre 4 --dy 110 --dx 160         # 滚动态斜滑 → ev_vswipe_b.txt
+python3 tools/qa/voca-37/vswipe.py <apk> 440 --mode above --start 215 --dy 215               # 起点在带上沿外（宿主区）
 ```
 
 ## 11. 环境风险与 evidence/ 全量清单（必须记录，否则数字不可比）
@@ -243,11 +275,15 @@ python3 tools/qa/voca-37/qa_rows.py <png> <y0> <y1> <dpi>
 | `ev_ac2_hw.txt` | 采信 | 硬件/注入键路径（`input keyevent 62`）× 开关开/关，含 `SWITCH state=... src=datastore raw_hex=...`、`MODE`、`IDENT` 与 `wall_between_ms` → §3.1 D1 |
 | `ev_ac2_soft.txt` | 采信 | 软键点击路径 × 开关开/关，同上口径（含间隔 577.1ms 的窗口外反例、三连点 `。␣`） |
 | `ev_crash_kbsettings.txt` | 采信（缺陷单） | §3.1 D2 的崩溃原文：`FATAL EXCEPTION: main` / `Process: com.ispeech.ime, PID: 30743` / `NullPointerException ... MutableStateFlow.setValue` @ `KeyboardViewModel.kt:35`；含「先弹键盘再进页面」的复现时序自证（两次 `pid` 同为 30743） |
-| `ev_ac47.txt` | 采信 | §3 AC-4/5/6/7 位移阶梯与钳制 |
+| `ev_ac47.txt` | 部分采信 | 位移阶梯与钳制的**数值**可用（±198、cum 4892、端点后归零）；**键名作废**——文件里没记 keycode，正文当时把 `-`/`=` 的方向标反了。方向/端点归属一律以 `ev_ac47b.txt` 为准；这批标签当时由一次性命令产出、脚本未入库，也是上一轮被打回的原因 |
+| `ev_ac47b.txt` | 采信 | §3 AC-4~AC-7 的返修轮重测（12:31:03–12:32:51，`IDENT` 双端 match=True）：`=`=keyevent70→+198×24 档、cum 4752 后归零；`-`=keyevent69→−198、左端第 25 次归零；`AC7_FROM_LEFT` +198 err 2.85；宿主全程 `shi`。产出脚本 `ac47.py` 已入库，命令行见 §10-4b |
 | `ev_ac9{,b,c,d}.txt` | 采信 | §3 AC-9 退格长按：200/1000/2000ms→删 1/5/15、英文态与 4s 续按；`ev_ac9d.txt` 的 `rate_ms=101.2/92.8` 只落 90ms 慢档 → AC-9 判据按「代码级确认，行为级未证 45ms 快档」收窄 |
 | `ev_r4.txt` | 采信 | §8.1 R4 补偿实现 S0–S3（含 `inject_ms=131` 的间隔自证） |
-| `ev_g46.txt` | 采信 | §3 G4（键区/工具栏横滑 shift=0）+ G6（762→0）；同文件候选条竖/斜滑 `shift=-870` 记入 §8.4 |
-| `ev_vswipe.txt` | 采信 | §8.4 P2 观察项（60px 上屏 / 110px 不上屏 / 带外 215px 起点仍上屏） |
+| `ev_g46.txt` | 部分采信 | §3 G4（键区/工具栏横滑 shift=0，err 0.0）+ G6（762→0）采信；同文件「候选条竖滑/斜滑 `shift=-870`」两行**作废**——err 11.4 > 5 按本报告 §3 自己的口径本就不可判，且比的是上屏前后两帧（候选池被 `CandidateView.kt:81` 的 `scrollTo(0,0)` 重置，内容不同） |
+| `ev_vswipe.txt` | 部分采信 | 「60px 上屏」成立；「110px 不上屏」本轮同参数 3 次复跑也未上屏（与质检专员的一次读数不一致，见 §8.4 与 `ev_vswipe_c.txt`），保留为观察；「带上沿外 215px 起点仍上屏」那行**作废**，由 `ev_vswipe_c.txt` 的 `ime_gone=True` 读数取代；该文件当时由一次性命令产出、脚本未入库 |
+| `ev_vswipe_a.txt` | 采信 | §8.4 上屏阈值扫（dy=20/40/60/80/110/150/200，dur 120，起点 1391）+ 纯 tap 对照。每行都给 start_y/end_y/dy/dx/dur/committed/ime_gone/h_shift/h_err/h_verdict，脚本 `vswipe.py` 已入库 |
+| `ev_vswipe_b.txt` | 采信 | §8.4 滚动态（先按 `=`×4 把 scrollX 推到 ~792px）下的横滚：纯竖滑 dx=0 → shift=0、err 0.0（可判）；斜滑 dx=160 → −264/−272px、err 4.37/4.07（可判） |
+| `ev_vswipe_c.txt` | 采信 | §8.4 阈值细扫（dy=90 上屏 / dy=100 不上屏）+ dy=110 同参数三连复跑（均未上屏）+ 起点带上沿外 215px（`ime_gone=True`、`after='<NONE>'`）+ 起点带下沿外 y=1500（shift=0、不上屏） |
 | `ev_pp.txt` | 采信 | §5 440dpi 行：iSpeech 988 / 搜狗 978 → +0.43pp |
 | `ev_520b.txt` | 采信 | §5 520dpi 左列：`ime=com.ispeech.ime top=1172 h=1168 pp=49.91` + 键帽行带 |
 | `ev_sogou115.txt` | 采信 | §5 440dpi 右列：搜狗 978（`ime=com.sohu...` 已标注） |
@@ -267,4 +303,4 @@ python3 tools/qa/voca-37/qa_rows.py <png> <y0> <y1> <dpi>
 
 ### 附：本报告引用的原始证据
 
-`ev_headline.txt`（作废段已标注）、`ev_ac47.txt`、`ev_ac23{,b,c,d}.txt`、`ev_ac2_{soft,hw}.txt`、`ev_r4.txt`、`ev_ac9*.txt`、`ev_g46.txt`、`ev_vswipe.txt`、`ev_pp.txt`、`ev_sogou{115,520}.txt`、`ev_fs115b.txt`、`ev_fs115_440_fs10.txt`、`ev_fs115_440_final.txt`、`ev_fs115_520.txt`、`ev_fs115_520_ink.txt`、`ev_fs115_gate.txt`、`ev_crash_kbsettings.txt`、`ev_paths{2,3,4,5,6,7,8,9}.txt`、`gradle_test.log`（全部在 `tools/qa/voca-37/evidence/`，逐文件口径见 §11.1），截图 `shots/f440_1.0_c_cand.png`、`f440_1.15_c.png`、`f440_1.15_c_cand.png`、`f520_1.15_c_cand.png`、`p5_phrase.png`、`p5_clip.png`、`reg_phr_after.png`。工装脚本：`tools/qa/voca-37/{fs115,ac2,drive,paths,paths2,paths3,qa_kb,qa_rows}.py` + `tools/qa/voca-37/README.md`。
+`ev_headline.txt`（作废段已标注）、`ev_ac47.txt`（键名作废）、`ev_ac47b.txt`、`ev_ac23{,b,c,d}.txt`、`ev_ac2_{soft,hw}.txt`、`ev_r4.txt`、`ev_ac9*.txt`、`ev_g46.txt`（−870 两行作废）、`ev_vswipe.txt`（部分采信）、`ev_vswipe_{a,b,c}.txt`、`ev_pp.txt`、`ev_sogou{115,520}.txt`、`ev_fs115b.txt`、`ev_fs115_440_fs10.txt`、`ev_fs115_440_final.txt`、`ev_fs115_520.txt`、`ev_fs115_520_ink.txt`、`ev_fs115_gate.txt`、`ev_crash_kbsettings.txt`、`ev_paths{2,3,4,5,6,7,8,9}.txt`、`gradle_test.log`（全部在 `tools/qa/voca-37/evidence/`，共 48 份，逐文件口径见 §11.1），截图 `shots/f440_1.0_c_cand.png`、`f440_1.15_c.png`、`f440_1.15_c_cand.png`、`f520_1.15_c_cand.png`、`p5_phrase.png`、`p5_clip.png`、`reg_phr_after.png`。工装脚本：`tools/qa/voca-37/{fs115,ac2,ac47,vswipe,drive,paths,paths2,paths3,qa_kb,qa_rows}.py` + `tools/qa/voca-37/README.md`。
