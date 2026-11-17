@@ -123,7 +123,7 @@ adb logcat -d -s AsrTrace:* | grep -E 'ev=(timeout|error|blocked)'   # 只看异
 | `retry` | `VoiceInputController.onError`（识别器忙）、CUSTOM 建识别器失败回退 | 原地重试 / 静默回退不再静默 |
 | `cancel` | `VoiceInputController.stop` / `destroy`、`IspeechImeService.cancelVoice` / `resetState` | 会话被丢弃 |
 | `commit` | `IspeechImeService.commitVoiceText` | 最终结果写入输入框（只记长度） |
-| `ui_reset` | `IspeechImeService.traceVoiceUiReset`（`commitVoiceText` / `commitVoice` / 引擎 `onError`） | **UI 是否离开「识别中」——卡住的直接判据** |
+| `ui_reset` | `IspeechImeService.endVoiceSession`（语音会话的单一出口，见 §十一） | **UI 是否离开「识别中」——卡住的直接判据**；`reason=` 取值 `candidate_commit`（点候选条上屏）/ `space_commit` / `engine_result` / `engine_error` / `user_stop` / `backspace` / `escape` / `session_timeout` / `reset_state` |
 
 隐私：只记长度（`chars=`）与状态位，**绝不**记录识别文本、输入框内容或宿主编辑字段（共享规程 §8 / §9）。
 
@@ -269,3 +269,41 @@ $ … | grep -c BIND_RECOGNITION_SERVICE  → 0                        ← 旧�
 **与 VOCA-310 的关系**：310 登记的是「查询 action 用错」这半条，本轮把 action 与权限判据一起改了，
 因为只修 action 在这台 AVD 上仍然 `usable=0`（真服务 `permission=null`），本单验收照旧过不去。
 310 的代码部分已并入本 PR，剩下的应是真机验证与关单。
+
+## 十一、语音会话的单一出口（VOCA-231，架构复审 §一 的行为回归）
+
+**现象**（静态可达路径，2026-11-17 架构复审提出）：一次已经上屏成功的语音会话，66 秒后仍会打出
+`ev=timeout stage=session`，把用户当时正在看的候选（很可能是拼音联想）清空、
+覆盖成「说话时间过长，本次语音输入已自动结束」。
+
+**根因**：UI 侧兜底表按 `voiceActive || 系统识别器 isListening || 离线引擎 isListening` 判「还卡在识别中」，
+而「结束一次语音会话」这件事在旧实现里散落在 7 处改写里，其中点候选条上屏那条——
+`bar.onCandidatePicked → pickCandidate() → commit()`——只写了 `voiceActive = false`：
+既没停识别器，也没摘兜底表。识别器在 `onResults` 之前 `isListening` 恒为真，于是三个条件里剩下的两个
+仍把这次会话算成进行中。空格的 `commitVoice()` 摘了表、点选没摘，两条并存的出口长得不一样。
+
+**修法**：收成一个出口 `endVoiceSession(reason, ok)`，一次做完五件事——停两路识别器、清 `voiceActive`、
+摘兜底表、清 `codeOverride`、打 `ev=ui_reset reason=`。七处收尾全部改走它，
+`cancelVoice(reason)` 的 `reason` 改为必填（谁结束的会话必须能从日志判读）。
+判据抽成纯函数 `voiceSessionOccupied(voiceActive, systemListening, voskListening)`，
+兜底表与出口共用同一个判据，避免「出口认为自己收完了、兜底表却还觉得卡着」。
+
+**非语音态是 no-op**：`commit()` 是每条候选上屏的必经路（拼音 / T9 / 联想都走它），
+出口先用 `voiceSessionOccupied` 判有没有会话在进行，没有就直接返回，不给正常打字刷埋点。
+
+**顺带消失的两个副作用**（同一处的连带修复，不是新需求）：
+1. 空格上屏语音候选后，识别器随之停掉，晚到的 `onFinal` 不会再往输入框补第二次同样的文本；
+2. 语音会话结束后的下一次点语音键，不再因为 `isListening` 残留而先走「取消」分支。
+
+**门禁**：`tools/verify/check_crosscut.py` 8b.3 从「数 disarm 出现几次」改成守结构与行为——
+出口必须含五步、`voiceActive = false` 只许出现在出口内、`cancelVoice()` 调用必须带 reason、
+`commit()` / `cancelVoice` / `commitVoice` / `commitVoiceText` 必须调用 `endVoiceSession`。
+把 `commit()` 改回旧写法会立刻红 2 条（本轮实测：`passed=174 failed=2`），旧断言当时是绿的——
+这就是复审说的「门禁守得住字符串，守不住行为」。
+
+**单测**：`app/src/test/java/com/ispeech/input/VoiceSessionExitTest.kt`（3 例）钉住判据：
+只清 `voiceActive` 不停识别器 = 仍算进行中（正是漏网那条）、只清识别器不清 UI = 仍算进行中、
+三个全清 = 结束。判据之外的「每条出口都走单一出口」由上面的静态门禁守。
+
+**仍未坐实的部分**：本条是静态可达路径 + 判据单测，不是运行时日志。
+`ev=timeout stage=session` 至今零运行时样本，要等基线机 `23F0224224000950` 接线后按 §八 的判读表复测。

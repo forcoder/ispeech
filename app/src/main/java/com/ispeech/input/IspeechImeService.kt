@@ -314,9 +314,11 @@ class IspeechImeService : InputMethodService() {
         voiceSessionGuardJob?.cancel()
         voiceSessionGuardJob = serviceScope.launch {
             delay(AsrTiming.UI_SESSION_TIMEOUT_MS)
-            val stuck = voiceActive ||
-                voiceController?.isListening == true ||
-                voskVoice?.isListening == true
+            val stuck = voiceSessionOccupied(
+                voiceActive = voiceActive,
+                systemListening = voiceController?.isListening == true,
+                voskListening = voskVoice?.isListening == true,
+            )
             if (!stuck) return@launch
             AsrTrace.w(
                 voiceSessionId,
@@ -328,10 +330,9 @@ class IspeechImeService : InputMethodService() {
                 "vosk_listening" to (voskVoice?.isListening == true),
                 "ms" to voiceElapsedMs(),
             )
-            cancelVoice()
+            cancelVoice("session_timeout")
             statusText = getString(AsrTiming.messageFor(AsrTiming.STAGE_SESSION))
             renderCandidateView()
-            traceVoiceUiReset("session_timeout", ok = false)
         }
     }
 
@@ -339,6 +340,34 @@ class IspeechImeService : InputMethodService() {
     private fun disarmVoiceSessionGuard() {
         voiceSessionGuardJob?.cancel()
         voiceSessionGuardJob = null
+    }
+
+    /**
+     * 语音会话的**单一出口**（VOCA-231）：一次语音会话结束，不管结束在上屏、点选、取消、
+     * 引擎失败还是复位，都必须一次做完这五件事——停两路识别器、清 `voiceActive`、摘兜底表、
+     * 清 `codeOverride`、打 `ev=ui_reset`。
+     *
+     * 漏一件的后果不是「日志少一行」：[armVoiceSessionGuard] 按 `voiceActive` + 两路
+     * `isListening` 判「还卡在识别中」，所以只清标志不停识别器的那条出口，会在 66 秒后
+     * 对着一次**已经上屏成功**的会话打出 `ev=timeout stage=session`，清空当时的候选、
+     * 把候选条文案覆盖成「说话时间过长」。旧实现里点候选条上屏走 `commit()`，
+     * 只做了 `voiceActive = false`，正是这条漏网出口。
+     *
+     * 非语音态进来是 no-op：`commit()` 是所有候选上屏的必经路，不能给拼音 / 联想路径刷埋点。
+     */
+    private fun endVoiceSession(reason: String, ok: Boolean) {
+        val occupied = voiceSessionOccupied(
+            voiceActive = voiceActive,
+            systemListening = voiceController?.isListening == true,
+            voskListening = voskVoice?.isListening == true,
+        )
+        if (!occupied && voiceSessionGuardJob == null) return
+        if (voiceController?.isListening == true) voiceController?.stop()
+        if (voskVoice?.isListening == true) voskVoice?.cancel()
+        voiceActive = false
+        disarmVoiceSessionGuard()
+        if (codeOverride == "语音") codeOverride = null
+        traceVoiceUiReset(reason, ok)
     }
 
     override fun onCreate() {
@@ -785,7 +814,7 @@ class IspeechImeService : InputMethodService() {
             return
         }
         if (voiceActive) {
-            cancelVoice()
+            cancelVoice("backspace")
             renderCandidateView()
             return
         }
@@ -875,7 +904,7 @@ class IspeechImeService : InputMethodService() {
             return
         }
         if (voiceActive) {
-            cancelVoice()
+            cancelVoice("escape")
             renderCandidateView()
             return
         }
@@ -1011,9 +1040,17 @@ class IspeechImeService : InputMethodService() {
         commit(top.insertText)
     }
 
-    /** 上屏文本，清空组合状态；[allowAssociation] 为真时接着给联想候选 */
+    /**
+     * 上屏文本，清空组合状态；[allowAssociation] 为真时接着给联想候选。
+     *
+     * 这里必须先走 [endVoiceSession]：点候选条上屏（`pickCandidate`）和按空格上屏
+     * （`commitTop`）都汇到这条，而语音候选就是候选条里的一项。旧实现只在这里清了
+     * `voiceActive`，识别器与兜底表都留着，于是一次已经成功的上屏会在 66 秒后被
+     * 判成「还卡在识别中」。
+     */
     private fun commit(text: String, allowAssociation: Boolean = true) {
         if (text.isEmpty()) return
+        endVoiceSession("candidate_commit", ok = true)
         val out = convertHan(text)
         currentInputConnection?.commitText(out, 1)
         buffer = ""
@@ -1022,7 +1059,6 @@ class IspeechImeService : InputMethodService() {
         lastCommit = out
         candidates = emptyList()
         associationActive = false
-        voiceActive = false
         codeOverride = null
         statusText = null
         recordCommit(CommitType.CANDIDATE, out)
@@ -1600,7 +1636,7 @@ class IspeechImeService : InputMethodService() {
         if (controller.isListening) {
             // 第二次按键 = 主动结束上一会话：cancel 由 controller.stop() 与 cancelVoice() 各自打出
             controller.stop()
-            cancelVoice()
+            cancelVoice("user_stop")
             statusText = getString(R.string.voice_cancel)
             renderCandidateView()
             return
@@ -1629,10 +1665,7 @@ class IspeechImeService : InputMethodService() {
                 commitVoiceText(text)
             },
             onError = { message ->
-                voiceActive = false
-                disarmVoiceSessionGuard()
-                traceVoiceUiReset("engine_error", ok = false)
-                if (codeOverride == "语音") codeOverride = null
+                endVoiceSession("engine_error", ok = false)
                 statusText = message
                 candidates = emptyList()
                 renderCandidateView()
@@ -1666,9 +1699,7 @@ class IspeechImeService : InputMethodService() {
     /** 上屏语音候选（空格 / 语音态直上屏后复位）。 */
     private fun commitVoice() {
         val candidate = candidates.firstOrNull()
-        voiceActive = false
-        disarmVoiceSessionGuard()
-        traceVoiceUiReset("space_commit", ok = candidate != null)
+        endVoiceSession("space_commit", ok = candidate != null)
         if (candidate == null) {
             renderCandidateView()
             return
@@ -1683,16 +1714,13 @@ class IspeechImeService : InputMethodService() {
      * （无需再按空格），这是与「候选待选」路径并存的收尾方式。
      */
     private fun commitVoiceText(text: String) {
-        voiceActive = false
-        disarmVoiceSessionGuard()
-        traceVoiceUiReset("engine_result", ok = text.isNotBlank())
+        endVoiceSession("engine_result", ok = text.isNotBlank())
         AsrTrace.i(
             voiceSessionId,
             AsrTrace.EV_COMMIT,
             "chars" to text.length,
             "ms" to voiceElapsedMs(),
         )
-        if (codeOverride == "语音") codeOverride = null
         candidates = emptyList()
         if (text.isBlank()) {
             renderCandidateView()
@@ -1747,10 +1775,7 @@ class IspeechImeService : InputMethodService() {
                 commitVoiceText(text)
             },
             onError = { message ->
-                voiceActive = false
-                disarmVoiceSessionGuard()
-                traceVoiceUiReset("engine_error", ok = false)
-                if (codeOverride == "语音") codeOverride = null
+                endVoiceSession("engine_error", ok = false)
                 statusText = message
                 candidates = emptyList()
                 renderCandidateView()
@@ -1783,14 +1808,12 @@ class IspeechImeService : InputMethodService() {
         }
     }
 
-    /** 取消语音识别并复位语音状态（不负责渲染）。 */
-    private fun cancelVoice() {
+    /** 取消语音识别并复位语音状态（不负责渲染）。`reason` 进 `ev=ui_reset`，用于判读是谁结束的会话。 */
+    private fun cancelVoice(reason: String) {
         AsrTrace.i(voiceSessionId, AsrTrace.EV_CANCEL, "stage" to "service", "ms" to voiceElapsedMs())
-        disarmVoiceSessionGuard()
-        if (voiceController?.isListening == true) voiceController?.stop()
+        endVoiceSession(reason, ok = false)
+        // 无条件再摘一次离线引擎：isListening 可能已被看门狗置回 false，但工作线程仍卡在 read() 占着麦克风
         voskVoice?.cancel()
-        voiceActive = false
-        if (codeOverride == "语音") codeOverride = null
         candidates = emptyList()
         statusText = null
     }
@@ -2140,11 +2163,7 @@ class IspeechImeService : InputMethodService() {
                 "ms" to voiceElapsedMs(),
             )
         }
-        if (voiceController?.isListening == true) voiceController?.stop()
-        if (voskVoice?.isListening == true) voskVoice?.cancel()
-        disarmVoiceSessionGuard()
-        voiceActive = false
-        if (codeOverride == "语音") codeOverride = null
+        endVoiceSession("reset_state", ok = false)
         punctor.reset()
         updatePanelVisibility()
         renderCandidateView()
@@ -2205,3 +2224,20 @@ class IspeechImeService : InputMethodService() {
         serviceScope.launch { SettingsStore.setChineseInputMethod(this@IspeechImeService, next) }
     }
 }
+
+/**
+ * 一次语音会话是否还占着候选条或麦克风（VOCA-231）。
+ *
+ * [IspeechImeService.armVoiceSessionGuard] 用它判「到点了还卡着没有」，
+ * [IspeechImeService.endVoiceSession] 用它判「这条出口是否真的结束了一次会话」。
+ * 两边必须是同一个判据，否则会出现「出口认为自己收完了、兜底表却还觉得卡着」。
+ *
+ * 三个条件缺一不可：`voiceActive` 是 UI 侧状态，两路 `isListening` 是引擎侧状态——
+ * 只清其中一个，剩下的那个仍会把会话算成进行中（点候选条上屏漏的就是引擎侧那个）。
+ * 抽成纯函数是为了能在 JVM 单测里把「漏停识别器」这种状态直接判出来。
+ */
+internal fun voiceSessionOccupied(
+    voiceActive: Boolean,
+    systemListening: Boolean,
+    voskListening: Boolean,
+): Boolean = voiceActive || systemListening || voskListening

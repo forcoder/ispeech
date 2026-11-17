@@ -907,7 +907,7 @@ def check_voice_chain() -> None:
         "voiceController?.destroy()",
         "voiceActive",
         "private fun commitVoice()",
-        "private fun cancelVoice()",
+        "private fun cancelVoice(",
         'codeOverride = "语音"',
     )
     missing = [t for t in service_tokens if t not in service]
@@ -1087,18 +1087,44 @@ def check_voice_timeouts() -> None:  # noqa: C901 - 一节内做完全部断言�
         check(not leaks, f"{name} 的 cancel / destroy 就地复位 isListening（卡死也能再按响）",
               f"{name} 复位仍依赖工作线程收尾：{leaks}")
 
-    # 8b.3 服务侧最后一道：每次开始都挂、每条正常收尾都摘
+    # 8b.3 服务侧最后一道：每次开始都挂、每条收尾都走**同一个出口**
+    # 判据按「结构 + 行为面」两头守：只数 disarm 出现几次，守不住「漏了停识别器」这种出口
+    # （旧实现点候选条上屏走 commit()，只清 voiceActive，66 秒后兜底表照样打进已上屏的会话）。
     arm_calls = len(re.findall(r"\barmVoiceSessionGuard\(\)", service))
-    disarm_calls = len(re.findall(r"\bdisarmVoiceSessionGuard\(\)", service))
     check(arm_calls >= 2, "两条开始路径（系统 / 离线）都挂了 UI 侧会话兜底",
           f"{rel(SERVICE)} armVoiceSessionGuard 只出现 {arm_calls} 次，未覆盖两种引擎")
-    check(disarm_calls >= 3, "取消 / 上屏 / 引擎失败三类收尾都摘表（旧会话不会掐掉新会话）",
-          f"{rel(SERVICE)} disarmVoiceSessionGuard 只出现 {disarm_calls} 次")
-    guard_body = function_region(service, r"private fun cancelVoice\(")
-    commit_body = function_region(service, r"private fun commitVoiceText\(")
-    check("disarmVoiceSessionGuard()" in guard_body and "disarmVoiceSessionGuard()" in commit_body,
-          "取消 / 上屏两条收尾路径都摘掉兜底表（不会打到下一次会话）",
-          f"{rel(SERVICE)} cancelVoice / commitVoiceText 未摘表")
+
+    exit_body = function_region(service, r"private fun endVoiceSession\(")
+    check(bool(exit_body), "语音会话有单一出口 endVoiceSession（收尾状态只在一处定义）",
+          f"{rel(SERVICE)} 缺 private fun endVoiceSession(...)")
+    for step, why in (
+        ("voiceController?.stop()", "出口停系统识别器（不停则 isListening 恒真，兜底表照样触发）"),
+        ("voskVoice?.cancel()", "出口停离线引擎"),
+        ("voiceActive = false", "出口清 UI 语音标志"),
+        ("disarmVoiceSessionGuard()", "出口摘兜底表"),
+        ("traceVoiceUiReset(reason", "出口打 ev=ui_reset（谁结束的会话必须能从日志判读）"),
+    ):
+        check(step in exit_body, why, f"{rel(SERVICE)} endVoiceSession 缺 {step}")
+
+    # 单一出口的「单一」：语音状态不许在别处散落改写（去注释，免得注释里提到状态就误判）
+    code = strip_comments(service)
+    code_exit = strip_comments(exit_body)
+    strays = re.findall(r"(?<!var )voiceActive = false\b", code.replace(code_exit, ""))
+    check(not strays, "voiceActive 只在出口处复位（没有第二条没收尾的出口）",
+          f"{rel(SERVICE)} 另有 {len(strays)} 处直接写 voiceActive = false，请改走 endVoiceSession")
+    check(not re.findall(r"\bcancelVoice\(\)", code),
+          "每条取消路径都带 reason（ev=ui_reset 能区分 超时 / 退格 / ESC / 再按一次语音键）",
+          f"{rel(SERVICE)} 存在不带 reason 的 cancelVoice() 调用")
+
+    # 回归钉：候选条点选上屏（commit）必须结束语音会话——这条漏掉就是架构复审 §一 的行为回归
+    commit_body = function_region(service, r"private fun commit\(")
+    check("endVoiceSession(" in commit_body,
+          "点候选条上屏这条必经路会结束语音会话（已上屏的会话不再被兜底表清空）",
+          f"{rel(SERVICE)} commit() 未调用 endVoiceSession")
+    for fn in ("cancelVoice", "commitVoice", "commitVoiceText"):
+        body = function_region(service, rf"private fun {fn}\(")
+        check("endVoiceSession(" in body, f"{fn} 收尾走单一出口",
+              f"{rel(SERVICE)} {fn}() 未调用 endVoiceSession")
 
     # 8b.4 文案：超时三类必须中英齐全，且不许复用「语音识别失败」这种无处置信息的兜底
     zh = _named_strings(STRINGS)
