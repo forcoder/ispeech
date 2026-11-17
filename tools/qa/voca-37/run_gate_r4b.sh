@@ -4,7 +4,7 @@
 # 让读到的宿主文本变成 'shi' + 一串 z。构造是明写着的，不当新缺陷、只当闸门分支的取证。
 cd "$(dirname "$0")" || exit 1
 A=/opt/homebrew/share/android-commandlinetools/platform-tools/adb
-APK=/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-d3c8a7824003/voca47-c524351/app/build/outputs/apk/debug/app-debug.apk
+APK=${APK:-/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-d3c8a7824003/voca47-c524351/app/build/outputs/apk/debug/app-debug.apk}
 OUT=./gate_r4
 python3 ac47.py "$APK" 440 > "$OUT/r4_host_residue.txt" 2>&1 &
 SPID=$!

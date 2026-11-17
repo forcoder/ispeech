@@ -5,7 +5,7 @@
 # 所以开局前预置的残留一定会被它擦掉，只能在它预热的那一刻把键漏进去）。
 cd "$(dirname "$0")" || exit 1
 A=/opt/homebrew/share/android-commandlinetools/platform-tools/adb
-APK=/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-d3c8a7824003/voca47-c524351/app/build/outputs/apk/debug/app-debug.apk
+APK=${APK:-/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-d3c8a7824003/voca47-c524351/app/build/outputs/apk/debug/app-debug.apk}
 OUT=./gate_r4
 mkdir -p "$OUT"
 : > "$OUT/rc.txt"
