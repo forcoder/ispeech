@@ -21,6 +21,12 @@ val keystoreProps = Properties().apply {
 val asrModelUrl: String = (project.findProperty("asrModelUrl") as String?)
     ?: "https://delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
 
+// Vosk 中文小模型地址（配置项，`VoskModelStore` 使用）：默认仍是 Vosk 官方源
+// （HTTPS + Range；实测 application/zip / 43898754 字节，见 docs/model-host-runbook.md §10）。
+// 打包时可用 -PvoskModelUrl=https://... 覆盖；镜像到自有 OSS 属外部资源变更，需另行拍板。
+val voskModelUrl: String = (project.findProperty("voskModelUrl") as String?)
+    ?: "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
+
 android {
     namespace = "com.ispeech"
     compileSdk = 34
@@ -37,6 +43,9 @@ android {
 
         // 离线语音模型下载地址（见文件顶部 asrModelUrl 配置项）
         buildConfigField("String", "ASR_MODEL_URL", "\"$asrModelUrl\"")
+
+        // Vosk 中文小模型下载地址（见文件顶部 voskModelUrl 配置项）
+        buildConfigField("String", "VOSK_MODEL_URL", "\"$voskModelUrl\"")
     }
 
     signingConfigs {
