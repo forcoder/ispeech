@@ -29,6 +29,19 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 `SUMMARY: passed=N failed=M warned=K`，**任一 `FAIL` 时退出码为 1**，全通过为 0，
 可直接接入 CI 或 pre-commit。
 
+**运行前提：`check_voca167.py` 需要 Python ≥3.12。** 导出被验树用的
+`tarfile.extractall(filter="data")` 从 3.12 起才有签名，低版本会在打印 `CMD:`
+之后抛 `TypeError` —— 那是**跑不起来**，不是某条 AC 判红。所以它在 `main()` 第一句
+就版本守卫，直接给一行可区分的读数并以**退出码 2** 结束（≠ 有 FAIL 时的 1），
+一条断言都不跑、不输出任何 `PASS/FAIL`：
+
+```bash
+/usr/bin/python3 tools/verify/check_voca167.py --tree main
+# ERROR: 需要 Python ≥3.12，当前 3.9.6（…）。… 退出码 2（≠ 有 FAIL 时的 1），换解释器重跑即可。
+```
+
+其余脚本（`check_static.py` / `check_input_logic.py` / `check_crosscut.py`）3.9 起即可运行。
+
 ## check_static.py —— 仓库静态一致性
 
 | # | 检查项 | 说明 |
@@ -99,15 +112,24 @@ python3 tools/verify/check_voca167.py --self-test                      # 不读�
 汇报读数时**连同参数一起报**（脚本会回显 `CMD:`）：没传 `--package` 就没有署名链，
 没传 `--device` 就没有运行时判定 —— 少了参数的读数不能写成「全量跑过」。
 
+要证明「运行时判定确实没取证」，用**按编号对账**的形式，期望值 `0`：
+
+```bash
+grep -Ec "^PASS: \[[^]]*\] (AC3-1|AC4-1|AC5-1|AC5-2|AC5-3|AC6-1|AC6-2)( |$)" 读数文件
+```
+
+别用 `grep -E "PASS: .*(AC3-1|AC4-1|AC5-[123]|AC6-[12])"` —— 静态前置的正文里就写着
+「判定见 AC3-1」这类字样，同一份无设备读数它会数出 5 条「绿」，把未取证读成已取证。
+
 | # | 断言 | 说明 |
 |---|------|------|
 | AC1-1 | 键数 | 文档写「工具栏（N 键）」必须等于该树 `toolbarKeys()` 解析出的键数 |
 | AC1-2 | 「第 N 键」指位 | 按 `KeyAction.*` > `「」`内称呼 > 别名 > 键面 的顺序定指位对象，再比该树实际位置；解析不出/多义只 `WARN`，不猜 |
 | AC1-3 | 键序 | 键名清单与反引号键序行逐位比对；个别称呼在该树解析不出时降级人工核对，但**错位就是红** |
-| AC1-5 | 内嵌摘录 | `DOC_GLOBS` 里**任何** ```kotlin 块中的 `KeyDef.fn(...)` 都逐字段比（键面 / `weight` / `iconRes`），不要求先写 `SoftKeyboardView.kt:起-止`；`SWITCH_IME` 无条件按工具栏比，其余按最近锚点定归属，数字页 / 符号页 / 候选条的摘录不参与工具栏比对，判不出归属只 `WARN` 不猜。没写行号标记的摘录额外 `WARN`：键面比过了，但「行号随主干腐烂」这一维本轮无判据 |
+| AC1-5 | 内嵌摘录 | `DOC_GLOBS` 里**任何** ``` 围栏块**与行内单反引号**中的 `KeyDef.fn(...)` 都逐字段比（键面 / `weight` / `iconRes`），不要求先写 `SoftKeyboardView.kt:起-止`；`SWITCH_IME` 无条件按工具栏比，其余按最近锚点定归属。**能解析出 `KeyAction.X` 且 X 在该树工具栏里存在的，字段不符一律 `FAIL`** —— 三条例外路径都咬人：① 摘录自称「数字页 / 符号页 / 候选条」，但该动作在该树只有工具栏这一处出处（`actions_outside_toolbar()` 现算）⇒ 回到工具栏逐字段比并 `FAIL`；② 整段没有锚点、归属判不出 ⇒ 不符 `FAIL`、巧合一致也只 `WARN`「不计绿」；③ `WARN` 只留给真歧义（X 不在该树工具栏 / 该动作源码里另有出处 / 解析不出 KeyAction），**不存在静默 `continue` 的通道**。没写行号标记的摘录额外 `WARN`：键面比过了，但「行号随主干腐烂」这一维本轮无判据 |
 | AC1-6 | 权重 | 权重序列与「权重和」声明都按该树实际值算 |
 | AC1-7 | 机检文案 | `tools/verify/check_*.py` 里硬编码的键面称呼必须与该树键面同源（注释不算声明；`def self_test(` 之后的反例夹具不算声明） |
-| AC1-8 | 口径腐烂 | 文档承诺「不嵌源码摘录」的**那一节**里不许回潮摘录 |
+| AC1-8 | 口径腐烂 | 文档承诺「不嵌源码摘录」的**那一节**里不许回潮摘录。锚点用 `PROMISE_ANCHOR`（同义表述「不内嵌代码片段 / 不含源码摘录 / 只给符号引用…」都能锚住），**定位不到承诺 ⇒ `FAIL … 守卫失效`**：只锚五个字的文案时，改词或整节删掉会让这条编号从读数里静默消失，那等于没有守卫。全绿时也留一条可见记录 `PASS … 守卫本次生效：<文件>:<行> 承诺「…」`，让人看得出这条守卫在跑还是没跑。该文档里节外的摘录不在本条追究范围，由 AC1-5 逐字段比 |
 | AC2-1 | `<queries>` | `android.view.InputMethod` intent 必须在清单里 —— 缺陷 D（Android 11+ 包可见性裁掉 `enabledInputMethodList`）的根因门禁 |
 | AC2-2/2-3 | 同源与截断 | 「共 N 个」与列表行同源；不允许 `take/drop/slice/filter` 截断 |
 | AC2-4 | 滚动阈值 | 从面板源码符号链（`makeMeasureSpec` → 构造参数 → `dp(SYM)`）算出可视行数，据此把「≥6 条需滚动」标为**条件用例**。行距按取证设备实测（`DEVICE_DPI=440`、均值 `118.7px`）推得，换密度的设备报数必须写明「按 440dpi 取证设备」 |
@@ -115,7 +137,7 @@ python3 tools/verify/check_voca167.py --self-test                      # 不读�
 | AC2-8/2-9 | 分类计数 | 解析 `ImeListVisibility.kt` 的判据并移植到 Python 跑向量：被框架裁掉的项 ≠ 系统里就不存在 |
 | AC2-D | 真机取证 | 行数 == `|ENABLED|`、「共 N 个」== `|ENABLED|`；行按 `InputMethodPanel.createRowView()` 写的 `contentDescription`（输入法名，当前项带「（当前）」）认，源码里没有 `ime-row:` / `ime_row` 这类标识。**「每个 id 都有行」只 `SKIP`** —— 面板行没有组件级 id 可对账，需产品侧加稳定标识后才能判。**仅在 `--exclusive-device` 时执行**，否则 `SKIP` |
 | AC3-S / AC3-1 | 切走 | `S`：服务侧调了 `setInputMethod`。`1`：点行前后 `settings get secure default_input_method` 真的变了 —— 只有设备上取到才算 |
-| AC4-S / AC4-1 | 失败兜底 | `S`：失败 → `showInputMethodPicker` → 「系统不允许切换输入法」链条齐备。`1`：切换真失败时选择器或文案真出现了；两者都没有 = `FAIL`（静默失败）。判据会先摘掉面板自带的「打开系统输入法选择器」按钮，否则面板一开着就永远算兜底成功 |
+| AC4-S / AC4-1 | 失败兜底 | `S`：失败 → `showInputMethodPicker` → 「系统不允许切换输入法」链条齐备，并额外报出**归属基准**（`applicationId` 从被验树 `app/build.gradle.kts` 现取）。`1`：切换真失败时选择器或文案真出现了；两者都没有 = `FAIL`（静默失败）。选择器**按窗口归属判**（`_picker_up()` 先算出本应用自己的包名集合 —— `applicationId` + 面板容器节点的包 + 挂着「打开系统输入法选择器」按钮 / 「共 N 个」计数的节点的包 —— 再只在**非本应用**包名的节点上找选择器特征），不是摘掉某一条文案：面板里 `hiddenLabel.contentDescription = "$hint，打开系统输入法选择器"` 这种带前缀的自家按钮不会再把静默失败洗成绿；包名缺失、归属不明的节点一律不算证据（宁可判不出兜底，也不给假绿） |
 | AC5-S1..3 / AC5-1..3 | 空态 | `S`：空态文案与「系统选择器」入口在源码里存在。`1`：`|ENABLED| = 1` 时显示「没有其他输入法」；`2`：读不到列表时的文案（无外部注入手段，常态 `SKIP`）；`3`：dump 里那颗选择器按钮 `clickable="true"` |
 | AC6-1 / AC6-2 | E 类（EMUI·鸿蒙拦截） | `1`：`ro.build.hw_emui_api_level` / `ro.build.version.emui` / manufacturer·brand 命中；不命中只 `SKIP` 并写明需要 EMUI 真机。`2`：命中后看切换是否被拦截 + 兜底是否出现，被拦且无提示 = `FAIL`。非独占设备一律 `SKIP`；E 类真机栈归 VOCA-228 第 5 项 |
 | PRE-0/1/2 | 被验对象署名 | 安装包字节的 sha256 与声称摘要、与该树 `dist/SHA256SUMS` 条目三者对齐；对不上就不许按这份清单谈结论 |

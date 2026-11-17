@@ -26,11 +26,11 @@
   文档引用的 `SoftKeyboardView.kt:NNN-MMN` 反过来与解析出的实际跨度比对。
 
 用法：
-  python3 tools/verify/check_voca167.py --tree fa57a07
+  python3 tools/verify/check_voca167.py --tree fa57a07            # 需要 Python ≥ 3.12
   python3 tools/verify/check_voca167.py --tree eba7a61 --package dist/ispeech-internal-v1.6.apk
   python3 tools/verify/check_voca167.py --tree <ref> --device emulator-5554 --exclusive-device
   python3 tools/verify/check_voca167.py --tree <目录> --label 我的变异树   # 目录必须带 --label
-退出码：任一 FAIL ⇒ 1；SKIP / WARN 不计失败。
+退出码：任一 FAIL ⇒ 1；SKIP / WARN 不计失败；运行前提不满足（Python 低于 3.12）⇒ 2 且不出任何断言读数。
 """
 
 from __future__ import annotations
@@ -48,6 +48,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+
+# 运行前提（不是断言）：`tarfile.extractall(filter="data")` 的签名从 3.12 起才有，
+# 低版本跑到导出那一步会抛 TypeError —— 那是「跑不起来」，不能让它混进断言读数。
+MIN_PY = (3, 12)
+EXIT_UNSUPPORTED = 2
 
 VIEW_REL = "app/src/main/java/com/ispeech/input/SoftKeyboardView.kt"
 SERVICE_REL = "app/src/main/java/com/ispeech/input/IspeechImeService.kt"
@@ -448,6 +453,56 @@ OTHER_ANCHOR = re.compile(
 KEYDEF_CLAIM = re.compile(r"KeyDef\.\w+\(\s*(?:KeyAction\.([A-Z_]+)\s*,\s*)?(\"[^\"]*\")?([^\n]*)")
 VIEW_LINE_REF = re.compile(r"SoftKeyboardView\.kt:(\d+)(?:\s*[-–~]\s*(\d+))?")
 MARKER_WINDOW = 12  # 摘录往上找标记的窗口（行），出了这个窗口就算「无标记」
+EXCERPT_CLAIM = re.compile(r"KeyDef\.\w+\(\s*KeyAction\.")
+KEYDEF_ACTION = re.compile(r"KeyDef\.\w+\(\s*KeyAction\.([A-Z_]+)")
+# 承诺锚点：整句删掉/换成同义表述都要能被识别，识别不到才算守卫失效
+PROMISE_ANCHOR = re.compile(
+    r"不嵌源码摘录|不内嵌[^\n]{0,10}(?:摘录|代码|片段)|不含源码摘录|不写源码摘录|只给符号引用"
+)
+
+
+def actions_outside_toolbar(root: Path, keys: list[dict]) -> set[str]:
+    """该树源码里，除工具栏之外还挂过这把 KeyAction 的动作名集合。
+
+    用来判「摘录行自称数字页 / 符号页」能不能放行：一把键在该树只有工具栏这一处出处时，
+    换个锚点就想躲过逐字段比对是躲不掉的。源码读不到时把所有工具栏动作都当成另有出处，
+    宁可只 `WARN`，也不在信息不全时判红。
+    """
+    src = root / "app" / "src" / "main" / "java"
+    total: dict[str, int] = {}
+    for f in sorted(src.rglob("*.kt")) if src.is_dir() else []:
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for m in KEYDEF_ACTION.finditer(text):
+            total[m.group(1)] = total.get(m.group(1), 0) + 1
+    if not total:
+        return {k["action"] for k in keys}
+    in_tb: dict[str, int] = {}
+    for k in keys:
+        in_tb[k["action"]] = in_tb.get(k["action"], 0) + 1
+    return {a for a, c in total.items() if c > in_tb.get(a, 0)}
+
+
+def excerpt_fields(face: str, rest: str, real: dict) -> list[str]:
+    """摘录里能解析出的字段逐条比这把键（键面 / weight / iconRes）。"""
+    problems = []
+    if face and face != real["label"]:
+        problems.append(f"键面摘录「{face}」≠ 代码「{real['label']}」")
+    w = re.search(r"weight\s*=\s*([0-9.]+)f?", rest) or re.search(r"^\s*,?\s*([0-9]+\.[0-9]+)f", rest)
+    if w and float(w.group(1)) != real["weight"]:
+        problems.append(f"weight 摘录 {w.group(1)}f ≠ 代码 {real['weight']}f")
+    ic = re.search(r"iconRes\s*=\s*R\.drawable\.(\w+)", rest)
+    if ic and ic.group(1) != real["iconRes"]:
+        problems.append(f"iconRes 摘录 {ic.group(1)} ≠ 代码 {real['iconRes'] or '（无）'}")
+    return problems
+
+
+def excerpt_problems(face: str, rest: str, cands: list[dict]) -> list[str]:
+    """同名键位在工具栏有多把时（`KeyAction.LAYOUT` = 符号 + 表情），任一把能对上就算一致。"""
+    per = [excerpt_fields(face, rest, k) for k in cands]
+    return next(([] for p in per if not p), per[0] if per else ["该树工具栏没有这把键"])
 
 
 def fence_ranges(lines: list[str]) -> list[tuple[int, int]]:
@@ -529,8 +584,11 @@ def check_ac1_excerpts(
     """AC1-5 的两个维度：内嵌摘录逐字段 + 摘录声明的行号跨度。
 
     判归属用「SWITCH_IME 无条件 + 其余按最近锚点」，围栏块级判会误伤同块里的数字页键位。
+    摘录（``` 围栏块和行内单反引号都算，逐行扫）里能解析出 `KeyAction.X` 且 X 在该树工具栏里存在的，
+    字段不符一律红；`WARN` 只留给真歧义（X 不在该树工具栏 / 该动作另有出处 / 整段解析不出 KeyAction）。
     """
     labels = [k["label"] for k in keys]
+    extra = actions_outside_toolbar(root, keys)
     for f in files:
         rel = f.relative_to(root).as_posix()
         lines = f.read_text(encoding="utf-8").splitlines()
@@ -541,16 +599,57 @@ def check_ac1_excerpts(
             for m in KEYDEF_CLAIM.finditer(line):
                 action, face, rest = m.group(1) or "", (m.group(2) or "").strip('"'), m.group(3) or ""
                 binding, why = excerpt_binding(lines, i, block_of(fences, i), action)
-                if binding == "other":
-                    continue
-                claims["excerpt"] += 1
                 where = f"{rel}:{i}"
+                cands = [k for k in keys if k["action"] == action] if action else []
+                if binding == "other":
+                    # 摘录自称非工具栏键位：只有这把 KeyAction 在该树确实另有出处时才放行，
+                    # 且要留一条可见记录 —— 静默 continue 等于「换个锚点就绕过机检」。
+                    if len(cands) == 1 and action not in extra:
+                        binding, why = (
+                            "toolbar",
+                            f"锚点写着非工具栏，但 KeyAction.{action} 在该树只有工具栏这一处出处（{why}）→ 仍按工具栏逐字段比",
+                        )
+                    else:
+                        claims["excerpt"] += 1
+                        r.warn(
+                            "AC1-5",
+                            f"{where} 摘录按锚点判为非工具栏键位（{why}），KeyAction.{action or '（解析不出）'} 在源码里另有出处"
+                            f" / 该树工具栏有 {len(cands)} 把同名键 —— 不参与工具栏逐字段比对，需人工核对；不计红也不计绿",
+                        )
+                        continue
+                claims["excerpt"] += 1
                 if binding == "unknown":
-                    r.warn(
-                        "AC1-5",
-                        f"{where} 摘录「{m.group(0).strip()[:70]}」判不出归属（块内外都没有工具栏 / 数字页锚点），"
-                        f"而 KeyAction.{action} 恰好也在工具栏里 —— 机检不替人猜是哪把键，需人工核对",
-                    )
+                    if not action:
+                        r.warn(
+                            "AC1-5",
+                            f"{where} 摘录里的 `KeyDef` 解析不出 KeyAction（{m.group(0).strip()[:70]}），"
+                            f"需人工核对 —— 不按「解析不出」算通过",
+                        )
+                        continue
+                    if not cands:
+                        r.warn(
+                            "AC1-5",
+                            f"{where} 判不出归属（块内外都没有工具栏 / 数字页锚点），且 KeyAction.{action} 不在该树工具栏"
+                            f"（{labels}）—— 可能是别的版面键位，需人工核对",
+                        )
+                        continue
+                    # 归属判不出 ≠ 可以不管：这把键在该树工具栏里存在，字段不符一律红
+                    probs = excerpt_problems(face, rest, cands)
+                    real = cands[0]
+                    if probs:
+                        r.fail(
+                            "AC1-5",
+                            f"{where} 内嵌 `KeyDef` 摘录与代码不符：{'；'.join(probs)}"
+                            f"（代码 {action}「{real['label']}」weight {real['weight']}f"
+                            f"{' iconRes=' + real['iconRes'] if real['iconRes'] else ''}；"
+                            f"摘录归属判不出，但 KeyAction.{action} 在该树工具栏里存在 → 字段不符一律红）",
+                        )
+                    else:
+                        r.warn(
+                            "AC1-5",
+                            f"{where} 摘录「{m.group(0).strip()[:70]}」归属判不出（块内外都没有锚点），"
+                            f"字段与该树工具栏的 KeyAction.{action} 逐字段一致 —— 不计绿，需人工确认这条摘录说的是哪把键",
+                        )
                     continue
                 if not action:
                     r.warn(
@@ -566,17 +665,7 @@ def check_ac1_excerpts(
                         f"{where} 摘录写了 KeyAction.{action}（依据 {why}），但该树工具栏没有这把键（{labels}）",
                     )
                     continue
-                problems = []
-                if face and face != real["label"]:
-                    problems.append(f"键面摘录「{face}」≠ 代码「{real['label']}」")
-                w = re.search(r"weight\s*=\s*([0-9.]+)f?", rest) or re.search(
-                    r"^\s*,?\s*([0-9]+\.[0-9]+)f", rest
-                )
-                if w and float(w.group(1)) != real["weight"]:
-                    problems.append(f"weight 摘录 {w.group(1)}f ≠ 代码 {real['weight']}f")
-                ic = re.search(r"iconRes\s*=\s*R\.drawable\.(\w+)", rest)
-                if ic and ic.group(1) != real["iconRes"]:
-                    problems.append(f"iconRes 摘录 {ic.group(1)} ≠ 代码 {real['iconRes'] or '（无）'}")
+                problems = excerpt_fields(face, rest, real)
                 if problems:
                     r.fail(
                         "AC1-5",
@@ -825,20 +914,36 @@ def check_ac1(r: Report, root: Path, keys: list[dict], span: tuple[int, int]) ->
                     )
                     break
 
-    # VOCA-399 / PR #20 的口径：§4.1 只给符号引用，摘录一旦回潮就是红
+    # VOCA-399 / PR #20 的口径：承诺小节里只给符号引用，摘录一旦回潮就是红。
+    # 定位不到这条承诺（改词 / 整节删掉）= 守卫本身失效，同样必须红：
+    # 只锚五个字的文案，换一句同义表述就让这条编号从读数里消失，等于没有守卫。
     t9 = read(root, T9_DOC_REL)
-    if "不嵌源码摘录" in t9:
-        scope = section_scope(t9, "不嵌源码摘录")
-        if re.search(r"KeyDef\.\w+\(\s*KeyAction\.", scope):
+    embedded = len(EXCERPT_CLAIM.findall(t9))
+    if not t9:
+        r.skip("AC1-8", f"该树没有 {T9_DOC_REL}（早于这份文档的版本），摘录口径守卫无从谈起")
+    else:
+        am = PROMISE_ANCHOR.search(t9)
+        if not am:
             r.fail(
                 "AC1-8",
-                f"{T9_DOC_REL} 的承诺小节内写了「不嵌源码摘录」，同一节仍有 KeyDef 摘录 —— 口径又腐烂了",
+                f"{T9_DOC_REL} 里定位不到「不嵌源码摘录」的承诺小节（同义表述也搜了）—— 守卫失效：这条承诺被改词或整节删掉后，"
+                f"摘录回潮不再有人拦。该文档当前仍有 {embedded} 处内嵌 KeyDef 摘录；要么把承诺写回来，"
+                f"要么这棵树确实还没落地 VOCA-399 的口径（那就该显式红，不许静默不判）",
             )
         else:
-            r.ok(
-                "AC1-8",
-                f"{T9_DOC_REL} 承诺「只给符号引用」的那一节内已无内嵌 KeyDef 摘录（口径守住，不追究其它章节）",
-            )
+            at = t9.count("\n", 0, am.start()) + 1
+            in_sec = len(EXCERPT_CLAIM.findall(section_scope(t9, am.group(0))))
+            if in_sec:
+                r.fail(
+                    "AC1-8",
+                    f"{T9_DOC_REL}:{at} 承诺「{am.group(0)}」的同一节里仍有 {in_sec} 处内嵌 KeyDef 摘录 —— 口径又腐烂了",
+                )
+            else:
+                r.ok(
+                    "AC1-8",
+                    f"{T9_DOC_REL}:{at} 守卫本次生效：承诺「{am.group(0)}」的那一节内已无内嵌 KeyDef 摘录"
+                    f"（该文档另有 {embedded} 处摘录在别处，由 AC1-5 逐字段比，不属本条追究范围）",
+                )
 
     r.ok(
         "AC1-0",
@@ -1037,6 +1142,9 @@ def ui_dump(serial: str) -> str | None:
 
 PICKER_DESC = "打开系统输入法选择器"
 NON_ROW_DESCS = {"返回", PICKER_DESC}
+COUNT_LABEL = re.compile(r"^共\s*\d+\s*个$")
+APP_ID_REL = "app/build.gradle.kts"
+APP_ID_RE = re.compile(r'applicationId\s*=\s*"([\w.]+)"')
 
 
 def _nodes(xml: str):
@@ -1095,23 +1203,77 @@ PICKER_WINDOW = re.compile(
 )
 
 
-def _picker_up(xml: str) -> bool:
-    """系统输入法选择器是否真的弹出来了。
+def app_package(root: Path) -> str:
+    """被验这棵树的 applicationId —— 判 dump 里哪些窗口是「自己人」的第一依据。"""
+    m = APP_ID_RE.search(read(root, APP_ID_REL))
+    return m.group(1) if m else ""
 
-    必须先把自己面板上那颗 `content-desc="打开系统输入法选择器"` 摘掉 —— 它含「输入法选择」，
-    不摘的话面板开着时这条永远判成「兜底已出现」，AC-4 / AC-6 的静默失败也就再也判不出来。
+
+def own_packages(xml: str, app_pkg: str = "") -> set[str]:
+    """这份设备 dump 里属于本应用自己的包名（= 判系统窗口时要剪掉的归属）。
+
+    自家面板的两条文案里就有「输入法选择」四个字（`InputMethodPanel.kt` 的选择器按钮 +
+    `hiddenLabel.contentDescription = "$hint，打开系统输入法选择器"` 那条带前缀的提示），
+    按文案子串判弹窗会把「点了没切走」判成「兜底已出现」—— 正是缺陷 D 复发时的形态。
+    所以按**归属**剪：applicationId、面板所在窗口（容器节点）的包、挂着选择器按钮 /
+    「共 N 个」计数的包。归属从 dump 现算，产品侧改包名或换测试包名都不会漏剪。
     """
-    return bool(PICKER_WINDOW.search(xml.replace(f'content-desc="{PICKER_DESC}"', "")))
+    own = {app_pkg} if app_pkg else set()
+    _, parents, nodes = _nodes(xml)
+    if nodes is None:
+        return own
+    box = panel_container(nodes, parents)
+    targets = [box] if box is not None else []
+    targets += list(nodes)
+    for n in targets:
+        pkg = n.get("package") or ""
+        if not pkg:
+            continue
+        blob = f"{n.get('content-desc') or ''}{n.get('text') or ''}"
+        if box is not None and n is box:
+            own.add(pkg)
+        elif PICKER_DESC in blob or COUNT_LABEL.match(blob.strip()):
+            own.add(pkg)
+    return own
 
 
-def system_picker_up(serial: str, xml: str) -> tuple[bool, bool]:
+def _picker_up(xml: str, app_pkg: str = "") -> bool:
+    """系统输入法选择器窗口是否真的在屏上 —— 按窗口归属判，不按单条文案判。
+
+    只在**非本应用**的节点上找选择器特征；包名缺失的节点归属不明，一律不算证据
+    （宁可判不出兜底，也不给一条假绿）。
+    """
+    _, _, nodes = _nodes(xml)
+    if nodes is None:
+        return False
+    own = own_packages(xml, app_pkg)
+    for n in nodes:
+        pkg = n.get("package") or ""
+        if not pkg or pkg in own:
+            continue
+        blob = " ".join(
+            [
+                n.get("text") or "",
+                n.get("content-desc") or "",
+                n.get("resource-id") or "",
+                n.get("class") or "",
+                f'package="{pkg}"',
+            ]
+        )
+        if PICKER_WINDOW.search(blob):
+            return True
+    return False
+
+
+def system_picker_up(serial: str, xml: str, app_pkg: str = "") -> tuple[bool, bool]:
     """切换失败后的两种兜底：系统输入法选择器窗口 / 面板内的「系统不允许切换输入法」文案。"""
-    picker = _picker_up(xml) or _picker_up(ui_dump(serial) or "")
-    toast = "系统不允许切换输入法" in xml or "系统不允许切换输入法" in (ui_dump(serial) or "")
+    picker = _picker_up(xml, app_pkg) or _picker_up(ui_dump(serial) or "", app_pkg)
+    dump = xml or ui_dump(serial) or ""
+    toast = "系统不允许切换输入法" in dump or "系统不允许切换输入法" in (ui_dump(serial) or "")
     return picker, toast
 
 
-def check_device_ac345(r: Report, serial: str, ids: list[str], rows: list[dict], xml: str) -> bool | None:
+def check_device_ac345(r: Report, serial: str, ids: list[str], rows: list[dict], xml: str, app_pkg: str) -> bool | None:
     """AC-3 / AC-4 / AC-5 的运行时判定（会改设备默认输入法，只在独占取证设备上做）。
 
     返回 AC-3 的切换结论：True 切走了 / False 没切走 / None 本轮没取证。
@@ -1141,9 +1303,9 @@ def check_device_ac345(r: Report, serial: str, ids: list[str], rows: list[dict],
         else:
             switched = False
             r.fail("AC3-1", f"点了「{target['desc']}」但 default_input_method 仍是 {after or before}（前后无变化）—— AC-3 不成立")
-            picker, toast = system_picker_up(serial, xml)
+            picker, toast = system_picker_up(serial, xml, app_pkg)
             if picker or toast:
-                r.ok("AC4-1", f"切换失败有兜底（系统选择器={picker} / 「系统不允许切换输入法」={toast}）")
+                r.ok("AC4-1", f"切换失败有兜底（系统选择器={picker} / 「系统不允许切换输入法」={toast}）；选择器只认非本应用包名的节点，自家 {app_pkg or '面板'} 的按钮与提示不参与")
             else:
                 r.fail("AC4-1", "切换失败且既没弹系统选择器、也没显示「系统不允许切换输入法」—— 静默失败")
     if n == 1:
@@ -1177,7 +1339,7 @@ EMUI_PROPS = (
 )
 
 
-def check_ac6(r: Report, serial: str, props: dict[str, str], switched: bool | None) -> None:
+def check_ac6(r: Report, serial: str, props: dict[str, str], switched: bool | None, app_pkg: str) -> None:
     """AC-6（E 类：EMUI 拦截 setInputMethod）。本件只保证「有设备时这条能跑」。"""
     emui_api = props.get("ro.build.hw_emui_api_level") or ""
     emui_ver = props.get("ro.build.version.emui") or ""
@@ -1199,9 +1361,9 @@ def check_ac6(r: Report, serial: str, props: dict[str, str], switched: bool | No
     elif switched:
         r.ok("AC6-2", "该机 setInputMethod 未被拦截（切换生效）—— E 类在这台不成立，结论只对本机有效")
     else:
-        picker, toast = system_picker_up(serial, "")
+        picker, toast = system_picker_up(serial, "", app_pkg)
         if picker or toast:
-            r.ok("AC6-2", f"EMUI 拦截成立且兜底生效（系统选择器={picker} / 文案={toast}）")
+            r.ok("AC6-2", f"EMUI 拦截成立且兜底生效（系统选择器={picker} / 文案={toast}）；选择器只认非本应用包名的节点")
         else:
             r.fail("AC6-2", "EMUI 拦截成立且无任何兜底提示 —— 用户点了没反应，E 类缺陷")
 
@@ -1224,6 +1386,11 @@ def check_device(r: Report, root: Path, serial: str, exclusive: bool) -> None:
         ac_runtime_skip(r, why)
         return
     props = {k: (v or "") for k, v in props_raw.items()}
+    app_pkg = app_package(root)
+    if app_pkg:
+        r.ok("AC4-S", f"兜底归属基准取自被验树 {APP_ID_REL}：applicationId={app_pkg} —— 判系统选择器前先剪掉本应用自己的节点")
+    else:
+        r.warn("AC4-S", f"{APP_ID_REL} 里解析不到 applicationId —— 选择器归属只能按 dump 里面板自身的包名剪，判定偏保守")
     raw = adb_shell(serial, "settings", "get", "secure", "enabled_input_methods") or ""
     ids = [s.split(";")[0] for s in raw.split(":") if s.strip()]
     n = len(ids)
@@ -1269,8 +1436,8 @@ def check_device(r: Report, root: Path, serial: str, exclusive: bool) -> None:
             f"滚动条件用例判 SKIP：本机 |ENABLED| = {n} < {limit}"
             f"（阈值 = AT_MOST {cap[0] if cap else '?'}dp / 行距 {ROW_PX}px @{DEVICE_DPI}dpi），构造不出滚动前置；不得因此报绿",
         )
-    switched = check_device_ac345(r, serial, ids, rows, xml)
-    check_ac6(r, serial, props, switched)
+    switched = check_device_ac345(r, serial, ids, rows, xml, app_pkg)
+    check_ac6(r, serial, props, switched, app_pkg)
 
 
 def check_package_sign(r: Report, root: Path, pkg: str, claimed: str) -> None:
@@ -1520,6 +1687,91 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
     if panel_rows('<!DOCTYPE h [<!ENTITY x SYSTEM "http://127.0.0.1/">]><hierarchy/>') != []:
         fails.append("带 DTD/实体的 dump 仍去解析，给了设备侧数据读本地文件的口子")
 
+    # 面板自带文案不许冒充系统窗口：按钮那颗 + InputMethodPanel.kt 的 hiddenLabel
+    # （"系统另有 N 项未显示，打开系统输入法选择器"）。包名故意用 com.ispeech.input，
+    # 与被验树的 applicationId（com.ispeech.ime）不同 —— 归属必须从 dump 现算，不能只比常量。
+    ours = "com.ispeech.input"
+    stub_dump = (
+        '<hierarchy><node content-desc="输入法面板" package="%s" bounds="[0,1200][1080,1800]">'
+        '<node text="共 3 个" resource-id="%s:id/count" package="%s"/>'
+        '<node text="搜狗输入法" content-desc="搜狗输入法（当前）" clickable="true" package="%s"/>'
+        f'<node text="" content-desc="{PICKER_DESC}" clickable="true" package="%s"/>'
+        f'<node text="系统另有 2 项未显示" content-desc="系统另有 2 项未显示，{PICKER_DESC}" package="%s"/>'
+        "</node></hierarchy>"
+    ) % ((ours,) * 6)
+    if _picker_up(stub_dump, "com.ispeech.ime"):
+        fails.append(
+            "自家面板的「系统另有 N 项未显示，打开系统输入法选择器」提示被判成系统弹窗 —— "
+            "真机上「点了没切走」会打成 PASS AC4-1 有兜底 + PASS AC6-2 兜底生效（缺陷 D 复发时的形态）"
+        )
+    if _picker_up(stub_dump, ""):
+        fails.append("没给 applicationId 时归属剪枝失效 —— 面板包名只能从 dump 自己算，这条不能依赖调用方传参")
+    stub_sys = stub_dump.replace(
+        "</node></hierarchy>",
+        '<node text="输入法选择" resource-id="android:id/title" package="com.android.settings" '
+        'bounds="[0,0][1080,2000]"/></node></hierarchy>',
+    )
+    if not _picker_up(stub_sys, "com.ispeech.ime"):
+        fails.append("真弹系统选择器（非本应用包名的窗口）被判成没弹 —— AC-4 兜底会被误报成静默失败")
+    if _picker_up('<hierarchy><node text="输入法选择" /></hierarchy>', "com.ispeech.ime"):
+        fails.append("包名缺失（归属不明）的节点被当成系统窗口证据 —— 宁可判不出，也不许给绿")
+
+    # AC1-8 的锚点不许只锚五个字：改词要还能锚住，锚点整段删掉必须显式红。
+    # （夹具的 Kotlin 源码从「好树」现读，`code` 这个变量名在下面 `for code in AC_RUNTIME` 里已被占用）
+    a8 = workdir / "selftest-ac18"
+    (a8 / src).mkdir(parents=True, exist_ok=True)
+    (a8 / "docs").mkdir(parents=True, exist_ok=True)
+    (a8 / "app/src/main/AndroidManifest.xml").write_text(manifest, encoding="utf-8")
+    (a8 / "README.md").write_text(good_readme, encoding="utf-8")
+    (a8 / src / "SoftKeyboardView.kt").write_text(read(good, VIEW_REL), encoding="utf-8")
+    rot = '```kotlin\nKeyDef.fn(KeyAction.SWITCH_IME, "⌨输入法", weight = 1.6f, iconRes = R.drawable.ic_ime_legacy)\n```\n'
+    a8_cases = {
+        "承诺原句+节内摘录": ("## 4. 接线\n\n只给符号引用，不嵌源码摘录。\n\n" + rot, "FAIL"),
+        "承诺改词+节内摘录": ("## 4. 接线\n\n这一节不内嵌代码片段。\n\n" + rot, "FAIL"),
+        "承诺被整节删掉": ("## 4. 接线\n\n（这节只写实现清单）\n\n" + rot, "FAIL"),
+        "承诺在+摘录在节外": ("## 4. 接线\n\n只给符号引用，不嵌源码摘录。\n\n## 9. 附录\n\n" + rot, "PASS"),
+    }
+    ac18_reports: dict[str, Report] = {}
+    for why_a8, (doc_a8, want_a8) in a8_cases.items():
+        (a8 / "docs" / "t9-and-symbols.md").write_text(doc_a8, encoding="utf-8")
+        rr = Report("selftest-ac18")
+        keys8, a8s, b8 = parse_toolbar(read(a8, VIEW_REL))
+        check_ac1(rr, a8, keys8, (a8s, b8))
+        ac18_reports[why_a8] = rr
+        lines_a8 = rr.hits("AC1-8")
+        if not keys8:
+            fails.append(f"AC1-8 变异「{why_a8}」的夹具树解析不出键位，断言等于没跑")
+        if not lines_a8:
+            fails.append(f"AC1-8 变异「{why_a8}」一条结论都没有 —— 守卫静默失效，读数里看不出来")
+        elif lines_a8[0][0] != want_a8:
+            fails.append(f"AC1-8 变异「{why_a8}」判成 {lines_a8[0][0]}（期望 {want_a8}）：{lines_a8[0][2][:90]}")
+        if want_a8 == "PASS" and not rr.hits("AC1-5", "FAIL"):
+            fails.append("承诺在、腐烂摘录写在节外时 AC1-5 没红 —— 节外摘录只剩 WARN，不计红的口子还开着")
+
+    # 摘录行自称「数字页」/ 整段没有任何锚点，都不许让「字段不符」降级成不判：
+    # 前者换锚点、后者删锚点，是能绕开逐字段比对的两条最短路径。
+    (a8 / "docs" / "t9-and-symbols.md").write_text(
+        "## 9. 其它版面的键\n\n数字页的键：`KeyDef.fn(KeyAction.SETTINGS, \"⚙设置\", weight = 9f)`\n",
+        encoding="utf-8",
+    )
+    (a8 / "docs" / "orphan-excerpt.md").write_text(
+        "## 附录：一段谁都没认领的摘录\n\n```\nKeyDef.fn(KeyAction.PANEL_QUICK_PHRASE, \"剪贴板\", weight = 7.5f)\n```\n\n"
+        "## 附录：同样没锚点、但抄对了的一段\n\n```\n"
+        'KeyDef.fn(KeyAction.SETTINGS, "⚙", weight = 1f, iconRes = R.drawable.ic_settings_gear)\n```\n',
+        encoding="utf-8",
+    )
+    rr = Report("selftest-ac15")
+    keys8, a8s, b8 = parse_toolbar(read(a8, VIEW_REL))
+    check_ac1(rr, a8, keys8, (a8s, b8))
+    a15_fail = " ".join(h[2] for h in rr.hits("AC1-5", "FAIL"))
+    if "锚点写着非工具栏" not in a15_fail:
+        fails.append("摘录行自称数字页、但该 KeyAction 在源码里只有工具栏一处出处时没判红 —— 换个锚点就能绕过逐字段比对")
+    if "摘录归属判不出" not in a15_fail:
+        fails.append("没有任何锚点的腐烂摘录仍只 WARN —— 删掉锚点就能绕过逐字段比对")
+    a15_warn = [h[2] for h in rr.hits("AC1-5", "WARN")]
+    if not any("逐字段一致" in w and "不计绿" in w for w in a15_warn):
+        fails.append("无锚点但字段抄对的摘录没有留「不计绿」的可见记录，读起来像漏了这条用例")
+
     cap = panel_scroll_rows(
         "private val maxPanelHeightDp = 240\n"
         "return BoundedScrollView(context, dp(maxPanelHeightDp))\n"
@@ -1541,7 +1793,17 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
     )
     print(
         f"SELFTEST: 设备 dump 解析 行数={len(dmp_rows)} 当前项={sum(1 for x in dmp_rows if x['current'])} "
-        f"自带按钮不误判成系统弹窗={not _picker_up(dmp)}"
+        f"自带按钮不误判成系统弹窗={not _picker_up(dmp)} "
+        f"面板提示语不误判成系统弹窗={not _picker_up(stub_dump, 'com.ispeech.ime')} "
+        f"(不传 applicationId 时={not _picker_up(stub_dump, '')}) "
+        f"真弹窗仍判得出={_picker_up(stub_sys, 'com.ispeech.ime')}"
+    )
+    print(
+        "SELFTEST: AC1-8 锚点变异 "
+        + " ".join(
+            f"{name}={('无结论' if not rr2.hits('AC1-8') else rr2.hits('AC1-8')[0][0])}"
+            for name, rr2 in ac18_reports.items()
+        )
     )
     print(f"SELFTEST: 目录署名 id={d_id} -> {d_id2} -> {d_id3}（内容变则 id 变）")
     for m in fails:
@@ -1551,6 +1813,16 @@ class InputMethodPanel(context: Context) : FrameLayout(context) {
 
 
 def main() -> int:
+    if sys.version_info < MIN_PY:
+        cur = ".".join(str(x) for x in sys.version_info[:3])
+        need = ".".join(str(x) for x in MIN_PY)
+        print(
+            f"ERROR: 需要 Python ≥{need}，当前 {cur}（{sys.executable}）。\n"
+            "       这是**运行前提不满足**：一条断言都没跑，读数里没有任何 PASS/FAIL，"
+            f"不能把它当成某个 AC 判红。导出被验树用的 `tarfile.extractall(filter=...)` 从 {need} 起才有。\n"
+            f"       退出码 {EXIT_UNSUPPORTED}（≠ 有 FAIL 时的 1），换解释器重跑即可。"
+        )
+        return EXIT_UNSUPPORTED
     ap = argparse.ArgumentParser(description="VOCA-167 AC-1 / AC-2 按树机检")
     ap.add_argument("--tree", action="append", default=[], help="git 对象（commit/tree/ref）或目录，可重复")
     ap.add_argument("--label", action="append", default=[], help="给 --tree 起的树名，按顺序对应；--tree 指目录时必填")
