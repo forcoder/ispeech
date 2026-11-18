@@ -26,6 +26,12 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
     private val _userWords = MutableStateFlow<List<UserDictEntry>>(emptyList())
     val userWords: StateFlow<List<UserDictEntry>> = _userWords.asStateFlow()
 
+    private val _chineseInputMethod = MutableStateFlow(ChineseInputMethod.PINYIN)
+    val chineseInputMethod: StateFlow<ChineseInputMethod> = _chineseInputMethod.asStateFlow()
+
+    private val _spaceLongPressMs = MutableStateFlow(500)
+    val spaceLongPressMs: StateFlow<Int> = _spaceLongPressMs.asStateFlow()
+
     init {
         // 订阅持久化数据，启动时同步一次
         viewModelScope.launch {
@@ -98,12 +104,6 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
         _settings.value = _settings.value.copy(traditionalOutput = enabled)
         viewModelScope.launch { SettingsStore.setTraditionalOutput(app, enabled) }
     }
-
-    private val _chineseInputMethod = MutableStateFlow(ChineseInputMethod.PINYIN)
-    val chineseInputMethod: StateFlow<ChineseInputMethod> = _chineseInputMethod.asStateFlow()
-
-    private val _spaceLongPressMs = MutableStateFlow(500)
-    val spaceLongPressMs: StateFlow<Int> = _spaceLongPressMs.asStateFlow()
 
     fun setChineseInputMethod(method: ChineseInputMethod) {
         _chineseInputMethod.value = method
