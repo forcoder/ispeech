@@ -683,6 +683,9 @@ def quick_trigger_limits() -> tuple[int, int]:
 #  本节三段判定（①/② 与接线）都在抠掉注释的文本上求值；接线那三段还额外抠掉字符串字面量（code_only()）。
 #  VOCA-454 质检打回项 1 第二轮实测：摘掉守卫调用 + 同函数体留一行提到守卫名的注释 = 48/0 假绿，
 #  行注释 / 整行块注释 / 行尾 `/* … */` / 跨行块注释 / 字符串五种形态都能绕，注释冒充代码不需要跨函数分析。
+#  第三轮延伸探针补两条同类可编译假阴性：嵌套块注释 `/* outer /* inner */ guardedRemoteMode(…) */`
+#  （Kotlin 块注释可嵌套，非贪婪正则停在第一个 `*/` 就漏出后半段）与三引号原始串 `"""x"guardedRemoteMode(…)"`
+#  （串内裸双引号把守卫名留在代码面），改后各自 `47/1`。`code_only()` 现在是单遍 Kotlin 词法扫描，
 #  抠完仍然锁不住的那一层：调用点写在代码里、结果却被丢掉或落在永不成立的条件里 —— 那是行为，
 #  归 `QuickPhraseLegacyRemoteRowTest`，本脚本不假装会做数据流分析（契约 C1-6b 行的口径与此一致）。
 # ──────────────────────────────────────────────────────────────
@@ -707,9 +710,89 @@ REMOTE_THEN_BRANCH_UNGUARDED_RE = re.compile(
 FIRST_PARSE_AFTER_OPEN_REMOTE_RE = re.compile(
     r"openRemote\([^)]*\)[\s\S]{0,400}?QuickPhraseEngine\.from(Remote)?Text\("
 )
-# 接线断言的求值面（VOCA-454 质检打回项 1）：整段块注释（含跨行、挂在代码行尾部的）与字符串字面量。
-BLOCK_COMMENT_RE = re.compile(r"/\*[\s\S]*?\*/")
-STRING_LITERAL_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+# 接线断言的求值面（VOCA-454 质检打回项 1）：注释（含**嵌套**块注释）与字符串（含原始串）都不算代码。
+# 这一面由 code_only() 单遍词法扫描产出，不用正则 —— 正则抠不对嵌套块注释与原始串这两类。
+
+
+def _blank_span(text: str) -> str:
+    """把一段注释 / 字符串正文抠成空格，换行原样保留 —— 行号与列号都不动。"""
+    return "".join("\n" if ch == "\n" else " " for ch in text)
+
+
+def _end_of_line(src: str, from_idx: int) -> int:
+    nl = src.find("\n", from_idx)
+    return len(src) if nl < 0 else nl
+
+
+def code_only(src: str) -> str:
+    """单遍 Kotlin 词法扫描，只留下真会被执行的代码 —— 接线断言在这份文本上求值。
+
+    状态机与 kotlinc 一致，五类都要认（VOCA-454 质检两轮实测，每一类都是一种把守卫名留在代码面之外的写法）：
+    块注释**可嵌套**（`/* outer /* inner */ guardedRemoteMode(trigger, declaredMode) */` 是一整条合法注释，
+    非贪婪正则停在第一个 `*/`，后半段就把守卫名吐回代码面）；`//` 到行尾，且注释里的 `/*` 不开块注释；
+    普通串（单个双引号包裹）认反斜杠转义；三引号原始串认到下一个三引号，正文里那个裸双引号不能提前结束抠除
+    （VOCA-454 质检第二轮的延伸探针：正则按成对双引号抠串，`"x"guardedRemoteMode(…)"` 会把守卫名留在代码面）；
+    字符字面量（单引号包裹）—— `'"'` 不开字符串，`"'"` 不开注释。
+    抠除是原地等长的：正文换成空格、换行保留，所以行号、列号与行首缩进都不动 —— FAIL 报的文件绝对行号、
+    `function_body()` 靠的缩进收口、`strip_kotlin_comment()` 的引号配平因此都不受影响。
+    未闭合的块注释抠到文件尾、未闭合的串抠到行尾：方向是 fail-closed，宁可误红，不再假绿。
+    仍然锁不住的那一层不归本函数管：调用点写在代码里、结果却被丢掉或落在永不成立的条件里 —— 那是行为，
+    归 `QuickPhraseLegacyRemoteRowTest`。字符串模板 `"${guardedRemoteMode(…)}"` 里那段确实是代码，本函数按
+    整串抠掉，误判方向是红（它在插值里拿到返回值也不改 mode，属上面那层行为）。
+    """
+    out: list[str] = []
+    n = len(src)
+    i = 0
+    depth = 0  # 块注释的嵌套深度，非 0 表示当前在注释里
+    while i < n:
+        if depth:
+            if src.startswith("*/", i):
+                depth -= 1
+                out.append("  ")
+                i += 2
+            elif src.startswith("/*", i):
+                depth += 1
+                out.append("  ")
+                i += 2
+            else:
+                out.append("\n" if src[i] == "\n" else " ")
+                i += 1
+            continue
+        if src.startswith("//", i):
+            nl = src.find("\n", i)
+            end = n if nl < 0 else nl
+            out.append(" " * (end - i))
+            i = end
+        elif src.startswith("/*", i):
+            depth = 1
+            out.append("  ")
+            i += 2
+        elif src.startswith('"""', i):
+            close = src.find('"""', i + 3)
+            body_end = close if close >= 0 else _end_of_line(src, i + 3)
+            out.append('"""' + _blank_span(src[i + 3:body_end]))
+            i = body_end + (3 if close >= 0 else 0)
+        elif src[i] == '"':
+            k = i + 1
+            while k < n and src[k] not in '"\n':
+                k += 2 if (src[k] == "\\" and k + 1 < n and src[k + 1] != "\n") else 1
+            closed = k < n and src[k] == '"'
+            out.append('"' + _blank_span(src[i + 1:k]))
+            i = k + (1 if closed else 0)
+        elif src[i] == "'":
+            k = i + 1
+            while k < n and src[k] not in "'\n":
+                k += 2 if (src[k] == "\\" and k + 1 < n and src[k + 1] != "\n") else 1
+            if k < n and src[k] == "'":  # 整个字符字面量原样留着，它是代码不是正文
+                out.append(src[i:k + 1])
+                i = k + 1
+            else:
+                out.append("'")
+                i += 1
+        else:
+            out.append(src[i])
+            i += 1
+    return "".join(out)
 
 
 def strip_kotlin_comment(line: str) -> str:
@@ -721,26 +804,6 @@ def strip_kotlin_comment(line: str) -> str:
     if cut > 0 and text.count('"', 0, cut) % 2 == 0:
         text = text[:cut]
     return text.strip()
-
-
-def code_only(src: str) -> str:
-    """把注释与字符串字面量都抠掉，只留下真会被执行的代码 —— 接线断言在这份文本上求值。
-
-    `strip_kotlin_comment` 只管整行注释与行尾 `//`：跨行块注释里不以 `*` 开头的中间行、
-    挂在代码行尾部的 `/* … */`、以及字符串里的同名片段都还在。VOCA-454 质检打回项 1 实测
-    「`parse` 里摘掉守卫调用 + 同函数体留一行 `// 之后接上 guardedRemoteMode(trigger, declaredMode)`」
-    能把断言哄成 48/0 绿 —— 那是注释冒充代码，同一个函数体内，不需要跨函数分析就能堵。
-    块注释替换成等量换行，行号与文件绝对行保持一致；字符串最后抠，`//` 说明里那个未配对的
-    引号已经先随注释去掉了，不会把两段真代码当成一个字符串吃掉。抠文本只会让断言更难满足，
-    方向是 fail-closed：宁可误红，不再假绿。
-    缩进按原行补回（`strip_kotlin_comment` 会把行首空白一起去掉）—— `function_body()` 靠缩进
-    收口表达式体，缩进丢了它就把函数签名单独当成一个函数，实测 baseline 从 48/0 掉到 47/1。
-    """
-    blocked = BLOCK_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), src)
-    kept: list[str] = []
-    for line in blocked.splitlines():
-        kept.append(line[:len(line) - len(line.lstrip())] + strip_kotlin_comment(line))
-    return STRING_LITERAL_RE.sub('""', "\n".join(kept))
 
 
 def mode_guard_lines(lines: list[str]) -> set[int]:
