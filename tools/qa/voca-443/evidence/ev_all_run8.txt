@@ -1,0 +1,122 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0	ts=2026-11-19T04:28:09+0800
+IDENT	stage=start	apk=app-debug.apk	match=True	head=aa4e236	product_baseline=fa57a07	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	apk_sha256=48ee0d3d41b29ed50d4ad9c23c1dbf8cb42da763066ab4f17823b38fa32eb330	ts=2026-11-19T04:28:10+0800
+HOST	ok=True	round=1	taps=2	top=1290	h=1050	ts=2026-11-19T04:28:24+0800
+KEYMAP	step_dp=72	step_px_expect=198	tol_px=6	dpi=440	source=IspeechImeService.kt:601-605 + CandidateView.kt:90-92,199（main fa57a07 行号）	sign_conv=drive.shift(): 正=内容左移=视口向右	ts=2026-11-19T04:28:24+0800
+NAV	at=to_number	tap=(864, 2118)	cells=7	ts=2026-11-19T04:28:25+0800
+NAV	at=to_t9	tap=(298, 2118)	row=(2045, 2192)	cells=4	ts=2026-11-19T04:28:26+0800
+T9_MAP	1=(134, 1623)	2=(388, 1623)	3=(642, 1623)	del=(921, 1623)	4=(134, 1786)	5=(388, 1786)	6=(642, 1786)	enter=(921, 1786)	7=(134, 1952)	8=(388, 1952)	9=(642, 1952)	emoji=(921, 1952)	*=(134, 2118)	0=(388, 2118)	#=(642, 2118)	mode=(921, 2118)	ts=2026-11-19T04:28:27+0800
+PREP	leg=t9	host='74'	want=74	frame=1124	bg_match_pct=78.0	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	note=T9 chip 恒 GONE，回读口径=宿主组合文本（见模块 docstring）	ts=2026-11-19T04:28:31+0800
+NODEPROBE	issue=§9-11	ime_window_dumpable=False	scrollable_nodes=0	xml_len=10732	note=挂载层运行时判定需 IME 节点可 dump；此处只记录能不能	ts=2026-11-19T04:28:33+0800
+POOL_FWD	i=1	key=70	shift=198	err=0.22	cum=198	verdict=ok	ts=2026-11-19T04:28:34+0800
+POOL_FWD	i=2	key=70	shift=198	err=0.0	cum=396	verdict=ok	ts=2026-11-19T04:28:34+0800
+POOL_FWD	i=3	key=70	shift=198	err=0.3	cum=594	verdict=ok	ts=2026-11-19T04:28:35+0800
+POOL_FWD	i=4	key=70	shift=198	err=0.0	cum=792	verdict=ok	ts=2026-11-19T04:28:36+0800
+POOL_FWD	i=5	key=70	shift=198	err=0.35	cum=990	verdict=ok	ts=2026-11-19T04:28:37+0800
+POOL_FWD	i=6	key=70	shift=198	err=0.25	cum=1188	verdict=ok	ts=2026-11-19T04:28:38+0800
+POOL_FWD	i=7	key=70	shift=198	err=0.0	cum=1386	verdict=ok	ts=2026-11-19T04:28:38+0800
+POOL_FWD	i=8	key=70	shift=198	err=0.0	cum=1584	verdict=ok	ts=2026-11-19T04:28:39+0800
+POOL_FWD	i=9	key=70	shift=198	err=0.3	cum=1782	verdict=ok	ts=2026-11-19T04:28:40+0800
+POOL_FWD	i=10	key=70	shift=198	err=0.31	cum=1980	verdict=ok	ts=2026-11-19T04:28:41+0800
+POOL_FWD	i=11	key=70	shift=198	err=0.14	cum=2178	verdict=ok	ts=2026-11-19T04:28:42+0800
+POOL_FWD	i=12	key=70	shift=198	err=0.0	cum=2376	verdict=ok	ts=2026-11-19T04:28:42+0800
+POOL_FWD	i=13	key=70	shift=198	err=0.5	cum=2574	verdict=ok	ts=2026-11-19T04:28:43+0800
+POOL_FWD	i=14	key=70	shift=198	err=0.28	cum=2772	verdict=ok	ts=2026-11-19T04:28:44+0800
+POOL_FWD	i=15	key=70	shift=164	err=3.6	cum=2936	verdict=ok	ts=2026-11-19T04:28:45+0800
+POOL_FWD	i=16	key=70	shift=0	err=0.0	cum=2936	verdict=ok	ts=2026-11-19T04:28:45+0800
+POOL_FWD	i=17	key=70	shift=0	err=0.0	cum=2936	verdict=ok	ts=2026-11-19T04:28:46+0800
+POOL_FWD	i=18	key=70	shift=0	err=0.0	cum=2936	verdict=ok	ts=2026-11-19T04:28:47+0800
+CLAMP	key=70	press=18	cum=2936	ts=2026-11-19T04:28:47+0800
+POOL	leg=t9	digits=74	pool_count=34	need=8	scroll_range_px=2936	frames=16	ts=2026-11-19T04:28:47+0800
+POOL_BACK	i=1	key=69	shift=-198	err=0.46	cum=-198	verdict=ok	ts=2026-11-19T04:28:48+0800
+POOL_BACK	i=2	key=69	shift=-198	err=0.46	cum=-396	verdict=ok	ts=2026-11-19T04:28:49+0800
+POOL_BACK	i=3	key=69	shift=-198	err=0.11	cum=-594	verdict=ok	ts=2026-11-19T04:28:49+0800
+POOL_BACK	i=4	key=69	shift=-198	err=0.32	cum=-792	verdict=ok	ts=2026-11-19T04:28:50+0800
+POOL_BACK	i=5	key=69	shift=-198	err=0.22	cum=-990	verdict=ok	ts=2026-11-19T04:28:51+0800
+POOL_BACK	i=6	key=69	shift=-198	err=0.36	cum=-1188	verdict=ok	ts=2026-11-19T04:28:52+0800
+POOL_BACK	i=7	key=69	shift=-198	err=0.44	cum=-1386	verdict=ok	ts=2026-11-19T04:28:52+0800
+POOL_BACK	i=8	key=69	shift=-198	err=0.25	cum=-1584	verdict=ok	ts=2026-11-19T04:28:53+0800
+POOL_BACK	i=9	key=69	shift=-198	err=0.32	cum=-1782	verdict=ok	ts=2026-11-19T04:28:54+0800
+POOL_BACK	i=10	key=69	shift=-198	err=0.43	cum=-1980	verdict=ok	ts=2026-11-19T04:28:55+0800
+POOL_BACK	i=11	key=69	shift=-198	err=0.48	cum=-2178	verdict=ok	ts=2026-11-19T04:28:55+0800
+POOL_BACK	i=12	key=69	shift=-198	err=0.03	cum=-2376	verdict=ok	ts=2026-11-19T04:28:56+0800
+POOL_BACK	i=13	key=69	shift=-198	err=0.37	cum=-2574	verdict=ok	ts=2026-11-19T04:28:57+0800
+POOL_BACK	i=14	key=69	shift=-198	err=0.09	cum=-2772	verdict=ok	ts=2026-11-19T04:28:58+0800
+POOL_BACK	i=15	key=69	shift=-164	err=2.32	cum=-2936	verdict=ok	ts=2026-11-19T04:28:59+0800
+POOL_BACK	i=16	key=69	shift=0	err=0.0	cum=-2936	verdict=ok	ts=2026-11-19T04:28:59+0800
+POOL_BACK	i=17	key=69	shift=0	err=0.0	cum=-2936	verdict=ok	ts=2026-11-19T04:29:00+0800
+POOL_BACK	i=18	key=69	shift=0	err=0.0	cum=-2936	verdict=ok	ts=2026-11-19T04:29:01+0800
+CLAMP	key=69	press=18	cum=-2936	ts=2026-11-19T04:29:01+0800
+GATES	leg=t9	readback=True	band_bg=True	pool_ge_8=True	at_origin=True	ts=2026-11-19T04:29:01+0800
+AC_A1_FWD	i=1	key=keyevent70(EQUALS)	shift=198	err=0.22	expect=198	verdict=PASS	ts=2026-11-19T04:29:02+0800
+AC_A1_FWD	i=2	key=keyevent70(EQUALS)	shift=198	err=0.0	expect=198	verdict=PASS	ts=2026-11-19T04:29:02+0800
+AC_A1_FWD	i=3	key=keyevent70(EQUALS)	shift=198	err=0.3	expect=198	verdict=PASS	ts=2026-11-19T04:29:03+0800
+AC_A1_CUM	steps=[198, 198, 198]	cum=594	expect3x=594	verdict=PASS	ts=2026-11-19T04:29:03+0800
+AC_A1_REV	i=1	key=keyevent69(MINUS)	shift=-198	err=0.3	expect=-198	verdict=PASS	ts=2026-11-19T04:29:04+0800
+AC_A1_REV	i=2	key=keyevent69(MINUS)	shift=-198	err=0.0	expect=-198	verdict=PASS	ts=2026-11-19T04:29:04+0800
+AC_A1_REV	i=3	key=keyevent69(MINUS)	shift=-198	err=0.22	expect=-198	verdict=PASS	ts=2026-11-19T04:29:05+0800
+HOSTTEXT	leg=t9	v='74'	unchanged=True	ts=2026-11-19T04:29:07+0800
+RESULT	ac=AC-a1	leg=t9	digits=74	fwd_steps=[198, 198, 198]	rev_steps=[-198, -198, -198]	cum3=594	verdict=PASS	note=FAIL(key_swallowed)=T9 态该键被吞的实测结论；err>5 的步另标 unverifiable	ts=2026-11-19T04:29:07+0800
+AC_A2_SCROLL	i=1	shift=198	err=0.22	offset=198	ts=2026-11-19T04:29:15+0800
+AC_A2_SCROLL	i=2	shift=198	err=0.0	offset=396	ts=2026-11-19T04:29:16+0800
+AC_A2_SCROLL	i=3	shift=198	err=0.3	offset=594	ts=2026-11-19T04:29:17+0800
+AC_A2_SCROLL	i=4	shift=198	err=0.0	offset=792	ts=2026-11-19T04:29:17+0800
+AC_A2_SCROLL	i=5	shift=198	err=0.35	offset=990	ts=2026-11-19T04:29:18+0800
+AC_A2_PICK	tap=(67, 1279)	item_left=22	item_right=112	ts=2026-11-19T04:29:19+0800
+AC_A2_COMMIT	leg=t9	host='日'	verdict=PASS	note=上屏词 != 组合串且非空 = 点选确实上屏	ts=2026-11-19T04:29:21+0800
+AC_A2_POST	leg=t9	assoc_cand_count=4	chip_visible=False	note=commit→startAssociation；联想态 chip 同样 GONE（code=statusText?:buffer）	ts=2026-11-19T04:29:21+0800
+AC_A2_OFFSET_T9	probe=boundary	cand_count=4	minus_shift=0	minus_err=0.0	diff_bbox=None	minus_idle=True	plus_shift=198	plus_err=0.09	plus_moves=True	at_left=True	ts=2026-11-19T04:29:24+0800
+AC_A2_NEXT_T9	probe=boundary	cand_count=8	minus_shift=0	minus_err=0.0	diff_bbox=None	minus_idle=True	plus_shift=198	plus_err=0.0	plus_moves=True	at_left=True	ts=2026-11-19T04:29:29+0800
+AC_A2_NEXT	leg=t9	host='日2'	want=…2	readback=True	ts=2026-11-19T04:29:29+0800
+RESULT	ac=AC-a2	leg=t9	offset_before_pick=990	committed='日'	at_left_after_commit=True	at_left_next_char=True	verdict=PASS	ts=2026-11-19T04:29:29+0800
+NAV	at=to_letter	tap=(298, 2117)	row=(2044, 2191)	cells=4	ts=2026-11-19T04:29:35+0800
+NAV	at=letter_restored	ok=True	ts=2026-11-19T04:29:35+0800
+W_POOL_FWD	i=1	key=70	shift=198	err=0.7	cum=198	verdict=ok	ts=2026-11-19T04:29:41+0800
+W_POOL_FWD	i=2	key=70	shift=198	err=0.0	cum=396	verdict=ok	ts=2026-11-19T04:29:42+0800
+W_POOL_FWD	i=3	key=70	shift=198	err=0.37	cum=594	verdict=ok	ts=2026-11-19T04:29:43+0800
+W_POOL_FWD	i=4	key=70	shift=198	err=0.0	cum=792	verdict=ok	ts=2026-11-19T04:29:43+0800
+W_POOL_FWD	i=5	key=70	shift=198	err=0.56	cum=990	verdict=ok	ts=2026-11-19T04:29:44+0800
+W_POOL_FWD	i=6	key=70	shift=198	err=0.0	cum=1188	verdict=ok	ts=2026-11-19T04:29:45+0800
+W_POOL_FWD	i=7	key=70	shift=198	err=0.37	cum=1386	verdict=ok	ts=2026-11-19T04:29:46+0800
+W_POOL_FWD	i=8	key=70	shift=198	err=0.0	cum=1584	verdict=ok	ts=2026-11-19T04:29:47+0800
+W_POOL_FWD	i=9	key=70	shift=198	err=0.33	cum=1782	verdict=ok	ts=2026-11-19T04:29:47+0800
+W_POOL_FWD	i=10	key=70	shift=198	err=0.0	cum=1980	verdict=ok	ts=2026-11-19T04:29:48+0800
+W_POOL_FWD	i=11	key=70	shift=198	err=0.35	cum=2178	verdict=ok	ts=2026-11-19T04:29:49+0800
+W_POOL_FWD	i=12	key=70	shift=198	err=0.0	cum=2376	verdict=ok	ts=2026-11-19T04:29:50+0800
+W_POOL_FWD	i=13	key=70	shift=180	err=2.69	cum=2556	verdict=ok	ts=2026-11-19T04:29:50+0800
+W_POOL_FWD	i=14	key=70	shift=0	err=0.0	cum=2556	verdict=ok	ts=2026-11-19T04:29:51+0800
+W_POOL_FWD	i=15	key=70	shift=0	err=0.0	cum=2556	verdict=ok	ts=2026-11-19T04:29:52+0800
+W_POOL_FWD	i=16	key=70	shift=0	err=0.0	cum=2556	verdict=ok	ts=2026-11-19T04:29:53+0800
+CLAMP	key=70	press=16	cum=2556	ts=2026-11-19T04:29:53+0800
+POOL	leg=wubi	code=g	pool_count=34	need=8	scroll_range_px=2556	ts=2026-11-19T04:29:53+0800
+W_POOL_BACK	i=1	key=69	shift=-198	err=0.52	cum=-198	verdict=ok	ts=2026-11-19T04:29:53+0800
+W_POOL_BACK	i=2	key=69	shift=-198	err=0.0	cum=-396	verdict=ok	ts=2026-11-19T04:29:54+0800
+W_POOL_BACK	i=3	key=69	shift=-198	err=0.55	cum=-594	verdict=ok	ts=2026-11-19T04:29:55+0800
+W_POOL_BACK	i=4	key=69	shift=-198	err=0.0	cum=-792	verdict=ok	ts=2026-11-19T04:29:56+0800
+W_POOL_BACK	i=5	key=69	shift=-198	err=0.38	cum=-990	verdict=ok	ts=2026-11-19T04:29:57+0800
+W_POOL_BACK	i=6	key=69	shift=-198	err=0.0	cum=-1188	verdict=ok	ts=2026-11-19T04:29:57+0800
+W_POOL_BACK	i=7	key=69	shift=-198	err=0.5	cum=-1386	verdict=ok	ts=2026-11-19T04:29:58+0800
+W_POOL_BACK	i=8	key=69	shift=-198	err=0.0	cum=-1584	verdict=ok	ts=2026-11-19T04:29:59+0800
+W_POOL_BACK	i=9	key=69	shift=-198	err=0.5	cum=-1782	verdict=ok	ts=2026-11-19T04:30:00+0800
+W_POOL_BACK	i=10	key=69	shift=-198	err=0.0	cum=-1980	verdict=ok	ts=2026-11-19T04:30:00+0800
+W_POOL_BACK	i=11	key=69	shift=-198	err=0.37	cum=-2178	verdict=ok	ts=2026-11-19T04:30:01+0800
+W_POOL_BACK	i=12	key=69	shift=-198	err=0.03	cum=-2376	verdict=ok	ts=2026-11-19T04:30:02+0800
+W_POOL_BACK	i=13	key=69	shift=-180	err=2.42	cum=-2556	verdict=ok	ts=2026-11-19T04:30:03+0800
+W_POOL_BACK	i=14	key=69	shift=0	err=0.0	cum=-2556	verdict=ok	ts=2026-11-19T04:30:04+0800
+W_POOL_BACK	i=15	key=69	shift=0	err=0.0	cum=-2556	verdict=ok	ts=2026-11-19T04:30:04+0800
+W_POOL_BACK	i=16	key=69	shift=0	err=0.0	cum=-2556	verdict=ok	ts=2026-11-19T04:30:05+0800
+CLAMP	key=69	press=16	cum=-2556	ts=2026-11-19T04:30:05+0800
+AC_A2_SCROLL	leg=wubi	i=1	shift=198	err=0.7	offset=198	ts=2026-11-19T04:30:06+0800
+AC_A2_SCROLL	leg=wubi	i=2	shift=198	err=0.0	offset=396	ts=2026-11-19T04:30:07+0800
+AC_A2_SCROLL	leg=wubi	i=3	shift=198	err=0.37	offset=594	ts=2026-11-19T04:30:07+0800
+AC_A2_SCROLL	leg=wubi	i=4	shift=198	err=0.0	offset=792	ts=2026-11-19T04:30:08+0800
+AC_A2_SCROLL	leg=wubi	i=5	shift=198	err=0.56	offset=990	ts=2026-11-19T04:30:09+0800
+AC_A2_PICK_W	tap=(101, 1347)	item_left=81	item_right=122	ts=2026-11-19T04:30:10+0800
+AC_A2_COMMIT	leg=wubi	host='到'	verdict=PASS	ts=2026-11-19T04:30:12+0800
+AC_A2_OFFSET_WUBI	probe=boundary	cand_count=6	minus_shift=0	minus_err=0.0	diff_bbox=None	minus_idle=True	plus_shift=198	plus_err=0.31	plus_moves=True	at_left=True	ts=2026-11-19T04:30:14+0800
+AC_A2_NEXT_WUBI	probe=boundary	cand_count=8	minus_shift=0	minus_err=0.0	diff_bbox=None	minus_idle=True	plus_shift=198	plus_err=0.48	plus_moves=True	at_left=True	ts=2026-11-19T04:30:20+0800
+AC_A2_NEXT	leg=wubi	host='到h'	want=…h	readback=True	ts=2026-11-19T04:30:20+0800
+RESULT	ac=AC-a2	leg=wubi	offset_before_pick=990	committed='到'	at_left_after_commit=True	at_left_next_char=True	verdict=PASS	ts=2026-11-19T04:30:20+0800
+RESTORE	density=Physical density: 440	size=Physical size: 1080x2340	font_scale=null	ts=2026-11-19T04:30:25+0800
+IDENT	stage=end	match=True	head=aa4e236	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-19T04:30:25+0800
+DONE	legs=all	digits=74	k=5	ts=2026-11-19T04:30:25+0800
