@@ -152,7 +152,11 @@
 
     <!-- Voice input -->
     <string name="voice_listening">Listening…</string>
-    <string name="voice_need_permission">Please grant microphone permission first</string>
+    <string name="voice_need_permission">Please grant microphone permission first. If the system no longer shows the dialog, enable it in System settings → Apps → iSpeech → Permissions.</string>
+    <string name="voice_action_grant">Grant</string>
+    <string name="voice_action_open_settings">Settings</string>
+    <string name="voice_permission_open_failed">Can\'t open the permission screen. Enable the microphone in System settings → Apps → iSpeech → Permissions.</string>
+    <string name="voice_permission_granted">Microphone permission is on — tap the mic to start talking</string>
     <string name="voice_no_match">Didn\'t catch that, please try again</string>
     <string name="voice_cancel">Voice input cancelled</string>
     <string name="voice_unavailable">Voice input is not available on this device</string>

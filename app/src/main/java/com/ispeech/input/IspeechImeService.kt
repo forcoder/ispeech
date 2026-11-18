@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.graphics.Paint
+import android.net.Uri
 import android.provider.Settings
 import android.text.SpannableString
 import android.text.Spanned
@@ -32,8 +33,10 @@ import com.ispeech.data.Punctuation
 import com.ispeech.data.PunctuationConverter
 import com.ispeech.data.UserDictStore
 import com.ispeech.data.UserDictMode
+import com.ispeech.data.FunAsrModelStore
 import com.ispeech.data.VoskModelStore
 import com.ispeech.di.AppContainer
+import com.ispeech.engine.AssociationCommit
 import com.ispeech.engine.CompositeEngine
 import com.ispeech.engine.LookupCandidate
 import com.ispeech.engine.LookupEngine
@@ -113,6 +116,9 @@ class IspeechImeService : InputMethodService() {
 
         /** 九宫格（T9）数字串最长 9 位 */
         private const val T9_MAX_DIGITS = 9
+
+        /** 联想词去重兜底时回看的已上屏字数（与 AssociationCommit 的锚点窗口一致） */
+        private const val ASSOCIATION_ANCHOR_CHARS = 16
 
         /**
          * 九宫格一次最多展开的字母组合数。
@@ -240,14 +246,32 @@ class IspeechImeService : InputMethodService() {
     /** 系统语音识别封装（onCreate 主线程创建，onDestroy 释放） */
     private var voiceController: VoiceInputController? = null
 
-    /** 端侧离线识别（Vosk）引擎，与 [voiceController] 按「识别引擎」设置二选一 */
+    /** 内置 FunASR 离线识别引擎，与 [voskVoice] / [voiceController] 按「识别引擎」设置三选一 */
+    private var funasrVoice: FunAsrSpeechEngine? = null
+
+    /** 端侧离线识别（Vosk）引擎，与 [funasrVoice] / [voiceController] 按「识别引擎」设置三选一 */
     private var voskVoice: VoskSpeechEngine? = null
 
-    /** 离线模型是否正在下载（避免重复触发下载任务） */
-    private var voskDownloading: Boolean = false
+    /** 离线模型是否正在下载（FunASR / Vosk 共用同一把闸门，避免重复触发下载任务） */
+    private var offlineModelDownloading: Boolean = false
 
     /** 当前候选是否为语音识别结果（空格 / 点选上屏后复位） */
     private var voiceActive = false
+
+    /**
+     * 挂在候选条上的麦克风授权提示文本（VOCA-166）。
+     *
+     * 只有它仍是候选条第 1 行文本时才显示「去授权」按钮：任何按键 / 上屏 / 切面板都会改写
+     * [statusText]，提示与按钮因此一起消失，不需要额外的清除钩子，也不靠「文本非空」推断
+     * （常态那一行是用户正在打的组合码）。
+     */
+    private var micPromptText: String? = null
+
+    /** 麦克风权限是否被永久拒绝（设置页授权回调写入）；只影响文案与跳转目标，不作为权限门禁 */
+    private var micPermanentlyDenied = false
+
+    /** 授权跳转在途：连点两次会弹两个授权框，返回输入法（onWindowShown）后复位 */
+    private var micJumpInFlight = false
 
     override fun onCreate() {
         super.onCreate()
@@ -258,6 +282,7 @@ class IspeechImeService : InputMethodService() {
         chineseInputMethod = SettingsStore.chineseInputMethod(this)
         // SpeechRecognizer 必须在主线程创建，onCreate 即在主线程
         voiceController = VoiceInputController(applicationContext)
+        funasrVoice = FunAsrSpeechEngine(applicationContext)
         voskVoice = VoskSpeechEngine(applicationContext)
         // 预热拼音引擎：切到拼音态后首键即用，避免首次上屏时在主线程加载拼音词表造成卡顿
         serviceScope.launch(Dispatchers.Default) {
@@ -273,6 +298,9 @@ class IspeechImeService : InputMethodService() {
         val bar = root.findViewById<CandidateView>(R.id.candidate_bar)
         bar.onCandidatePicked = { index -> pickCandidate(index) }
         bar.onCandidateLongPressed = { index -> rememberCandidate(index) }
+        bar.vibrate = settings.vibrate
+        // 授权跳转只由这一次点击发起：语音键本身不再改前台 Activity（VOCA-166 AC-1/AC-6）
+        bar.onMicActionClicked = { openMicAuthorization() }
         candidateView = bar
 
         // 软键盘
@@ -335,6 +363,24 @@ class IspeechImeService : InputMethodService() {
     /** 候选条 + 软键盘始终随输入法窗口展示 */
     override fun onEvaluateInputViewShown(): Boolean = true
 
+    /**
+     * 输入法窗口重新可见（从授权页 / 系统框回到键盘）：复位「跳转在途」，按钮重新可点，
+     * 权限已开好则直接撤掉提示 —— 不该让用户再按一次语音键才发现权限已经生效（AC-4）。
+     */
+    override fun onWindowShown() {
+        super.onWindowShown()
+        micJumpInFlight = false
+        if (micPromptText == null) return
+        if (isMicPermissionGranted()) {
+            // S8 授权成功回场：ADR-001 决策 4 不承诺宿主自动重显键盘，「回来该干什么」全靠这一句
+            // 一次性指引兜着，否则用户回到输入框却没有下一步（BA 反向风险 #5）。
+            // 任何一次按键都会经 dismissAiState() 改写 statusText，所以它天然只出现一次。
+            clearMicPrompt()
+            statusText = getString(R.string.voice_permission_granted)
+        }
+        renderCandidateView()
+    }
+
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         refreshEngineIfStale()
@@ -367,6 +413,8 @@ class IspeechImeService : InputMethodService() {
     override fun onDestroy() {
         voiceController?.destroy()
         voiceController = null
+        funasrVoice?.destroy()
+        funasrVoice = null
         voskVoice?.destroy()
         voskVoice = null
         serviceScope.cancel()
@@ -380,6 +428,7 @@ class IspeechImeService : InputMethodService() {
                 settings = latest
                 softKeyboard?.keyHeightDp = latest.keyHeightDp
                 softKeyboard?.vibrate = latest.vibrate
+                candidateView?.vibrate = latest.vibrate
                 if (panel == Panel.SETTINGS) settingsPanel?.submit(latest, asr, chineseInputMethod)
                 refreshCandidates()
             }
@@ -388,6 +437,14 @@ class IspeechImeService : InputMethodService() {
             SettingsStore.asrSettingsFlow(this@IspeechImeService).collect { latest ->
                 asr = latest
                 if (panel == Panel.SETTINGS) settingsPanel?.submit(settings, latest, chineseInputMethod)
+            }
+        }
+        serviceScope.launch {
+            SettingsStore.micPermanentlyDeniedFlow(this@IspeechImeService).collect { denied ->
+                micPermanentlyDenied = denied
+                // 提示还挂着时立刻换按钮文案：刚被标记成永久拒绝，「去授权」已经问不出系统框，
+                // 要马上变成「去设置」，而不是等用户再按一次语音键
+                if (micPromptText != null) renderCandidateView()
             }
         }
         serviceScope.launch {
@@ -473,10 +530,15 @@ class IspeechImeService : InputMethodService() {
     /**
      * 按住说话：按下开始收音（空格长按进语音走这里）。
      *
-     * 引擎选择沿用 [toggleVoiceInput] 的既有判定：离线识别（[AsrEngine.VOSK]）与系统识别
-     * 是两条完全不同的链路，这里只负责「开始」，结束交给 [onVoicePressUp]。
+     * 引擎选择沿用 [toggleVoiceInput] 的既有判定：内置离线识别（[AsrEngine.FUNASR] /
+     * [AsrEngine.VOSK]）与系统识别是完全不同的链路，这里只负责「开始」，结束交给 [onVoicePressUp]。
      */
     private fun onVoicePressDown() {
+        if (asr.engine == AsrEngine.FUNASR) {
+            if (funasrVoice?.isListening == true) return
+            toggleFunAsrVoice()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             if (voskVoice?.isListening == true) return
             toggleVoskVoice()
@@ -490,9 +552,14 @@ class IspeechImeService : InputMethodService() {
      * 按住说话：松手结束收音并上屏。
      *
      * 系统识别走 [VoiceInputController.finish]（保留回调，收尾结果仍经 onFinal 上屏）；
-     * Vosk 走 [VoskSpeechEngine.finish]（工作线程读 finalResult 后回调）。
+     * FunASR 走 [FunAsrSpeechEngine.finish]、Vosk 走 [VoskSpeechEngine.finish]
+     * （工作线程读最终结果后回调）。
      */
     private fun onVoicePressUp() {
+        if (asr.engine == AsrEngine.FUNASR) {
+            funasrVoice?.finish()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             voskVoice?.finish()
             return
@@ -1116,8 +1183,24 @@ class IspeechImeService : InputMethodService() {
         }
         val candidate = candidates.getOrNull(index) ?: return
         val wasAssociation = associationActive
-        if (!wasAssociation) learn(candidate)
-        commit(candidate.insertText, allowAssociation = !wasAssociation)
+        if (!wasAssociation) {
+            learn(candidate)
+            commit(candidate.insertText)
+            return
+        }
+        // 联想词按已上屏的末字查出来，开头就是这个字，整词上屏会把它重复一遍：
+        // 「你」+「你好」→「你你好」，「指导老师」+「师专」→「指导老师师专」。
+        // 只上屏与已上屏文本不相重的部分，靠已上屏的字接续
+        val beforeCursor = runCatching {
+            currentInputConnection?.getTextBeforeCursor(ASSOCIATION_ANCHOR_CHARS, 0)?.toString().orEmpty()
+        }.getOrDefault("")
+        val text = AssociationCommit.textToCommit(lastCommit, candidate.insertText, beforeCursor)
+        if (text.isEmpty()) {
+            clearAssociation()
+            renderCandidateView()
+            return
+        }
+        commit(text, allowAssociation = false)
     }
 
     /** 组合码带下划线，等价于 macOS 版的 marked text 样式 */
@@ -1132,8 +1215,33 @@ class IspeechImeService : InputMethodService() {
         // codeOverride（「联想」「语音」「快捷短语」「AI回复」等）仍作为状态机参与上屏判断，
         // 但不再渲染到候选条左侧，避免候选区出现来源标识。
         val code = statusText ?: buffer
-        candidateView?.update(code, candidates)
+        // 按钮可用性与 in-flight 同一个真相源：任何一次渲染都按当前状态决定，
+        // 不存在「看着能点、点了没反应」的第二条写入通道
+        candidateView?.update(code, candidates, micActionLabel(), actionEnabled = !micJumpInFlight)
     }
+
+    /**
+     * 未授权提示态下「去授权 / 去设置」按钮的文案；不在提示态时返回 null（按钮隐藏）。
+     *
+     * 判断条件是「授权提示仍是候选条那一行文本」：其它状态（组合码、别的通知）一律不带按钮，
+     * 因此不会把用户正在打的码读成授权态。
+     */
+    private fun micActionLabel(): String? {
+        val action = MicGrantAction.resolve(
+            prompt = micPromptText,
+            line = statusText,
+            granted = isMicPermissionGranted(),
+            permanentlyDenied = micPermanentlyDenied,
+        )
+        return when (action) {
+            MicGrantAction.NONE -> null
+            MicGrantAction.REQUEST -> getString(R.string.voice_action_grant)
+            MicGrantAction.OPEN_SETTINGS -> getString(R.string.voice_action_open_settings)
+        }
+    }
+
+    private fun isMicPermissionGranted(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     /** 清掉联想候选（用户继续输入时调用） */
     private fun clearAssociation() {
@@ -1457,14 +1565,18 @@ class IspeechImeService : InputMethodService() {
     // ──────────────────────────────────────────────
 
     /**
-     * 点击语音键：未授权则引导授权 → 识别中则取消 → 否则开始识别。
+     * 点击语音键：未授权则在候选条提示（不跳页）→ 识别中则取消 → 否则开始识别。
      *
      * 识别文本**说完即上屏**（最终结果直接提交到输入框）：语音是一次到位的整句，
      * 不像五笔 / 拼音还要从候选里挑，若只放进候选条等用户再按空格，就会显得「说完不出字」。
      * 中间结果（partial）仍先作为候选实时展示。
      */
     private fun toggleVoiceInput() {
-        // 离线识别（Vosk）与系统识别是完全不同的链路，分开处理
+        // 内置离线识别（FunASR / Vosk）与系统识别是完全不同的链路，分开处理
+        if (asr.engine == AsrEngine.FUNASR) {
+            toggleFunAsrVoice()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             toggleVoskVoice()
             return
@@ -1485,10 +1597,8 @@ class IspeechImeService : InputMethodService() {
             renderCandidateView()
             return
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            statusText = getString(R.string.voice_need_permission)
-            renderCandidateView()
-            requestMicPermission()
+        if (!isMicPermissionGranted()) {
+            showMicPermissionPrompt()
             return
         }
         if (controller.isListening) {
@@ -1571,18 +1681,19 @@ class IspeechImeService : InputMethodService() {
         commitDirect(text, CommitType.VOICE)
     }
 
-    // ── 离线识别（Vosk 端侧引擎）──
+    // ── 内置离线识别（FunASR / Vosk 端侧引擎）──
 
     /**
-     * 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
+     * FunASR 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
      *
-     * Vosk 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
-     * 与 [VoskSpeechEngine] 的 [VoskSpeechEngine.finish] 语义一致。
+     * FunASR 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
+     * 与 [FunAsrSpeechEngine] 的 [FunAsrSpeechEngine.finish] 语义一致。下载与就绪判定复用
+     * [FunAsrModelStore]（本 issue 只恢复接线，不改其下载 / 校验逻辑）。
      */
-    private fun toggleVoskVoice() {
-        val engine = voskVoice ?: return
+    private fun toggleFunAsrVoice() {
+        val engine = funasrVoice ?: return
         if (!engine.isReady) {
-            startVoskModelDownload()
+            startFunAsrModelDownload()
             return
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -1620,10 +1731,72 @@ class IspeechImeService : InputMethodService() {
         )
     }
 
-    /** 首次使用离线识别时下载模型（约 42MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
+    /**
+     * Vosk 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
+     *
+     * Vosk 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
+     * 与 [VoskSpeechEngine] 的 [VoskSpeechEngine.finish] 语义一致。
+     */
+    private fun toggleVoskVoice() {
+        val engine = voskVoice ?: return
+        if (!engine.isReady) {
+            startVoskModelDownload()
+            return
+        }
+        if (!isMicPermissionGranted()) {
+            showMicPermissionPrompt()
+            return
+        }
+        if (engine.isListening) {
+            engine.finish()
+            return
+        }
+        if (panel != Panel.NONE) closePanel()
+        commitPending()
+        clearAssociation()
+        dismissAiState()
+        voiceActive = true
+        statusText = getString(R.string.voice_listening)
+        codeOverride = "语音"
+        candidates = emptyList()
+        renderCandidateView()
+        engine.start(
+            onPartial = { text -> showVoiceCandidate(text) },
+            onFinal = { text ->
+                statusText = null
+                commitVoiceText(text)
+            },
+            onError = { message ->
+                voiceActive = false
+                if (codeOverride == "语音") codeOverride = null
+                statusText = message
+                candidates = emptyList()
+                renderCandidateView()
+            },
+        )
+    }
+
+    /** 首次使用 FunASR 离线识别时下载模型（约 74MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
+    private fun startFunAsrModelDownload() {
+        if (offlineModelDownloading) return
+        offlineModelDownloading = true
+        statusText = getString(R.string.voice_model_downloading, 0)
+        renderCandidateView()
+        serviceScope.launch {
+            val ok = FunAsrModelStore.ensureModel(this@IspeechImeService) { percent ->
+                statusText = getString(R.string.voice_model_downloading, percent)
+                renderCandidateView()
+            }
+            offlineModelDownloading = false
+            statusText = getString(if (ok) R.string.voice_model_ready else R.string.voice_model_failed)
+            renderCandidateView()
+        }
+    }
+
+    /** 首次使用 Vosk 离线识别时下载模型（约 42MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
     private fun startVoskModelDownload() {
-        if (voskDownloading) return
-        voskDownloading = true
+        if (offlineModelDownloading) return
+        offlineModelDownloading = true
         statusText = getString(R.string.voice_model_downloading, 0)
         renderCandidateView()
         serviceScope.launch {
@@ -1631,7 +1804,7 @@ class IspeechImeService : InputMethodService() {
                 statusText = getString(R.string.voice_model_downloading, percent)
                 renderCandidateView()
             }
-            voskDownloading = false
+            offlineModelDownloading = false
             statusText = getString(if (ok) R.string.voice_model_ready else R.string.voice_model_failed)
             renderCandidateView()
         }
@@ -1640,6 +1813,7 @@ class IspeechImeService : InputMethodService() {
     /** 取消语音识别并复位语音状态（不负责渲染）。 */
     private fun cancelVoice() {
         if (voiceController?.isListening == true) voiceController?.stop()
+        funasrVoice?.cancel()
         voskVoice?.cancel()
         voiceActive = false
         if (codeOverride == "语音") codeOverride = null
@@ -1647,18 +1821,103 @@ class IspeechImeService : InputMethodService() {
         statusText = null
     }
 
-    /** 未授予 RECORD_AUDIO 时拉起设置页触发系统权限申请（extra 键见 [REQUEST_MIC_EXTRA]）。 */
+    /**
+     * 未授权提示态（VOCA-166 AC-1 / AC-5）：只写候选条文本与「去授权」按钮，**不改前台 Activity**。
+     *
+     * 旧实现在这里直接拉设置页，用户刚碰到语音键（还没说话）键盘就被顶掉、宿主退后台，
+     * 正在打的字回不去。跳转改由按钮点击发起（[openMicAuthorization]）；提示之前先按其它
+     * 语音入口的既有语义上屏未完成的组合，免得提示盖住已经打出来的字。
+     */
+    private fun showMicPermissionPrompt() {
+        commitPending()
+        codeOverride = null
+        candidates = emptyList()
+        val prompt = getString(R.string.voice_need_permission)
+        micPromptText = prompt
+        statusText = prompt
+        renderCandidateView()
+    }
+
+    /**
+     * 兼容旧调用点：FunASR 接线（VOCA-190 / PR #6）的未授权分支仍按 main 旧名调用
+     * `requestMicPermission()`。语义已并入提示流——只出候选条提示，跳转仍仅由
+     * [openMicAuthorization] 的用户点击发起；不得在这里恢复自动跳页。
+     */
     private fun requestMicPermission() {
-        val intent = Intent().apply {
-            setClassName(this@IspeechImeService, SETTINGS_ACTIVITY)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(REQUEST_MIC_EXTRA, true)
+        showMicPermissionPrompt()
+    }
+
+    /**
+     * 用户点「去授权 / 去设置」才发起的唯一一次跳转（AC-6：从按语音键起 ≤2 步可达授权界面）。
+     *
+     * - 非永久拒绝：走设置页代申请桥（extra 键见 [REQUEST_MIC_EXTRA]），由设置页弹系统授权框；
+     * - 永久拒绝（USER_FIXED）：系统不再弹框，直达「系统设置 → 应用 → 智语 iSpeech → 权限」。
+     *
+     * 权限实时判定优先：已经授予就只撤提示，不跳页（ADR-001 决策 2「flag 是提示、不是门禁」）。
+     */
+    private fun openMicAuthorization() {
+        if (isMicPermissionGranted()) {
+            clearMicPrompt()
+            renderCandidateView()
+            return
         }
-        try {
-            startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
-            Log.w(TAG, "未找到设置页 $SETTINGS_ACTIVITY", e)
-        }
+        if (micJumpInFlight) return
+        micJumpInFlight = true
+        // 按钮立刻转灰：可见状态与 micJumpInFlight 同源，不给 UI 开第二条写入通道
+        renderCandidateView()
+        // 首个成功即止：一次点击最多把前台切走一次
+        val jumped = MicGrantAction.jumpPlan(micPermanentlyDenied).firstOrNull { launchMicIntent(it) }
+        if (jumped == null) showMicJumpFailure()
+    }
+
+    /** 撤掉授权提示；那一行文本只在仍是提示时清，不覆盖用户之后打出的组合码。 */
+    private fun clearMicPrompt() {
+        val prompt = micPromptText ?: return
+        micPromptText = null
+        if (statusText == prompt) statusText = null
+    }
+
+    /**
+     * 发起一次跳转尝试，返回是否已交给系统。
+     *
+     * 跳转目标是跨进程系统组件，ROM（EMUI「后台弹出界面」拦截等）可抛 SecurityException /
+     * IllegalArgumentException，而这里跑在**输入法进程**的点击回调里：未捕获就是 IME 崩溃、
+     * 键盘整个消失——正是本 issue 要修的 P1 症状本身。因此按 ADR-001 决策 3 兜到 Throwable：
+     * 记一条带异常类型的日志（保留栈）后交给 [showMicJumpFailure]，绝不外抛。
+     * 只包跳转，识别链路有它自己的错误边界，不在这里动。
+     */
+    private fun launchMicIntent(target: MicJumpTarget): Boolean = try {
+        startActivity(
+            when (target) {
+                MicJumpTarget.APP_DETAILS -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+
+                MicJumpTarget.SETTINGS_BRIDGE -> Intent().apply {
+                    setClassName(this@IspeechImeService, SETTINGS_ACTIVITY)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(REQUEST_MIC_EXTRA, true)
+                }
+            },
+        )
+        true
+    } catch (t: Throwable) {
+        Log.w(TAG, "mic_auth_jump_failed target=$target type=${t.javaClass.name} msg=${t.message}", t)
+        false
+    }
+
+    /**
+     * 跳转全部失败的兜底（X1）。旧实现只 `Log.w` 一行，用户面对的是一次彻底静默的点击。
+     *
+     * 提示换成失败文案、按钮保留可重试（下一次点击同样最多跳一次）；不自动重试、不循环弹。
+     */
+    private fun showMicJumpFailure() {
+        micJumpInFlight = false
+        val message = getString(R.string.voice_permission_open_failed)
+        micPromptText = message
+        statusText = message
+        renderCandidateView()
     }
 
     // ──────────────────────────────────────────────
@@ -1982,6 +2241,7 @@ class IspeechImeService : InputMethodService() {
         softKeyboard?.resetShift()
         dismissAiState()
         if (voiceController?.isListening == true) voiceController?.stop()
+        if (funasrVoice?.isListening == true) funasrVoice?.cancel()
         if (voskVoice?.isListening == true) voskVoice?.cancel()
         voiceActive = false
         if (codeOverride == "语音") codeOverride = null

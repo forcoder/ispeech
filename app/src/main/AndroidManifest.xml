@@ -25,8 +25,14 @@
         android:theme="@style/Theme.Ispeech">
 
         <!-- 设置主界面 -->
+        <!--
+          singleTask 是麦克风授权桥的必要条件：输入法以 NEW_TASK 拉起时，若实例已存在，
+          标准 launchMode 只会把它带到前台（onNewIntent 都不发），授权框永远弹不出来，
+          用户会被丢在设置页里（VOCA-166 AC-4）。
+        -->
         <activity
             android:name="com.ispeech.settings.MainActivity"
+            android:launchMode="singleTask"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -27,6 +27,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ispeech.BuildConfig
 import com.ispeech.R
 import com.ispeech.settings.about.AboutViewModel
 
@@ -71,7 +72,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = stringResource(R.string.about_version, ISPEECH_VERSION),
+                text = stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
