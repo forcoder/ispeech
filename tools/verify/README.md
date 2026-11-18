@@ -88,6 +88,11 @@ manifest 里 `MainActivity` 声明 `singleTask`（否则复用实例时 `onNewIn
 `jumpPlan` + `firstOrNull`，一次点击最多成功跳一次；按钮的文案与可用性只有 `CandidateView.update()`
 一条写入通道（公开 setter 一出现即 `FAIL`），且 `onWindowShown` 必须带 S8 那句一次性指引。
 
+与 FunASR 接线（VOCA-190 / PR #6）合流后的补充口径：① 的 `toggleFunAsrVoice()` 未授权分支
+仍按 main 旧名调用 `requestMicPermission()`，④ 保留该名字为**兼容私有 helper**、体内只委托
+`showMicPermissionPrompt()`（不恢复自动跳页）。脚本只在「FunASR 入口与提示流并存」的树上
+追加一条断言锁住这层接线；① 单独树（旧定义仍在）不触发，不影响其各自验收。
+
 ```bash
 python3 tools/verify/check_crosscut.py
 ```

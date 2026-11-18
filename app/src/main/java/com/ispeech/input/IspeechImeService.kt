@@ -1732,6 +1732,15 @@ class IspeechImeService : InputMethodService() {
     }
 
     /**
+     * 兼容旧调用点：FunASR 接线（VOCA-190 / PR #6）的未授权分支仍按 main 旧名调用
+     * `requestMicPermission()`。语义已并入提示流——只出候选条提示，跳转仍仅由
+     * [openMicAuthorization] 的用户点击发起；不得在这里恢复自动跳页。
+     */
+    private fun requestMicPermission() {
+        showMicPermissionPrompt()
+    }
+
+    /**
      * 用户点「去授权 / 去设置」才发起的唯一一次跳转（AC-6：从按语音键起 ≤2 步可达授权界面）。
      *
      * - 非永久拒绝：走设置页代申请桥（extra 键见 [REQUEST_MIC_EXTRA]），由设置页弹系统授权框；

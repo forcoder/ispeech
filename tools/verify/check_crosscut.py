@@ -947,6 +947,22 @@ def check_voice_chain() -> None:
         "两条语音链路（系统识别 / VOSK）各自都接到同一个授权提示入口",
         f"{rel(SERVICE)} 有语音入口没走 showMicPermissionPrompt：漏 {sorted({'toggleVoiceInput', 'toggleVoskVoice'} - set(wired))}",
     )
+    # 第三条语音链路（FunASR，VOCA-190 / PR #6）只在与 166 提示流并存时约束：
+    # ① 单独树上旧 requestMicPermission 定义仍在、本节不触发；④ 合入后旧名必须是
+    # 指向提示流的兼容 helper，FunASR 未授权分支同样不许自动跳页。
+    funasr_entry = function_region(service, r"private fun toggleFunAsrVoice\(")
+    if funasr_entry and "showMicPermissionPrompt()" in service:
+        helper = function_region(service, r"private fun requestMicPermission\(")
+        check(
+            ("showMicPermissionPrompt()" in funasr_entry or "requestMicPermission()" in funasr_entry)
+            and "startActivity" not in funasr_entry
+            and "openMicAuthorization" not in funasr_entry
+            and bool(helper)
+            and "showMicPermissionPrompt()" in helper
+            and "startActivity" not in helper,
+            "FunASR 语音入口未授权分支同样只出候选条提示（旧名 requestMicPermission 为兼容 helper，不自动跳页）",
+            f"{rel(SERVICE)} toggleFunAsrVoice / requestMicPermission 兼容层未接入 showMicPermissionPrompt 提示流",
+        )
     jump_region = function_region(service, r"private fun launchMicIntent\(")
     check(
         "onMicActionClicked = { openMicAuthorization() }" in service
