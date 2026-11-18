@@ -685,7 +685,10 @@ def quick_trigger_limits() -> tuple[int, int]:
 #  行注释 / 整行块注释 / 行尾 `/* … */` / 跨行块注释 / 字符串五种形态都能绕，注释冒充代码不需要跨函数分析。
 #  第三轮延伸探针补两条同类可编译假阴性：嵌套块注释 `/* outer /* inner */ guardedRemoteMode(…) */`
 #  （Kotlin 块注释可嵌套，非贪婪正则停在第一个 `*/` 就漏出后半段）与三引号原始串 `"""x"guardedRemoteMode(…)"`
-#  （串内裸双引号把守卫名留在代码面），改后各自 `47/1`。`code_only()` 现在是单遍 Kotlin 词法扫描，
+#  （串内裸双引号把守卫名留在代码面），改后各自 `47/1`。第四轮质检自拟探针 N9：原始串尾随第四引号
+#  `"""x"""" + "guardedRemoteMode(…)"` —— kotlinc 取连引号串的最后三个作收尾，旧实现停在第一个三连，
+#  尾随引号开幻影串把邻串里的守卫名吐回代码面，`48/0` 假绿；收尾规则改成与 kotlinc 一致后 `47/1`。
+#  `code_only()` 现在是单遍 Kotlin 词法扫描，
 #  抠完仍然锁不住的那一层：调用点写在代码里、结果却被丢掉或落在永不成立的条件里 —— 那是行为，
 #  归 `QuickPhraseLegacyRemoteRowTest`，本脚本不假装会做数据流分析（契约 C1-6b 行的口径与此一致）。
 # ──────────────────────────────────────────────────────────────
@@ -730,7 +733,9 @@ def code_only(src: str) -> str:
     状态机与 kotlinc 一致，五类都要认（VOCA-454 质检两轮实测，每一类都是一种把守卫名留在代码面之外的写法）：
     块注释**可嵌套**（`/* outer /* inner */ guardedRemoteMode(trigger, declaredMode) */` 是一整条合法注释，
     非贪婪正则停在第一个 `*/`，后半段就把守卫名吐回代码面）；`//` 到行尾，且注释里的 `/*` 不开块注释；
-    普通串（单个双引号包裹）认反斜杠转义；三引号原始串认到下一个三引号，正文里那个裸双引号不能提前结束抠除
+    普通串（单个双引号包裹）认反斜杠转义；三引号原始串的收尾是 ≥3 连引号串的**最后**三个，多出的引号属正文
+    （以四连引号收尾的原始串，正文含一个引号；停在第一个三连会把尾随引号漏进代码面开幻影串，
+    把邻串里的守卫名吐回来 —— N9），正文里那个裸双引号不能提前结束抠除
     （VOCA-454 质检第二轮的延伸探针：正则按成对双引号抠串，`"x"guardedRemoteMode(…)"` 会把守卫名留在代码面）；
     字符字面量（单引号包裹）—— `'"'` 不开字符串，`"'"` 不开注释。
     抠除是原地等长的：正文换成空格、换行保留，所以行号、列号与行首缩进都不动 —— FAIL 报的文件绝对行号、
@@ -769,9 +774,18 @@ def code_only(src: str) -> str:
             i += 2
         elif src.startswith('"""', i):
             close = src.find('"""', i + 3)
-            body_end = close if close >= 0 else _end_of_line(src, i + 3)
-            out.append('"""' + _blank_span(src[i + 3:body_end]))
-            i = body_end + (3 if close >= 0 else 0)
+            if close >= 0:
+                k = close
+                while k < n and src[k] == '"':
+                    k += 1
+                # kotlinc 取 ≥3 连引号串的最后三个作收尾，多出的引号属正文（N9）
+                body_end = k - 3
+                out.append('"""' + _blank_span(src[i + 3:body_end]))
+                i = k
+            else:
+                body_end = _end_of_line(src, i + 3)
+                out.append('"""' + _blank_span(src[i + 3:body_end]))
+                i = body_end
         elif src[i] == '"':
             k = i + 1
             while k < n and src[k] not in '"\n':
