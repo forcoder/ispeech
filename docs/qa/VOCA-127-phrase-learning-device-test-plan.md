@@ -203,6 +203,15 @@ adb install -r <官方包路径>
 
 **模拟器层：6 项全部执行，5 项通过读数，1 项（AC-3.10）被 P1 挡住 → 5/6。**
 
+**复现口径（11-18 08:00 CST 二次全跑）**：`scripts/qa/voca127-emulator` 四个脚本在同一台
+`emulator-5554` 上从零再跑一遍，读数与上表一致 —— `r1b.py` TOTALS
+`{'commit': 10, 'int_n': 0, 'int_c': 0, 'other': {}, 'hit': 10}` + `ANR lines: []`；
+`r2.py` ②③与 F1 A/B 共 12 组全部 `commit=False`（期望合并码一个没学进去）、B 组 5/5 出中断；
+`r3.py` 前快照 2 条 → 学到「喂猫」→ 后快照 3 条、`pick(0)` 上屏 `喂猫`；
+`r4.py` `reason=disabled` + 词库零新增 → 重开后 `commit code=klqt text=喂猫`。
+③ 那轮额外出现一条 `commit code=uykl text=门喂`：来自 ② 那轮残留在状态机里的第一跳「门」
+（§4.3 已声明该噪声），不影响 ③ 的判据（期望码 `klpw` 仍无 commit、无词库新增）。
+
 ### 6.3 缺陷单（P1，非 PR #4 引入）
 
 - **标题**：设置 → 键盘与输入 打开即 NPE，`com.ispeech.ime` 整个进程被杀（含输入法）
@@ -227,7 +236,8 @@ adb install -r <官方包路径>
 
 ## 7. 待确认 / 已收敛
 
-1. **真机**：期望 serial `23F0224224000950`（人类在 wakeup 指令里给出）。本主机 11-17 12:40 实测只有 `emulator-5554`，目标 serial 不在 `adb devices -l`、无 mdns、USB 无 Android 设备；需人类接入（USB 或无线调试）或在有该 serial 的机器上执行本用例集。
+1. **真机**：期望 serial `23F0224224000950`（人类在 wakeup 指令里给出）。本主机 11-17 12:40 与 11-18 复现前（本轮 `adb devices -l`，见 6.2 复现口径）两次实测都只有
+`emulator-5554`（`sdk_gphone64_arm64`），目标 serial 不在列；需人类接入（USB 或无线调试）或在有该 serial 的机器上执行本用例集。
 2. **出包**：PR #4 head `8ab0a88` 合入 `main` 后需重出官方包；现有 v1.6 内测包与 `origin/main`（`fa57a07`，`versionName="1.5"`）都不含条目 3，不可用于本单。`scripts/qa/voca127-device-capture.sh pre` 会在开工前当场拒绝这两类包。
 3. **N-1 回写**：验收文件 v1.1.2 的 AC-3.7 Given（L238）仍缺「无命中 `klqt` 的单字词条」这半句，`agent/ba/voca-122` 上未补。本单按 §4 通用前置第 2 条自挡（判「不适用」），不卡 11-19，归属仍是 BA。
 4. **C-1（11-17 第四轮质检的非阻塞项）已在本文件收敛**：`reason=interrupt` 的两个发射点（`:1178` 无 `count=` / `:1126` 带 `count=`）已在 §4.1、§4.2、§4.4 与取证脚本里分计。**同一处盲区在验收文件 §3.5 AC-3.4 真机行原文里**（写的是「无 `skipped{reason=interrupt}`」，未区分两类），归 BA 下次回写，本单不改需求口径。
