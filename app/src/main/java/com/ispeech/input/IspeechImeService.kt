@@ -1676,9 +1676,6 @@ class IspeechImeService : InputMethodService() {
         statusText = getString(R.string.voice_listening)
         codeOverride = "语音"
         candidates = emptyList()
-        allCandidates = emptyList()
-        pageCount = 1
-        pageIndex = 0
         renderCandidateView()
         engine.start(
             onPartial = { text -> showVoiceCandidate(text) },
