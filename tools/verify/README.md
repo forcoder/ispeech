@@ -68,6 +68,35 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 长度不符 / 不支持 Range），**不联网**验证判定逻辑双向准确；判定逻辑改动后先跑它。
 处置流程见 `docs/model-host-runbook.md`。
 
+## check_crosscut.py —— 跨组件接线（8.1–8.8）
+
+按「一条能力要穿过几层文件」组织的连线检查：词库/编码（8.1）、键盘布局与按键动作
+（8.2）、候选栏（8.3）、语音输入链路（8.4）、ASR 设置与 DataStore（8.5）、快捷短语
+（8.6）、主题与令牌（8.7）、资源与字符串（8.8）。任一断言 `FAIL` 退出码 1。
+
+8.4 语音链路的口径（VOCA-166 起）：**未授予 `RECORD_AUDIO` 不再是从输入法自动拉起
+设置页的理由**，脚本改为断言「跳页只能由用户在候选条上主动点击触发」——即服务侧
+`showMicPermissionPrompt()` / `openMicAuthorization()` 与 `MicGrantAction` 决策分离、
+`MainActivity` 认 `REQUEST_MIC_EXTRA` 会话（新建与 `onNewIntent` 复用两条路都要认）、
+manifest 里 `MainActivity` 声明 `singleTask`（否则复用实例时 `onNewIntent` 不发、
+授权框弹不出来，用户被丢在设置页）、会话结束 `finish()` 回原输入框。
+
+架构师评审（ADR-001 决策 3 / 4 / 6）后又锁了四条：两条语音链路**各自**都必须接
+`showMicPermissionPrompt()`（不再用「调用点数 == 3」这种实现计数断言，将来接第三条链路
+不会误伤）；`launchMicIntent` 必须 `catch (Throwable)` 并记含异常类型的 `mic_auth_jump_failed`
+——跳转跑在输入法进程的点击回调里，漏一个 `SecurityException` 就是一次键盘消失；跳转目标走
+`jumpPlan` + `firstOrNull`，一次点击最多成功跳一次；按钮的文案与可用性只有 `CandidateView.update()`
+一条写入通道（公开 setter 一出现即 `FAIL`），且 `onWindowShown` 必须带 S8 那句一次性指引。
+
+与 FunASR 接线（VOCA-190 / PR #6）合流后的补充口径：① 的 `toggleFunAsrVoice()` 未授权分支
+仍按 main 旧名调用 `requestMicPermission()`，④ 保留该名字为**兼容私有 helper**、体内只委托
+`showMicPermissionPrompt()`（不恢复自动跳页）。脚本只在「FunASR 入口与提示流并存」的树上
+追加一条断言锁住这层接线；① 单独树（旧定义仍在）不触发，不影响其各自验收。
+
+```bash
+python3 tools/verify/check_crosscut.py
+```
+
 ## 局限（这些脚本覆盖不到的东西）
 
 - **不能替代编译**：Kotlin 类型推断、泛型、签名匹配、import 缺失、Compose API

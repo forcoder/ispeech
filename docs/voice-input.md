@@ -23,7 +23,10 @@
        └─ IspeechImeService.onVoicePressDown / onVoicePressUp
             ├─ FunASR：startFunAsrListening() / funasrVoice.finish()
             └─ 系统引擎：toggleVoiceInput() / VoiceInputController.finish()
-                 ├─ 未授权：requestMicPermission() -> 设置页 MainActivity（extra REQUEST_MIC_EXTRA）弹系统授权
+                 ├─ 未授权：showMicPermissionPrompt() 只出候选条提示，不跳页；用户点「去授权」才 openMicAuthorization()
+                 │    ├─ 系统还会弹框：拉起设置页 MainActivity（extra REQUEST_MIC_EXTRA）代弹授权框
+                 │    └─ 已永久拒绝：拉起本应用「系统设置 → 应用 → 智语 iSpeech → 权限」页
+                 │         └─ 会话结束 MainActivity.finish() 回到原输入框（不停在设置页）
                  ├─ 开始收音：Panel.VOICE（VoicePanelView：实时文字 + 音量波形）
                  ├─ onPartialResults -> voicePanel.setListeningText()（只进面板，不占候选条）
                  ├─ onResults       -> closeVoicePanel() + commitVoiceText()（松手即上屏）
@@ -38,7 +41,7 @@
 | 持久化 | `SettingsStore`（`asrSettingsFlow` / `asrSettings` / `setAsrSettings`） |
 | 设置页 | `settings/asr/AsrSettingsScreen.kt` + `AsrSettingsViewModel.kt`（导航路由 `IspeechRoutes.ASR`，首页 ASR 卡片） |
 | 输入法内面板 | `input/SettingsPanel.kt`（引擎 / 语言 / 参数分项，`onAsrChange -> applyAsrChange`） |
-| 权限 | `AndroidManifest.xml`（`RECORD_AUDIO` + `queries/RecognitionService`）、`settings/MainActivity.kt`（`REQUEST_MIC_EXTRA` 代申请） |
+| 权限 | `AndroidManifest.xml`（`RECORD_AUDIO` + `queries/RecognitionService`，`MainActivity` 需 `singleTask`）、`input/MicGrantAction.kt`（提示态该显示哪个动作：纯决策，可单测）、`settings/MainActivity.kt`（`REQUEST_MIC_EXTRA` 代申请 + 会话结束 `finish()` 回场）、`SettingsStore.micPermanentlyDeniedFlow`（永久拒绝提示，仅作文案提示，是否可授权一律以 `checkSelfPermission` 实时结果为准） |
 | 文案 | `res/values/strings.xml` / `values-en/strings.xml`（`voice_*` 6 项 + `asr_*` 19 项，中英同名） |
 
 健壮性（真机踩坑后加）：
@@ -76,6 +79,32 @@
 - **识别能力**：取决于设备上的 `RecognitionService`；设备无识别服务时入口直接提示「设备不支持语音输入」；离线能力取决于该服务是否支持 `EXTRA_PREFER_OFFLINE`。
 - **模型名**：走应用自有 extra `com.ispeech.extra.ASR_MODEL`（非 Android 标准常量），仅识别服务主动读取时生效。
 - **待补验收**：真机朗读一段话，验证转写文本与准确率（O-09）。
+
+### 麦克风授权入口（VOCA-166）
+
+按语音键时**没有录音权限**，过去的做法是立刻 `startActivity` 拉起设置页，宿主随之被切到后台、
+整个输入法消失，用户还没说话就断了输入场景。现在的规则：
+
+| 场景 | 行为 | 代码位置 |
+| --- | --- | --- |
+| 未授权（系统还会弹框） | 候选条显示合并提示文案 + 右侧「去授权」，**不跳页**；用户点按钮才代申请 | `IspeechImeService.showMicPermissionPrompt` / `openMicAuthorization` |
+| 永久拒绝（不再弹框） | 同一提示补「系统设置 → 应用 → 智语 iSpeech → 权限」路径，按钮转「去设置」，跳本应用应用信息页；该页起不来才回落设置页代申请桥 | `MicGrantAction.jumpPlan` + `launchMicIntent` + `SettingsStore.micPermanentlyDeniedFlow` |
+| 授权结束（允许 / 拒绝 / 返回） | `MainActivity.finish()` 回到原输入框，不停在设置页；输入法重新显示时按实时权限清提示 | `MainActivity.finishMicSession` / `IspeechImeService.onWindowShown` |
+| 授权成功后回到键盘（S8） | 候选条给一次性指引「麦克风权限已开启，点击麦克风开始说话」，任何按键即清；ADR-001 决策 4 不承诺宿主重显键盘，这一句是用户回来后的下一步 | `onWindowShown` + `voice_permission_granted` |
+| 提示期间用户打字 / 切面板 / 上屏 | 提示与按钮立即消失（提示文案与 `statusText` 同生命周期，无需额外清理钩子） | `CandidateView.update` |
+| 跳转失败（ROM 拦截 / 无应用信息页） | 提示改为「打不开授权页面…」并保留按钮可再点，同时打一条含异常类型、带栈的 `mic_auth_jump_failed` | `launchMicIntent` 的 `catch (Throwable)` → `showMicJumpFailure` |
+
+跳转的三条不变量：① **只由用户点击发起**，语音键本身永不改前台（AC-1）；② 一次点击**最多成功跳一次**
+——按 `jumpPlan` 逐项尝试、首个成功即止，且 in-flight 期间按钮转灰，连点不会叠出两个授权框（AC-8）；
+③ 跳转包在 `catch (Throwable)` 里——这些调用跑在**输入法进程**的点击回调上，未捕获的 `SecurityException` /
+`IllegalArgumentException`（EMUI 后台弹窗拦截）就是一次 IME 崩溃、键盘整个消失，正是本 issue 要修的症状。
+按钮的文案与可用性只从 `CandidateView.update()` 一个入口渲染，视图侧不另开状态写入通道。
+
+「永久拒绝」标志只是**文案提示**，不作为能否授权的门槛：能不能录音每次都以
+`checkSelfPermission` 实时结果为准，标志写错也不会挡住已经授权好的用户。
+
+未覆盖（另议，不在本 issue 范围）：键盘内设置面板的常驻权限行（E2）、设置页语音识别处的
+「开启麦克风」入口（E3）。
 
 ## 六、中文输入法（拼音 / 五笔）
 
