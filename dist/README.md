@@ -4,20 +4,34 @@
 简繁输出 + 颜文字 / 更多符号 + 输入统计 + csBaby 快捷短语（收藏 / 最近）+ 触屏软键盘 + AI 回复。
 
 **本版定位**：内测分发 · Android Debug 证书签名 · 含 FunASR 离线语音运行时（4 ABI）· 默认模型源为 OSS HTTPS。
-本包是**试包**：版本 / 签名 / 模型源 / 产物内容可验。语音入口修复（VOCA-166）与联想去重修复（VOCA-121）**均未合入本包**——
-前者不在本包保证范围内，后者见「已知限制」；两条都随 VOCA-186 在 11-19 统一窗口重打的**最终包**生效，最终包会替换本文件。
+本文件随 **最终包** `ispeech-internal-v1.6-final-20261119.apk` 分发：11-19 统一合并窗口六条修复
+（VOCA-190 / 170 / 121 / 166 / 233 / 496）全部在包内，出包门禁 `tools/deploy/assert_apk_fix.sh` exit 0。
+试包 `ispeech-internal-v1.6.apk` 保留作基线证据，**不再作为交付包**。
 
 ## 本版文件（v1.6）
 
 | 文件 | 说明 |
 | --- | --- |
-| `ispeech-internal-v1.6.apk` | **内测交付包（试包）**：versionCode 6 / versionName 1.6，Android Debug 证书（SHA-256 `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`），含 4 ABI `libsherpa-onnx-jni.so` |
-| `SHA256SUMS` | 完整性校验（含 `_archive/` 历史包） |
+| `ispeech-internal-v1.6-final-20261119.apk` | **内测交付包（最终包）**：versionCode 6 / versionName 1.6，Android Debug 证书（SHA-256 `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`），含 4 ABI `libsherpa-onnx-jni.so`。**字节走 VOCA-186 issue 附件，不在 git 树内**（R1：139,258,185 B > GitHub 100 MB 单文件硬限，见「取包方式」） |
+| `ispeech-internal-v1.6.apk` | 试包（11-15 基线证据，sha256 `9cddcec5…43f42`）：路径与字节不动，不含窗口六条修复，勿用于验收 |
+| `SHA256SUMS` | 完整性校验（含 `_archive/` 历史包与最终包交付行） |
 | `_archive/` | 历史包 v1.0–v1.5，**均不含语音**（无 sherpa-onnx / FunASR 运行时），仅用于回归对比 |
 
 ## 取包方式（产物必须可被他人取到）
 
-内测包以 **git 发布分支**交付，任何人可用一条命令取到字节并自查：
+**最终包**：从 VOCA-186 issue 附件下载 `ispeech-internal-v1.6-final-20261119.apk`，核对：
+
+```bash
+shasum -a 256 ispeech-internal-v1.6-final-20261119.apk
+# 期望：736236292856ada201bad9e34b93dde286720237695d13075865f0e3d1b430a6（139258185 字节）
+```
+
+- **为什么不在 git 树内**：窗口后 main 含 Vosk 引擎（`07214d6`），4 ABI `libvosk.so` 使整包从试包 98,416,118 B 增至
+  139,258,185 B，超过 GitHub 100,000,000 B 单文件硬限（runbook §6 R1，触发点 = 第 8 步构建后 stat）。
+  按 R1 口径「只登记 sha256 走附件」：`SHA256SUMS` 交付行登记期望值，附件取回后放入 `dist/` 即可跑 `shasum -a 256 -c SHA256SUMS`。
+- 出包 commit = 发布分支 `release/voca-186-v1.6` 上的出包提交（其父 = 第 6 步 merge 提交 `2b393b2`，
+  合并窗口后 main `a9c5109`）；构建基线 = `2b393b2` 树，`git merge-base --is-ancestor a9c5109 2b393b2` = YES（C9）。
+- **试包**仍可从发布分支取（字节未变）：
 
 ```bash
 git clone --single-branch --branch release/voca-186-v1.6 <repo-url>
@@ -25,42 +39,44 @@ cd voca-186-v1.6/dist && shasum -a 256 ispeech-internal-v1.6.apk
 # 期望：9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42（98416118 字节）
 ```
 
-- 发布分支 `release/voca-186-v1.6` = 出包提交 `199b972`（版本提交 `a9d1dae`、出包基线合并 `bc81c30`）+ 本文档；APK 与 `199b972` 里的是同一个 blob 对象，字节未变。
-- 不走任务分支 `agent/sre/voca-186`：其历史含一个 132.72 MB 的 `dist/ispeech-release-1.5-20261115-1004.apk`（非本 issue 产物），超过 GitHub 100 MB 硬限制，`git push` 被 pre-receive 以 GH001 拒收；v1.6 包 93.86 MB 只触发 >50 MB 警告，可正常推送。
-- 最终包门禁 = VOCA-190（FunASR 接线）+ VOCA-170（设置页必崩）+ VOCA-121（联想去重，PR #10，**必要项·不可裁剪**）+ VOCA-166（语音入口/麦克风）四条都合入 main 后重打，覆盖发布分支 `release/voca-186-v1.6` 并同步更新本节 sha256。验收判据 = VOCA-183 交付计划 六·五 / AC-1…AC-10；缺任一条不出包。
-  - PR #10 当前 head = `980b496f524af51134e3773fca12a4a1fcbc1aa7`（本文此前写的 `e8dc6f1` 是其旧 head，11-16 并入 main `fa57a07` 解冲突后前移）；状态 OPEN / draft / MERGEABLE，计划 11-19 窗口 W③ 转 ready 后 squash 进 main。
-- **判据以包内字节为准，不以本文件的变更清单为准**：本试包的「v1.6 变更」曾把 VOCA-121 记成已修复，而 dex 里 0 命中（取证见「入包字节断言」）。最终包出完必须先跑那条断言，**不命中即包不合规、不发**；
-  发布分支的 main 指针 = 窗口当天 `git log -1 --format=%H origin/main` 记下的 commit，不要凭记忆写。
+- 最终包门禁 = VOCA-190（FunASR 接线）+ VOCA-170（设置页必崩）+ VOCA-121（联想去重，**必要项·不可裁剪**）+ VOCA-166（语音入口/麦克风）四条都合入 main 后重打；本窗口实际合入六条（另含 ④b VOCA-233 版本显示 PR #14、⑥ VOCA-496 就绪标记 PR #33），WINDOW_HEAD = `a9c5109`（锚点 `fa57a07`，逆序 revert 可回）。验收判据 = VOCA-183 交付计划 六·五 / AC-1…AC-10；缺任一条不出包。
+- **判据以包内字节为准，不以本文件的变更清单为准**：最终包已跑 `assert_apk_fix.sh`（在树断言 C1…C5 + C9 + dex 字节），exit 0；不命中即包不合规、不发。
 
 ## v1.6 变更（相对 v1.5）
 
-- 版本号 `versionCode 6` / `versionName 1.6`，装机后可凭版本号区分「含语音」的内测包与旧包
+- 版本号 `versionCode 6` / `versionName 1.6`；应用内主页与「关于智语」显示读 `BuildConfig.VERSION_NAME`（VOCA-233 已入包），与系统「应用信息」页一致
 - 默认 `asrModelUrl` 切到 OSS HTTPS（`delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com`），
   构建**不带** `-PasrModelUrl`；dex 内不再出现 `cvm.agentai0.com`
 - 内置 FunASR 离线识别运行时：sherpa-onnx + Paraformer-zh-small，arm64-v8a / armeabi-v7a / x86 / x86_64
 - 签名：Android Debug 证书（非 release 自签证书），可与既有内测包同证书覆盖安装，不用先卸载
-- 出包基线：提交 `bc81c30`（合并 `origin/main` 的 `76d178c`）+ 版本提交 `a9d1dae`；APK 由该提交 `assembleRelease` 产物用本机 debug keystore 重签
-- **不含** VOCA-121（联想去重）修复——该条此前误记为「已修复」，2026-11-16 按包内字节更正：本试包 dex 里 `AssociationCommit` 0 命中，修复随 11-19 最终包生效，本包上仍会复现「你」+「你好」→「你你好」、`zhidao`→「指导老师」+「师专」→「指导老师师专」
+- 出包基线：发布分支第 6 步 merge 提交 `2b393b2`（合并窗口后 main `a9c5109`，树含六条 squash 修复）；APK 由该提交 `assembleRelease` 产物用本机 debug keystore 重签
+- **含** VOCA-121（联想去重）修复：dex 四 token（`AssociationCommit` / `textToCommit` / `suffixPrefixOverlap` / `ASSOCIATION_ANCHOR_CHARS`）全命中；「你」+「你好」→「你好」、`zhidao`→「指导老师」+「师专」→「指导老师专」
+- **含** VOCA-170（设置页 NPE）修复：`KeyboardViewModel` 声明先于 `init{}`，护栏单测在树
+- **含** VOCA-166（语音入口/麦克风）修复：未授权不再顶掉输入法，候选条提示 + 主动「去授权」（`MicGrantAction`）
+- **含** VOCA-496（模型就绪判定）修复：专用完成标记 `.ready-<modelId>` + 原子解压 + 零流量自愈
+- 另含 main 原有 Vosk 离线引擎（`07214d6`，设置页可选 VOSK；其 4 ABI 原生库是整包超 100 MB 的原因）
 
-## 出包门禁（2026-11-14 实测，全部通过）
+## 出包门禁（2026-11-19 最终包实测，全部通过）
 
 | 门禁 | 结果 |
 | --- | --- |
+| 出包门禁脚本 | `bash tools/deploy/assert_apk_fix.sh <最终包> <出包commit> a9c5109` → **exit 0**（C9 祖先 YES + C1…C5 在树断言 + dex 字节 + 交付文档） |
 | 原生库 ABI 数 | `unzip -l … \| grep -c libsherpa-onnx-jni.so` = **4** |
-| 模型源在 dex | 命中 `delivery-service-smzk` = **1**；`cvm.agentai0.com` = **0** |
+| 模型源在 dex | 命中 `delivery-service-smzk`；`cvm.agentai0.com` = **0** |
 | 签名证书 | `apksigner verify --print-certs` → `85:7C:E6:…:A0:ED`（Android Debug） |
 | 版本元数据 | `aapt2 dump badging` → `versionCode='6'` / `versionName='1.6'` |
-| 模型源可用 | `HEAD` 200 / `Content-Length: 77920048` / `Range: 0-1023` → 206 |
+| 模型源可用 | `HEAD` 200 / `Content-Length: 77920048` / `Range: 0-1023` → 206（11-19 复测） |
 
-## 入包字节断言（最终包必做；本试包已实测不通过）
+## 入包字节断言（最终包必做；试包历史取证保留）
 
 上面的门禁只证明「包是怎么签的」，不证明「某个修复在包里」——1.6 试包就是在这里翻的车。
 所以最终包（以及任何被声称「含某修复」的包）出完后，先跑下面这段：把它存成 `assert_apk_fix.sh`，`bash assert_apk_fix.sh <apk>`，**exit 非 0 = 包不合规，不发**。
+（完整出包门禁 = 本发布分支 `tools/deploy/assert_apk_fix.sh`，出包提交自带，含在树断言与交付文档检查；下面这份是 VOCA-121 单修复的最小断言。）
 
 ```bash
 #!/usr/bin/env bash
 # 入包字节断言：APK 里必须出现「修复项」的 dex 符号；缺任一项 → exit 1（包不合规，不发）
-# 用法：bash assert_apk_fix.sh dist/ispeech-internal-v1.6.apk
+# 用法：bash assert_apk_fix.sh dist/ispeech-internal-v1.6-final-20261119.apk
 APK="${1:?用法: bash assert_apk_fix.sh <apk 路径>}"
 BT="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}/build-tools/34.0.0"
 DEXDUMP="${BT}/dexdump"
@@ -80,7 +96,7 @@ done
 if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL，未命中:$MISS → 包不合规，不发"; exit 1; fi
 ```
 
-断言的 token 与判据（VOCA-121，来源 = PR #10 的 `app/src/main/java/com/ispeech/engine/AssociationCommit.kt` 与 `IspeechImeService.kt:119/1132/1134`；`isMinifyEnabled = false`，符号名在 dex 里原样保留）：
+断言的 token 与判据（VOCA-121，来源 = PR #10 的 `app/src/main/java/com/ispeech/engine/AssociationCommit.kt` 与 `IspeechImeService.kt`；`isMinifyEnabled = false`，符号名在 dex 里原样保留）：
 
 | token | 期望 | v1.6 试包 `9cddcec5…`（3 dex） | 121 被测包 `ccdbfa83…`（17 dex，正对照） |
 | --- | --- | --- | --- |
@@ -97,6 +113,16 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 - 正对照包 = 装机专员在 `23F0224224000950` 上验证过的那份（VOCA-192 `01a1da16`），它是 v1.5/5；**不要拿它覆盖已装的 1.6/6**（版本号方向不对，会触发降级），复跑 AC-1…AC-5 只用最终包。
 - 新增修复若带来新类 / 新常量，出包前把它的 dex 符号追加进上面 `for t in …` 与本表；只用 `grep -a` 兜底时判「有没有命中」，不要拿它的行数当计数。
 
+## AC-6 取证变体包（不是交付包，禁止进内测通道）
+
+- 文件：`ispeech-internal-v1.6-ac6-probe404.apk`（VOCA-186 issue 附件，与最终包同批）
+  sha256 `3e46f92630ead5887c26b97169a4cd450d0cc4a5e3c28427bdef0cd62bffef5a`（139,258,185 字节）
+- 与最终包**同一出包 commit / 同 versionCode 6 / 同 debug 证书 / 同 ABI**，仅构建时命令行覆盖
+  `-PasrModelUrl=https://delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/v1.6-ac6-404-probe-does-not-exist.tar.bz2`
+  （HEAD/GET/Range 三段全 404 + `NoSuchKey`，11-19 复测；override 不落 main，`app/build.gradle.kts` 兜底值未动）。
+- 用途：11-20 装机时跑 AC-6（模型源 404 → 可读报错）。**模型永远下不下来**：不进内测通道、不覆盖试包与最终包、
+  不进 `SHA256SUMS` 交付行（本节即其单独登记）；装机后请卸载或覆盖回最终包。
+- 门禁：`APK_MODE=probe404 bash tools/deploy/assert_apk_fix.sh <该包> <出包commit> a9c5109` → exit 0（变体构建正确）。
 
 ## v1.5 变更（历史，相对 v1.4）
 
@@ -115,8 +141,8 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 
 ## 安装
 
-1. `adb install -r ispeech-internal-v1.6.apk`，或将 APK 拷进手机点击安装（要求 Android 8.0+ / minSdk 26）。
-   已装旧内测包（同 debug 证书）可直接覆盖，不需要先卸载；若报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 说明证书不同，**不要卸载清数据**，先回报。
+1. `adb install -r ispeech-internal-v1.6-final-20261119.apk`，或将 APK 拷进手机点击安装（要求 Android 8.0+ / minSdk 26）。
+   已装旧内测包（同 debug 证书，含试包）可直接覆盖，不需要先卸载；若报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 说明证书不同，**不要卸载清数据**，先回报。
 2. 系统设置 → 语言与输入 → 管理输入法 → 启用「智语」。
 3. 任意输入框：通过输入法切换器（长按空格 / 通知栏）切到「智语」，或直接在键盘工具栏点「⌨输入法」。
 
@@ -133,12 +159,10 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 ## 已知限制
 
 - 无双拼 / 手写 / 五笔 98 / 云词库；皮肤仅主题色
-- **语音**：本试包已带 FunASR 运行时与默认 OSS 模型源，但语音入口修复（VOCA-166）未合入，语音键行为以真机验收（VOCA-188）结论为准
-- **联想词重复末字未修复（VOCA-121）**：点候选词上屏后再点以末字开头的联想词，本包仍会写成「你你好」「指导老师师专」。原因是出包基线 `bc81c30` 合的是 `origin/main` 的 `76d178c`，而该修复只在 PR #10（head `980b496f…1aa7`，draft、未合并）里，`git ls-tree -r --name-only origin/main | grep -ci association` = 0，本包 dex 同样 0 命中（见「入包字节断言」）。
-  **验收 / 复测 AC-1、AC-2 不要使用本试包**——用它只能得出「修复无效」的错误结论；统一等 11-19 窗口 W⑤ 的最终包，且先确认断言命中再装机
-- **设置 → 键盘与输入 必崩（VOCA-170）**：`KeyboardViewModel.kt` 的 `init{}`（`:29`，写入在 `:35` / `:38`）先于属性声明（`:102` / `:105`）执行，
-  对尚未初始化的 `MutableStateFlow` 调 `setValue` → 确定性 NPE，崩的是 IME 主进程 `com.ispeech.ime`。1.5/5 与 v1.6 试包同源，均 100% 复现（取证见 VOCA-228）。
-  **这不是 v1.6 回归**，装机与验收请勿按新缺陷重复上报；最终包门禁要求 VOCA-170 先合入 main
+- **语音整链本版无运行时验收判据**（AC-4/5/7 待 11-20 真机 + AC-5 真人时段）：FunASR 接线、模型就绪判定已入包，
+  但「识别准确率 / 端到端可用」未经真机验证；灰度全绿不等于语音已验证
+- **无结构化语音日志**（VOCA-231 未批准进本窗口）：语音异常请附机型 + 录屏，`logcat` 此时给不出 ASR 链路信息；
+  失败只有可读文案、`pidof`、`logcat -b crash` 三类观测
 - 九宫格无音节切分（组合枚举上限 192 组、数字串 ≤9 位），>6 位数字时候选变少
 - 简繁为字符级转换，不做词汇消歧
 - 输入统计不含 AI 回复上屏
@@ -152,31 +176,31 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-git checkout a9d1dae                            # 出包提交（含 76d178c 与 v1.6 版本号）
+git checkout 2b393b2                            # 第 6 步 merge 提交（发布分支吸收窗口后 main a9c5109，版本号 6/1.6）
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties   # 本机文件，不入库
 ./gradlew assembleRelease                       # 不带 -PasrModelUrl，走 OSS 默认源
 
 BT=$ANDROID_HOME/build-tools/34.0.0
 $BT/apksigner sign --ks ~/.android/debug.keystore --ks-type JKS \
   --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android \
-  --out dist/ispeech-internal-v1.6.apk app/build/outputs/apk/release/app-release.apk
-cd dist && shasum -a 256 ispeech-internal-v1.6.apk _archive/*.apk > SHA256SUMS
+  --out ispeech-internal-v1.6-final-20261119.apk app/build/outputs/apk/release/app-release.apk
+# 产物 139,258,185 B > 100 MB：不 commit 进 git（R1），走 issue 附件 + SHA256SUMS 登记
 ```
 
 ## 校验
 
 ```bash
+# 最终包字节先从 VOCA-186 附件取回放入 dist/（R1：不在 git 树内），再：
 shasum -a 256 -c SHA256SUMS
 ```
 
-## 最终包出包顺序（11-19 窗口 W⑤，SRE 执行）
+## 重出路线（门禁事后 FAIL / 基线错时）
 
-1. 前提：VOCA-190 / 170 / 121 / 166 四条已按顺序 squash 进 `main`；记下基线 `git log -1 --format=%H origin/main`，写进本文件「出包基线」。
-2. 从该基线 `assembleRelease` + 本机 debug keystore 重签（同上 recipe，只把 `git checkout a9d1dae` 换成新基线；`versionCode` 若不再递增仍为 6，靠 sha256 区分试包与最终包）。
-3. `shasum -a 256 ispeech-internal-v1.6.apk` → 更新本文件「取包方式」的期望值与 `SHA256SUMS`。
-4. **跑「入包字节断言」，exit 0 才算包合规**；不命中不覆盖发布分支、不装机，回到第 1 步查合并漏了哪条。
+1. 前提：窗口六条已在 `main`（WINDOW_HEAD `a9c5109`）；发布分支已含第 6 步 merge 提交 `2b393b2`（C9 成立则直接从第 2 步起）。
+2. 从 `2b393b2`（或吸收更新 main 后的新 merge 提交）`assembleRelease` + 本机 debug keystore 重签（同上 recipe；`versionCode` 仍为 6，靠**新文件名 + 新 sha256** 区分批次）。
+3. 更新本文件「取包方式」期望值与 `SHA256SUMS` 交付行；试包路径与字节不动。
+4. **跑 `tools/deploy/assert_apk_fix.sh`（final 模式）+ AC-6 变体 probe404 模式，exit 0 才算包合规**；不命中不覆盖发布分支、不装机，回第 1 步查合并漏了哪条。
 5. 装机（`adb install -r`，同 debug 证书不用卸载、不丢词库）→ 交装机专员执行、测试工程师判定 AC-1…AC-5。
 
-**回滚点**：包 = 本分支当前 blob `dist/ispeech-internal-v1.6.apk`（sha256 `9cddcec5a88d…`，98,416,118 字节），`git checkout release/voca-186-v1.6 -- dist/` 取回后 `adb install -r` 覆盖即可，不需要卸载；
-main = 窗口起点 `fa57a07`（四条各一个 squash 提交，`git revert` 可逐条退、互不牵连）；本文件 = 本文档纠正提交（VOCA-121 口径 + 入包断言）。
-
+**回滚点**：最终包 = 本文件登记的 sha256 `73623629…430a6`（附件取回）；试包 = 本分支 blob `dist/ispeech-internal-v1.6.apk`（sha256 `9cddcec5a88d…`，98,416,118 字节），`git checkout release/voca-186-v1.6 -- dist/` 取回后 `adb install -r` 覆盖即可，不需要卸载；
+main = 窗口起点 `fa57a07`（六条各一个 squash 提交，逆序 `git revert a9c5109 9940e82 6ef10c2 0f51e65 a749bf7 badb7f1` 可逐条退）；降级 v1.5 需卸载重装（清私有数据，须人类确认），包从本分支 `_archive/ispeech-release-v1.5.apk` 取（sha256 `490b152a…d7b6`）。
