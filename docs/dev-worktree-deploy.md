@@ -101,9 +101,23 @@ tools/deploy/deploy.sh --merge-all --target auto  # 先 land-all 再部署
 7. `adb -s <serial> install -r <apk>`；
 8. `ime enable com.ispeech.ime/com.ispeech.input.IspeechImeService` → `ime set` → 回读 `settings get secure default_input_method`；
 9. 截图到 `dist/screenshots/deploy-<ts>-<serial>.png`；
-10. 全流程日志写 `dist/deploy-<ts>.log`。
+10. 出包门禁 **版本显示**：`python3 tools/deploy/check_version_display.py -s <serial>`
+    断言「主页 + 关于智语显示的版本 == `dumpsys package` 的 `versionName`」，不一致直接失败不出包
+    （VOCA-233：v1.6 包带着 `ISPEECH_VERSION = "1.5"` 过了只看 badging / dex 的门禁）；
+    退出码 `0` 全部判定通过 / `1` 版本不一致 / `2` 有一项没判定成（uiautomator 读不到层级、
+    或点「关于智语」没进到关于页）。**`1` 和 `2` 都不出包** —— 「没验到」不等于「验过了」。
+    关于页那一项会先在 UI 层级里确认已离开首页（首页独有文案消失、关于页独有文案出现），
+    防止 tap 失效时把首页那行当成关于页版本给出假 PASS；
+11. 全流程日志写 `dist/deploy-<ts>.log`。
 
 其他参数：`--release`、`--no-build`（复用 `app/build/outputs/apk/...` 现有产物）、`--skip-verify`。
+
+版本显示门禁也可单独跑（装机后自查、或验收时复现）：
+
+```bash
+python3 tools/deploy/check_version_display.py                  # 自动选唯一在线设备
+python3 tools/deploy/check_version_display.py -s FMR0224913042917 --wait 4   # 真机 / 慢设备
+```
 
 ## 6. 装真机
 

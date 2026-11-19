@@ -179,6 +179,13 @@ tools/dev/worktree.sh land VOCA-1234                      # squash 合并回 mai
 tools/deploy/deploy.sh --target emulator                  # 从 main 出包并装机
 ```
 
+装机后 `deploy.sh` 会跑一条版本门禁（`tools/deploy/check_version_display.py`）：
+**主页与「关于智语」显示的版本必须等于 `dumpsys package` 的 `versionName`**。
+版本号只有一个来源 —— `app/build.gradle.kts` 的 `versionName` → `BuildConfig.VERSION_NAME`，
+业务代码里不再存副本（VOCA-233：v1.6 曾因 `ISPEECH_VERSION = "1.5"` 显示旧版本）。
+门禁退出码 1（版本不一致）与 2（层级读不到、关于页没真正验到）都会拦住出包：
+没验到不等于验过了。
+
 ## 安装测试（APK）
 
 1. **安装**：`adb install -r dist/ispeech-release-v1.5.apk`，或点击 APK 安装（要求 Android 8.0+；v1.5 已签名，versionCode 5）

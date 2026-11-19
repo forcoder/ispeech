@@ -16,9 +16,6 @@ import kotlinx.coroutines.launch
 /** 产品名（设置首页 logo 与关于页展示）。 */
 const val ISPEECH_NAME = "智语 iSpeech"
 
-/** 版本号（与 app/build.gradle.kts 的 versionName 保持一致）。 */
-const val ISPEECH_VERSION = "1.5"
-
 /**
  * 「申请麦克风权限」extra 键名。
  *
