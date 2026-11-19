@@ -45,3 +45,7 @@ dist/app-debug.apk
 
 # 短语数据导出
 通用短语.csv
+
+# 构建产物不进任务分支（R12 根治，VOCA-183 计划六·四第 4 条）
+dist/ispeech-release-*.apk
+dist/ispeech-internal-*.apk
