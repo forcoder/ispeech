@@ -76,7 +76,7 @@ python3 tools/verify/check_model_host.py --self-test
 |---|---|---|
 | 发布前门禁（**强制**） | 每次出包前 | 人工跑一次；红则 no-go，不许发版 |
 | 定时探测（**待接**） | 每 30 分钟 | 见下方 cron / Actions 片段 |
-| 用户侧信号 | 持续 | logcat `FunAsrModelStore` 出现 `HTTP_4xx` / `NOT_MODEL_PAYLOAD`；源站日志 404 突增；`R.string.voice_model_failed` 相关反馈 |
+| 用户侧信号 | 持续 | logcat `FunAsrModelStore` 出现 `funasr category=…`：源站类 `HTTP_4xx` / `NOT_MODEL_PAYLOAD` / `SIZE_MISMATCH` / `DIGEST_MISMATCH`，落盘类 `EXTRACT_STREAM_FAILED` / `EXTRACT_SHORT_WRITE` / `ARTIFACT_MISSING_ONNX` / `ARTIFACT_MISSING_TOKENS` / `RENAME_FAILED`，自愈类 `SELF_HEAL_RE_EXTRACT`（INFO，正常）；源站日志 404 突增；`R.string.voice_model_failed` 相关反馈 |
 
 定时探测两种接法（执行环境需人类确认后再接，二者选一）：
 
@@ -230,7 +230,8 @@ jobs:
 
 ## 7. 容量与成本（OSS 默认域名，2026-11-09 实测）
 
-- 单次下载 **77,920,048 B ≈ 74.3 MiB**；首装/清数据后各触发一次，之后走 `tokens.txt` 哨兵不再下载。
+- 单次下载 **77,920,048 B ≈ 74.3 MiB**；首装/清数据后各触发一次，之后走**完成标记**（`files/funasr/model/.ready-b77920048-sda92b3db5218`，由 `AsrModelInstall` 在校验通过后最后写）不再下载。
+- 标记缺失而本地整包（`files/funasr/model.tar.bz2`）仍在且大小 / 摘要判得过 ⇒ **只重新解压，零流量**（VOCA-496 自愈）；整包缺失或摘要不符才重下，所以真实下载次数的上界是「首装 + 清数据 + 包体损坏」。
 - 吞吐（本机 → cn-guangzhou，单连接）：整包 74.3 MiB **3.2s ≈ 23.5 MB/s**（探测脚本 `--sha256` 实测）；
   项目组另一轮单连接实测 **7.6 MB/s**、ttfb 0.10s。**容量规划取保守值 7.6 MB/s**：
   74MB 一个包约 **10 秒/连接**，瓶颈通常在客户端带宽而不是 OSS。
