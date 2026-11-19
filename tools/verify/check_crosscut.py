@@ -850,17 +850,22 @@ def check_voice_chain() -> None:
         f"{rel(SERVICE)} handleSoftKey 未把 VOICE 接到 toggleVoiceInput()",
     )
 
-    # 8.1b 按住说话：两种引擎都要接线（系统引擎曾因早退直接失效）
-    #       引擎已由 FunASR 换成 VOSK（07214d6）：按下按 asr.engine 分派到
-    #       VoskSpeechEngine / VoiceInputController，松手由各自 finish() 收尾。
+    # 8.1b 按住说话：三种引擎都要接线（系统引擎曾因早退直接失效）。
+    #       引擎由 FunASR 切换（临时切换到 VOSK/VOCA-190 前的断线）恢复为 FunASR 默认并保留
+    #       VOSK：按下按 asr.engine 分派到 FunAsrSpeechEngine / VoskSpeechEngine /
+    #       VoiceInputController，松手由各自 finish() 收尾。
     down = function_region(service, r"private fun onVoicePressDown\(")
     up = function_region(service, r"private fun onVoicePressUp\(")
     down_tokens = (
+        "if (asr.engine == AsrEngine.FUNASR)",
+        "toggleFunAsrVoice()",
         "if (asr.engine == AsrEngine.VOSK)",
         "toggleVoskVoice()",
         "toggleVoiceInput()",
     )
     up_tokens = (
+        "if (asr.engine == AsrEngine.FUNASR)",
+        "funasrVoice?.finish()",
         "if (asr.engine == AsrEngine.VOSK)",
         "voskVoice?.finish()",
         "voiceController?.finish()",
@@ -869,7 +874,7 @@ def check_voice_chain() -> None:
     missing += [f"松手缺 {t}" for t in up_tokens if t not in up]
     check(
         not missing,
-        "按住说话对两种引擎都接线（VOSK / 系统识别）：按下开始收音、抬起收尾上屏",
+        "按住说话对三种引擎都接线（FunASR / VOSK / 系统识别）：按下开始收音、抬起收尾上屏",
         f"{rel(SERVICE)} 按住说话接线缺项：{missing}",
     )
     check(
@@ -939,6 +944,18 @@ def check_voice_chain() -> None:
         f"{rel(ASR_SETTINGS)} 的 AsrEngine 缺 SYSTEM / CUSTOM",
     )
     check(
+        {"FUNASR", "VOSK"} <= set(enum_members(asr, "AsrEngine") or []),
+        "AsrEngine 含 FUNASR / VOSK（两种内置离线识别引擎都保留）",
+        f"{rel(ASR_SETTINGS)} 的 AsrEngine 缺 FUNASR / VOSK",
+    )
+    check(
+        "val engine: AsrEngine = AsrEngine.FUNASR" in asr
+        and "?:" in asr
+        and "FUNASR" in asr,
+        "AsrSettings 默认引擎为 FUNASR（parse() 未存过 / 不识别时也回落 FUNASR）",
+        f"{rel(ASR_SETTINGS)} 默认引擎未设为 FUNASR 或 parse() 未回落 FUNASR",
+    )
+    check(
         "ASR_MODEL_EXTRA" in asr and "ZH_CN" in asr and '"zh-CN"' in asr,
         "AsrSettings 含模型透传 extra 与 zh-CN 默认语言",
         f"{rel(ASR_SETTINGS)} 缺 ASR_MODEL_EXTRA / zh-CN 语言取值",
@@ -1002,6 +1019,7 @@ def check_voice_chain() -> None:
         "voice_listening", "voice_need_permission", "voice_no_match",
         "voice_error", "voice_cancel", "voice_unavailable",
         "asr_title", "asr_description", "asr_engine_system", "asr_engine_custom",
+        "asr_engine_funasr", "asr_engine_vosk",
         "asr_partial_desc", "asr_offline_desc", "asr_saved", "asr_save_failed",
     }
     missing = sorted(k for k in required if k not in zh or k not in en)
