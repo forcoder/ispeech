@@ -35,6 +35,7 @@ import com.ispeech.data.UserDictMode
 import com.ispeech.data.FunAsrModelStore
 import com.ispeech.data.VoskModelStore
 import com.ispeech.di.AppContainer
+import com.ispeech.engine.AssociationCommit
 import com.ispeech.engine.CompositeEngine
 import com.ispeech.engine.LookupCandidate
 import com.ispeech.engine.LookupEngine
@@ -114,6 +115,9 @@ class IspeechImeService : InputMethodService() {
 
         /** 九宫格（T9）数字串最长 9 位 */
         private const val T9_MAX_DIGITS = 9
+
+        /** 联想词去重兜底时回看的已上屏字数（与 AssociationCommit 的锚点窗口一致） */
+        private const val ASSOCIATION_ANCHOR_CHARS = 16
 
         /**
          * 九宫格一次最多展开的字母组合数。
@@ -1133,8 +1137,24 @@ class IspeechImeService : InputMethodService() {
         }
         val candidate = candidates.getOrNull(index) ?: return
         val wasAssociation = associationActive
-        if (!wasAssociation) learn(candidate)
-        commit(candidate.insertText, allowAssociation = !wasAssociation)
+        if (!wasAssociation) {
+            learn(candidate)
+            commit(candidate.insertText)
+            return
+        }
+        // 联想词按已上屏的末字查出来，开头就是这个字，整词上屏会把它重复一遍：
+        // 「你」+「你好」→「你你好」，「指导老师」+「师专」→「指导老师师专」。
+        // 只上屏与已上屏文本不相重的部分，靠已上屏的字接续
+        val beforeCursor = runCatching {
+            currentInputConnection?.getTextBeforeCursor(ASSOCIATION_ANCHOR_CHARS, 0)?.toString().orEmpty()
+        }.getOrDefault("")
+        val text = AssociationCommit.textToCommit(lastCommit, candidate.insertText, beforeCursor)
+        if (text.isEmpty()) {
+            clearAssociation()
+            renderCandidateView()
+            return
+        }
+        commit(text, allowAssociation = false)
     }
 
     /** 组合码带下划线，等价于 macOS 版的 marked text 样式 */

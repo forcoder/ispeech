@@ -23,6 +23,9 @@
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
 11. 中文输入法（默认拼音 / 五笔 + 中英切换）：枚举 -> 持久化 -> 设置页 / 内置面板 -> 服务两态切换
 12. 候选条字重（VOCA-56）：候选词常规字重、首选靠颜色 / 底色区分、类注释口径一致
+13. 联想词上屏去重（VOCA-121）：AssociationCommit 规则 -> 服务 pickCandidate 联想分支接线 ->
+    规则本身用 Python 复刻跑用例（「你」+「你好」不能变「你你好」；
+    多字候选「指导老师」+「师专」不能变「指导老师师专」）
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -79,6 +82,7 @@ CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
 CHINESE_INPUT_METHOD = JAVA / "settings" / "store" / "ChineseInputMethod.kt"
 INPUT_MODE = JAVA / "input" / "InputMode.kt"
 INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
+ASSOCIATION_COMMIT = JAVA / "engine" / "AssociationCommit.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
@@ -1743,6 +1747,101 @@ def check_candidate_style() -> None:
     )
 
 
+# ═════════════════════════════════════════════════════════════
+# 13. 联想词上屏去重（VOCA-121）
+# ═════════════════════════════════════════════════════════════
+
+def check_association_commit() -> None:
+    """13. 联想词上屏去重（VOCA-121）：「你」上屏后点联想词「你好」不能得到「你你好」."""
+    commit = read(ASSOCIATION_COMMIT)
+    service = read(SERVICE)
+    check(
+        "object AssociationCommit" in commit,
+        "AssociationCommit 规则存在",
+        f"{rel(ASSOCIATION_COMMIT)} 缺失或没有 AssociationCommit",
+    )
+    check(
+        "suffixPrefixOverlap" in commit and "regionMatches" in commit,
+        "规则：按「已上屏后缀 / 候选前缀」最长重合裁剪",
+        "AssociationCommit.textToCommit 未实现最长重合裁剪（多字候选会出现重复字）",
+    )
+    check(
+        "candidate.startsWith(lastCommit)" not in commit,
+        "规则不再只认「整段前缀」重合（多字候选漏裁剪的根因）",
+        "AssociationCommit 仍只处理整段前缀，多字候选上屏后点联想词会重复末字",
+    )
+    pick = re.search(r"private fun pickCandidate\(.*?\n    \}", service, re.S)
+    body = pick.group(0) if pick else ""
+    check(
+        "AssociationCommit.textToCommit" in body,
+        "pickCandidate 的联想分支走 AssociationCommit",
+        "pickCandidate 未调用 AssociationCommit.textToCommit（联想词仍会整词上屏）",
+    )
+    check(
+        "getTextBeforeCursor" in body,
+        "pickCandidate 用光标前实际文本兜底（lastCommit 被宿主清空时不重复）",
+        "pickCandidate 未把光标前文本作为兜底锚点，宿主重启输入连接后仍可能重复",
+    )
+    check(
+        "commit(text, allowAssociation = false)" in body,
+        "联想词上屏后不再接续联想（沿用原语义，只改上屏文本）",
+        "pickCandidate 联想分支的上屏调用被改动，需人工确认",
+    )
+
+    def text_to_commit(last_commit: str, candidate: str, before_cursor: str = "") -> str:
+        """Python 复刻 AssociationCommit.textToCommit（改 Kotlin 时同步改这里）."""
+        if not candidate:
+            return candidate
+        anchor = last_commit or before_cursor
+        if not anchor:
+            return candidate
+        if candidate == anchor:
+            return ""
+        window = anchor[-16:]
+        for length in range(min(len(window), len(candidate)), 0, -1):
+            if candidate.startswith(window[-length:]):
+                return candidate[length:]
+        return candidate
+
+    cases = [
+        # 末字单字上屏 -> 联想词只补后半截
+        (("你", "你好"), "好"),
+        (("你", "你们"), "们"),
+        # 多字候选：联想按末字查，候选开头就是这个字 -> 裁掉重复的那个字
+        (("指导老师", "师专"), "专"),
+        (("指导老师", "师傅"), "傅"),
+        (("知道", "道理"), "理"),
+        (("指导老师", "老师好"), "好"),
+        # 词组整词前缀重合 -> 只补多出来的部分
+        (("你好", "你好吗"), "吗"),
+        (("天气", "天气预报"), "预报"),
+        # 无重合 -> 整词上屏（用户词库「包含」联想）
+        (("气", "天气"), "天气"),
+        (("知", "认知"), "认知"),
+        # 与已上屏内容相同 -> 不重复写
+        (("天气", "天气"), ""),
+        (("指导老师", "指导老师"), ""),
+        # 无已上屏文本 -> 原样
+        (("", "你好"), "你好"),
+        # lastCommit 被宿主清空 -> 退回光标前实际文本
+        (("", "师专", "指导老师"), "专"),
+        (("", "师专", "师专"), ""),
+    ]
+    bad = [(args, want, text_to_commit(*args)) for args, want in cases if text_to_commit(*args) != want]
+    check(
+        not bad,
+        f"去重规则用例全过（{len(cases)} 组：单字接续 / 多字重复字 / 整词重合 / 无重合 / 完全相同）",
+        f"去重规则用例不符：{bad}",
+    )
+
+    matrix = read(ROOT / "docs" / "sogou-feature-matrix.md")
+    check(
+        "联想" in matrix and "重复" in matrix,
+        "功能矩阵同步「联想词上屏不重复已上屏文字」口径",
+        "docs/sogou-feature-matrix.md 未写联想词去重口径",
+    )
+
+
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
     print("-- 1. LookupKind（WUBIPHRASE / PINYIN）--")
@@ -1769,6 +1868,8 @@ def main() -> int:
     check_chinese_input_method()
     print("-- 12. 候选条字重（VOCA-56）--")
     check_candidate_style()
+    print("-- 13. 联想词上屏去重（VOCA-121）--")
+    check_association_commit()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 
