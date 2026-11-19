@@ -215,12 +215,12 @@ private fun KeyboardSizeCard(current: KeyboardSettings, onSelect: (KeyboardSize)
     }
 }
 
-/** 每页候选数选择卡片：只允许 5 / 7 / 9。 */
+/** 候选显示数量选择卡片：只允许 5 / 7 / 9（候选条不再分页，左右滑动浏览）。 */
 @Composable
 private fun CandidatePageSizeCard(current: Int, onSelect: (Int) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(vertical = 4.dp)) {
-            KeyboardCardTitle("每页候选数")
+            KeyboardCardTitle("候选显示数量")
             listOf(5, 7, 9).forEach { size ->
                 KeyboardOptionRow(
                     selected = current == size,

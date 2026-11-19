@@ -48,7 +48,7 @@ object KeyboardLayouts {
 
     /** 切到符号页的 `符` 键（搜狗五笔字母页底行最左）。 */
     private fun symbolSwitchKey(): KeyDef =
-        KeyDef.fn(KeyAction.LAYOUT, "符", 1.6f, KeyStyle.SPECIAL, KeyboardLayoutKind.SYMBOL)
+        KeyDef.fn(KeyAction.LAYOUT, "符", 1f, KeyStyle.SPECIAL, KeyboardLayoutKind.SYMBOL)
 
     /**
      * 切到九宫格（T9）的 `9键` 键。
@@ -108,10 +108,6 @@ object KeyboardLayouts {
     /**
      * 构造字母页。底行照搬搜狗五笔 26 键：`符` / `中/英` / `，` / 空格 / `。` / `123` / `换行`。
      *
-     * 底行各键的宽度权重按同一台真机上搜狗底行的实测像素比例取值（实测 1260px 屏：
-     * 符 169 / 123 134 / ，102 / 空格 309 / 。102 / 中英 134 / 换行 168）：
-     * `符` 在搜狗侧是宽键（1.66 单位），旧版写成 1f 后比 `123` 还窄，底行看着一头重一头轻。
-     *
      * @param commaAlt `,` 键长按候选（直接上屏，不经过中文标点转换）
      * @param periodAlt `.` 键长按候选（同上）
      */
@@ -133,12 +129,12 @@ object KeyboardLayouts {
                 row(backspaceKey()),
             listOf(
                 symbolSwitchKey(),
-                numberSwitchKey(),
+                KeyDef.fn(KeyAction.MODE_SWITCH, "中/英", 1.8f, KeyStyle.SPECIAL),
                 KeyDef.punct(commaOutput, commaLabel, commaAlt, 1f),
-                spaceKey(3.3f),
+                spaceKey(),
                 KeyDef.punct(periodOutput, periodLabel, periodAlt, 1f),
-                KeyDef.fn(KeyAction.MODE_SWITCH, "中/英", 1.45f, KeyStyle.SPECIAL),
-                enterKey(1.8f),
+                numberSwitchKey(),
+                enterKey(),
             ),
         ),
     )
@@ -188,143 +184,98 @@ object KeyboardLayouts {
      * 末尾追加 [T9Layouts.moreSymbolPages]（数学 / 箭头 / 货币 / 单位 / 希腊 / 线框）。
      * 每页底行固定为 `123` / `ABC` / 空格 / `↵`。
      */
-// ── 符号页（复刻搜狗五笔符号面板）──
-
-    /** 符号每页的符号列数（不含右侧控制列）。 */
-    private const val SYMBOL_COLUMNS = 4
-
-    /** 符号每页的符号行数。 */
-    private const val SYMBOL_ROWS = 4
-
-    /** 右侧控制列宽度权重：比符号键窄一些，和搜狗一致。 */
-    private const val SYMBOL_CONTROL_WEIGHT = 0.85f
-
-    /** 分类条文案，顺序即页序；点一下直达该页（[KeyDef.pageOffset]）。 */
-    private val symbolCategoryNames = listOf(
-        "1.常用",
-        "2.中文",
-        "3.英文",
-        "4.网络",
-        "5.数学",
-        "6.角标",
-    )
-
-    /** 常用符号（实拍第 1 页）。 */
-    private val symbolCommon = listOf(
-        ".", "@", "~", "-",
-        ",", ":", "*", "?",
-        "!", "–", "#", "/",
-        "=", "+", "——", "&",
-    )
-
-    /** 中文符号（实拍第 2 页）。 */
-    private val symbolChinese = listOf(
-        "，", "。", "？", "！",
-        "～", "`", "：", "#",
-        "；", "%", "*", "——",
-        "……", "&", "·", "￥",
-    )
-
-    /** 英文符号（实拍第 3 页）。 */
-    private val symbolEnglish = listOf(
-        "“", "”", "~", "@",
-        "?", "+", "—", "、",
-        ",", "#", ":", "*",
-        "(", ")", "/", "-",
-    )
-
-    /** 网络符号（未实拍，按搜狗常见集合补齐）。 */
-    private val symbolNetwork = listOf(
-        "@", "#", ".", "/",
-        ":", "-", "_", "~",
-        "?", "&", "=", "%",
-        "http://", "www.", ".com", ".cn",
-    )
-
-    /** 数学符号（未实拍；高等数学符号见追加的「数学」页）。 */
-    private val symbolMath = listOf(
-        "+", "-", "×", "÷",
-        "=", "≠", "≈", "≤",
-        "≥", "±", "√", "∞",
-        "°", "′", "″", "π",
-    )
-
-    /** 角标符号（上标 / 下标数字）。 */
-    private val symbolScript = listOf(
-        "⁰", "¹", "²", "³",
-        "⁴", "⁵", "⁶", "⁷",
-        "⁸", "⁹", "₀", "₁",
-        "₂", "₃", "₄", "₅",
-    )
-
-    /**
-     * 符号页：复刻搜狗五笔的符号面板。
-     *
-     * 版式与实拍一致：4 列 × 4 行符号 + 右侧控制列（返回 / 上一页 / 下一页 / 删除），
-     * 底部一行是分类条，点一下直达对应分类页（不靠反复翻页找）。
-     *
-     * 末尾仍追加 [T9Layouts.moreSymbolPages]（高等数学 / 箭头 / 货币 / 单位 / 希腊 / 线框），
-     * 这些页不在分类条上，用右侧 ↑ / ↓ 翻到。
-     */
     fun symbols(): List<KeyboardPage> = listOf(
-        symbolPage("符号1", symbolCommon, 0),
-        symbolPage("符号2", symbolChinese, 1),
-        symbolPage("符号3", symbolEnglish, 2),
-        symbolPage("符号4", symbolNetwork, 3),
-        symbolPage("符号5", symbolMath, 4),
-        symbolPage("符号6", symbolScript, 5),
+        KeyboardPage(
+            title = "符号1",
+            rows = rows(
+                row(
+                    KeyDef.char("，"),
+                    KeyDef.char("。"),
+                    KeyDef.char("？"),
+                    KeyDef.char("！"),
+                    KeyDef.char("、"),
+                    KeyDef.char("；"),
+                    KeyDef.char("："),
+                    KeyDef.char("“"),
+                    KeyDef.char("”"),
+                    KeyDef.char("‘"),
+                ),
+                row(
+                    KeyDef.char("’"),
+                    KeyDef.char("《"),
+                    KeyDef.char("》"),
+                    KeyDef.char("【"),
+                    KeyDef.char("】"),
+                    KeyDef.char("（"),
+                    KeyDef.char("）"),
+                    KeyDef.char("—"),
+                    KeyDef.char("…"),
+                    KeyDef.char("·"),
+                ),
+                row(
+                    KeyDef.char("～"),
+                    KeyDef.char("｜"),
+                    KeyDef.char("〈"),
+                    KeyDef.char("〉"),
+                    // ⬅ ➡ 用矢量块箭头（复刻搜狗 ime_function_edit_left/right）：不同 ROM 的
+                    // 箭头字形粗细不一，直接当文字画容易显得粗糙。label 保留给无障碍朗读。
+                    KeyDef.fn(
+                        KeyAction.MOVE_LEFT,
+                        "⬅",
+                        1.2f,
+                        iconRes = R.drawable.ic_cursor_left,
+                    ),
+                    KeyDef.fn(
+                        KeyAction.MOVE_RIGHT,
+                        "➡",
+                        1.2f,
+                        iconRes = R.drawable.ic_cursor_right,
+                    ),
+                ),
+                bottomRow(),
+            ),
+        ),
+        KeyboardPage(
+            title = "符号2",
+            rows = rows(
+                row(
+                    KeyDef.char("＋"),
+                    KeyDef.char("－"),
+                    KeyDef.char("×"),
+                    KeyDef.char("÷"),
+                    KeyDef.char("＝"),
+                    KeyDef.char("≠"),
+                    KeyDef.char("≈"),
+                    KeyDef.char("≤"),
+                    KeyDef.char("≥"),
+                ),
+                row(
+                    KeyDef.char("±"),
+                    KeyDef.char("√"),
+                    KeyDef.char("∞"),
+                    KeyDef.char("°"),
+                    KeyDef.char("′"),
+                    KeyDef.char("″"),
+                    KeyDef.char("℃"),
+                    KeyDef.char("㎡"),
+                    KeyDef.char("$"),
+                ),
+                row(
+                    KeyDef.char("€"),
+                    KeyDef.char("£"),
+                    KeyDef.char("‰"),
+                    KeyDef.char("§"),
+                    KeyDef.char("№"),
+                    KeyDef.char("①"),
+                    KeyDef.char("②"),
+                    KeyDef.char("③"),
+                    KeyDef.char("④"),
+                    KeyDef.char("⑤"),
+                ),
+                bottomRow(),
+            ),
+        ),
     ) + T9Layouts.moreSymbolPages()
-
-    /** 组一页符号：[symbols] 按 4 列铺开，右侧插控制键，末行是分类条。 */
-    private fun symbolPage(title: String, symbols: List<String>, pageIndex: Int): KeyboardPage {
-        val pageRows = ArrayList<List<KeyDef>>(SYMBOL_ROWS + 1)
-        for (row in 0 until SYMBOL_ROWS) {
-            val cells = (0 until SYMBOL_COLUMNS).map { column ->
-                val symbol = symbols.getOrNull(row * SYMBOL_COLUMNS + column).orEmpty()
-                if (symbol.isEmpty()) {
-                    // 数据不足时留一个不可点的空位，保持网格不错位
-                    KeyDef.fn(KeyAction.CLEAR, "", 1f, KeyStyle.SPECIAL)
-                } else {
-                    KeyDef.char(symbol)
-                }
-            }
-            pageRows += cells + symbolControlKey(row, pageIndex)
-        }
-        pageRows += symbolCategoryRow()
-        return KeyboardPage(title = title, rows = pageRows)
-    }
-
-    /**
-     * 右侧控制列：返回 / 上页 / 下页 / 删除。
-     *
-     * 搜狗第 4 位是「锁键盘」，我们没有对应语义，换成更常用的删除；
-     * 翻页文案用「上页 / 下页」而不是箭头 —— 箭头字形与「更多符号」的箭头页重复。
-     */
-    private fun symbolControlKey(row: Int, pageIndex: Int): KeyDef = when (row) {
-        0 -> KeyDef.fn(
-            KeyAction.LAYOUT,
-            "返回",
-            SYMBOL_CONTROL_WEIGHT,
-            KeyStyle.SPECIAL,
-            KeyboardLayoutKind.LETTER,
-        )
-        1 -> KeyDef.fn(KeyAction.PAGE_PREV, "上页", SYMBOL_CONTROL_WEIGHT)
-        2 -> KeyDef.fn(KeyAction.PAGE_NEXT, "下页", SYMBOL_CONTROL_WEIGHT)
-        else -> KeyDef.fn(KeyAction.BACKSPACE, "⌫", SYMBOL_CONTROL_WEIGHT)
-    }
-
-    /** 分类条：每格直达一个分类页；用 [KeyStyle.PUNCT] 让文案字号小一号。 */
-    private fun symbolCategoryRow(): List<KeyDef> =
-        symbolCategoryNames.mapIndexed { index, name ->
-            KeyDef.fn(
-                KeyAction.LAYOUT,
-                name,
-                1f,
-                KeyStyle.PUNCT,
-                KeyboardLayoutKind.SYMBOL,
-                pageOffset = index,
-            )
-        }
 
     // ── 表情页 ──
 

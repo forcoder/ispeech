@@ -35,6 +35,13 @@ AGENTS.md
 
 # 临时 worktree / 本地运行时
 .claude/worktrees/
+.claude/settings.local.json
+
+# dist/ 下的部署产物（release 包、dist/README.md、SHA256SUMS 继续入库）
+dist/deploy-*.log
+dist/screenshots/
+dist/ispeech-debug-*.apk
+dist/app-debug.apk
 
 # 短语数据导出
 通用短语.csv

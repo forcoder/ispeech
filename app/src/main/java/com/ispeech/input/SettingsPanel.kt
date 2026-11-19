@@ -47,7 +47,7 @@ class SettingsPanel @JvmOverloads constructor(
     /** 语音识别设置变更（引擎 / 语言）。 */
     var onAsrChange: ((AsrSettings) -> Unit)? = null
 
-    /** 中文输入法变更（拼音 / 五笔）。 */
+    /** 中文输入法变更（拼音 / 五笔）：中文态默认输入法。 */
     var onChineseInputMethodChange: ((ChineseInputMethod) -> Unit)? = null
 
     // ── 颜色（与 InputMethodPanel 保持同一套）──
@@ -172,6 +172,10 @@ class SettingsPanel @JvmOverloads constructor(
         rendering = true
         listContainer.removeAllViews()
 
+        toggles().forEach { spec -> listContainer.addView(buildToggleRow(spec), rowParams()) }
+
+        listContainer.addView(createDividerView(), dividerParams())
+        // 中文输入法：中文态默认用哪种（也是中/英切回中文时的目标输入法）
         listContainer.addView(
             buildChoiceRow(
                 label = context.getString(R.string.panel_chinese_input_method),
@@ -184,17 +188,12 @@ class SettingsPanel @JvmOverloads constructor(
             ),
             rowParams(),
         )
-        listContainer.addView(createDividerView(), dividerParams())
-
-        toggles().forEach { spec -> listContainer.addView(buildToggleRow(spec), rowParams()) }
-
-        listContainer.addView(createDividerView(), dividerParams())
         listContainer.addView(
             buildChoiceRow(
                 label = context.getString(R.string.asr_engine_label),
                 value = engineLabel(asr.engine),
                 onClick = {
-                    // 四态循环：系统 → 自定义 → Vosk → FunASR → 系统
+                    // 五态循环：FunASR → 系统 → 自定义 → Vosk → FunASR
                     val entries = AsrEngine.entries
                     val next = entries[(entries.indexOf(asr.engine) + 1) % entries.size]
                     onAsrChange?.invoke(asr.copy(engine = next))
@@ -227,14 +226,6 @@ class SettingsPanel @JvmOverloads constructor(
         ToggleSpec("fuzzyPinyin", R.string.panel_toggle_fuzzy_pinyin, keyboard.fuzzyPinyin),
         ToggleSpec("traditionalOutput", R.string.panel_toggle_traditional, keyboard.traditionalOutput),
         ToggleSpec("vibrate", R.string.panel_toggle_vibrate, keyboard.vibrate),
-    )
-
-    /** 中文输入法当前值文案（拼音 / 五笔）。 */
-    private fun chineseInputMethodLabel(method: ChineseInputMethod): String = context.getString(
-        when (method) {
-            ChineseInputMethod.PINYIN -> R.string.panel_chinese_input_pinyin
-            ChineseInputMethod.WUBI -> R.string.panel_chinese_input_wubi
-        },
     )
 
     private fun buildToggleRow(spec: ToggleSpec): View {
@@ -305,11 +296,19 @@ class SettingsPanel @JvmOverloads constructor(
         }
     }
 
+    private fun chineseInputMethodLabel(method: ChineseInputMethod): String = context.getString(
+        when (method) {
+            ChineseInputMethod.PINYIN -> R.string.panel_chinese_input_pinyin
+            ChineseInputMethod.WUBI -> R.string.panel_chinese_input_wubi
+        },
+    )
+
     private fun engineLabel(engine: AsrEngine): String = context.getString(
         when (engine) {
             AsrEngine.SYSTEM -> R.string.asr_engine_system
             AsrEngine.CUSTOM -> R.string.asr_engine_custom
             AsrEngine.FUNASR -> R.string.asr_engine_funasr
+            AsrEngine.VOSK -> R.string.asr_engine_vosk
         },
     )
 

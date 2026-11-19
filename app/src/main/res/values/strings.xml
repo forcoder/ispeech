@@ -156,13 +156,19 @@
 
     <!-- 语音输入 -->
     <string name="voice_listening">语音识别中…</string>
-    <string name="voice_need_permission">请先授予麦克风权限</string>
+    <string name="voice_need_permission">请先授予麦克风权限；若系统不再弹出授权框，请到「系统设置 → 应用 → 智语 iSpeech → 权限」开启麦克风</string>
+    <string name="voice_action_grant">去授权</string>
+    <string name="voice_action_open_settings">去设置</string>
+    <string name="voice_permission_open_failed">打不开授权页面，请在「系统设置 → 应用 → 智语 iSpeech → 权限」中开启麦克风</string>
+    <!-- S8 授权成功回场的一次性指引：设置页 finish() 后宿主不一定重显键盘，靠这句告诉用户下一步（docs/adr/001-mic-permission-bridge.md 决策 4） -->
+    <string name="voice_permission_granted">麦克风权限已开启，点击麦克风开始说话</string>
     <string name="voice_no_match">没听清，请再说一次</string>
     <string name="voice_cancel">语音已取消</string>
     <string name="voice_unavailable">设备不支持语音输入</string>
     <string name="voice_service_unavailable">本机未安装可用的语音识别服务；请在「设置 → 语音识别」中指定其它识别服务组件，或安装支持语音识别的应用</string>
     <string name="voice_network_error">网络异常，语音识别需要联网</string>
     <string name="voice_audio_error">录音失败，请检查麦克风是否被其它应用占用</string>
+    <string name="voice_error">语音识别失败，请重试</string>
     <string name="voice_error_code">语音识别失败（错误码 %1$d）</string>
     <string name="voice_panel_listening">正在聆听…</string>
     <string name="voice_panel_hint">松开上屏 · 上滑取消</string>
@@ -222,4 +228,6 @@
     <string name="quick_cloud_added_success">云端简写「%1$s」已添加成功</string>
     <string name="quick_cloud_added_failed">云端简写「%1$s」添加失败：%2$s</string>
     <string name="sync_upload_partial">云端生效：新增 %1$d · 修改 %2$d · 删除 %3$d；%4$d 条未生效（后端不支持修改 / 删除）</string>
+<string name="asr_engine_vosk">离线识别（内置）</string>
+<string name="asr_engine_vosk_desc">内置 Vosk 中文模型，完全离线、不联网；首次使用需下载约 42MB 模型</string>
 </resources>
