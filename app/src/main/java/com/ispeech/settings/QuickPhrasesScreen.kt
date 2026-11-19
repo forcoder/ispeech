@@ -1,6 +1,7 @@
 package com.ispeech.settings
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.annotation.StringRes
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,19 +69,71 @@ import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickMatchMode
 import com.ispeech.engine.QuickSource
+import com.ispeech.engine.QuickTrigger
+import com.ispeech.engine.QuickTriggerIssue
 import com.ispeech.settings.quick.QuickPhrasesUiState
 import com.ispeech.settings.quick.QuickPhrasesViewModel
 import com.ispeech.settings.quick.RemoteRuleInfo
 
 /**
- * 快捷字母校验：2–4 位小写字母。
+ * 快捷字母校验只有 [QuickTrigger.isValidShortcutTrigger] 一个实现（ADR-0002 C1-2）：
+ * 本文件不再写第二份长度判定，上限与输入法缓冲区口径都由它给出。
  *
- * 上限 4 与输入法五笔态的组合缓冲区 MAX_CODE_LENGTH 一致：超过 4 位时第 5 个字母会先上屏
- * 当前首选再重新起码，完整简写永远打不出来，也就拿不到「精确命中排第一」。
- * 数字 / 符号在五笔态直接上屏、不进入编码缓冲，所以同样不允许。
+ * 这里只保留「还差什么」到文案资源的映射，供禁用原因与错误提示共用（C1-7），
+ * ViewModel 与界面同一个来源，避免同一问题两处不同说法。
  */
-internal fun isValidShortcutTrigger(trigger: String): Boolean =
-    trigger.length in 2..4 && trigger.all { it in 'a'..'z' }
+@StringRes
+internal fun triggerIssueRes(issue: QuickTriggerIssue): Int = when (issue) {
+    QuickTriggerIssue.EMPTY -> R.string.quick_trigger_reason_empty
+    QuickTriggerIssue.TOO_SHORT -> R.string.quick_trigger_reason_short
+    QuickTriggerIssue.TOO_LONG -> R.string.quick_trigger_reason_long
+    QuickTriggerIssue.NOT_LETTERS -> R.string.quick_trigger_reason_letters
+}
+
+/**
+ * 快捷字母输入框下方的引导文案（C1-7 禁用原因 + C1-7 可达性提示 + C1-9 误弹警示）。
+ *
+ * 三条都非阻断：>4 位照样能存，只是五笔态敲不全；选了前缀 / 包含匹配时长正文可能压过
+ * 正在输入的词，界面把这件事说出来，而不是靠「不让存」来回避。
+ */
+@Composable
+private fun QuickTriggerGuidance(trigger: String, mode: QuickMatchMode? = null) {
+    val normalized = trigger.trim().lowercase()
+    val issue = QuickTrigger.issue(normalized)
+    if (normalized.isEmpty()) {
+        Text(
+            text = stringResource(R.string.quick_trigger_hint),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    if (issue != null) {
+        // 按钮禁用时说明「还差什么」，不要只让用户对着一个灰掉的确认键猜
+        Text(
+            text = stringResource(R.string.quick_trigger_invalid, stringResource(triggerIssueRes(issue))),
+            color = MaterialTheme.colorScheme.error,
+        )
+        return
+    }
+    Text(
+        text = stringResource(R.string.quick_trigger_hint),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (QuickTrigger.isBeyondWubiBuffer(normalized)) {
+        Text(
+            text = stringResource(R.string.quick_trigger_reachable_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (mode != null && QuickTrigger.mayMisfire(normalized, mode)) {
+            Text(
+                text = stringResource(R.string.quick_trigger_prefix_long_content_warn),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
 
 /**
  * 通用短语 CSV 的文件选择器 MIME 白名单。
@@ -113,6 +166,8 @@ fun QuickPhrasesScreen(onBack: () -> Unit, onOpenSync: () -> Unit) {
     var cloudEditor by remember { mutableStateOf<CloudShortcutEditor?>(null) }
     // 远端规则快捷字母弹窗状态：null 表示未打开
     var remoteEditor by remember { mutableStateOf<RemoteShortcutEditor?>(null) }
+    // 冲突详情：本地条目 + 远端条目成对传入，两个动作都由用户点（C3-7）
+    var conflictEntry by remember { mutableStateOf<Pair<QuickEntry, QuickEntry>?>(null) }
     // 「新增」类型选择弹窗：本地规则 / 云端简写
     var choosingAddKind by remember { mutableStateOf(false) }
 
@@ -223,8 +278,8 @@ fun QuickPhrasesScreen(onBack: () -> Unit, onOpenSync: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(state.matches, key = { match -> match.id }) { match ->
+                        // 同 trigger 折叠后卡片正文取本地内容（C2-3），来源信息一律按展示 id 取
                         val info = state.remoteInfo[match.id]
-                            ?.takeIf { match.entry.source == QuickSource.REMOTE }
                         QuickEntryCard(
                             entry = match,
                             info = info,
@@ -240,6 +295,7 @@ fun QuickPhrasesScreen(onBack: () -> Unit, onOpenSync: () -> Unit) {
                             },
                             onDelete = { viewModel.remove(match.entry) },
                             onRestore = { info?.let { viewModel.removeRemoteOverride(it.original) } },
+                            onConflict = { info?.let { conflictEntry = match.entry to it.original } },
                         )
                     }
                 }
@@ -267,6 +323,22 @@ fun QuickPhrasesScreen(onBack: () -> Unit, onOpenSync: () -> Unit) {
             onConfirm = {
                 viewModel.addCloudShortcut(current.keyword.trim(), current.replyTemplate.trim())
                 cloudEditor = null
+            },
+        )
+    }
+
+    conflictEntry?.let { (local, remote) ->
+        QuickConflictDetailDialog(
+            local = local,
+            remote = remote,
+            onDismiss = { conflictEntry = null },
+            onAdoptRemote = {
+                viewModel.adoptRemoteContent(local, remote.content)
+                conflictEntry = null
+            },
+            onPushLocal = {
+                viewModel.overwriteRemoteWithLocal(local.trigger)
+                conflictEntry = null
             },
         )
     }
@@ -361,6 +433,64 @@ private fun QuickSearchBar(
 }
 
 /** 单条快捷规则卡片：展示 trigger / label / content / kind / mode / weight，命中处高亮。 */
+/**
+ * 冲突详情弹窗（ADR-0002 决策 2 / C3-7）：两侧正文逐字可读，两个动作各管一边。
+ *
+ * 「采用云端正文」只写本地，云端一个字节不动；「以本地为准并更新云端」走显式推送入口，
+ * 推后复验，未生效不清空冲突。默认按钮什么都不做 —— 自动拉平任一方向都是数据丢失。
+ */
+@Composable
+private fun QuickConflictDetailDialog(
+    local: QuickEntry,
+    remote: QuickEntry,
+    onDismiss: () -> Unit,
+    onAdoptRemote: () -> Unit,
+    onPushLocal: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.quick_conflict_detail_title, local.trigger)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.quick_conflict_local_label),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    text = local.content,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = stringResource(R.string.quick_conflict_remote_label),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    text = remote.content,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onPushLocal) {
+                Text(stringResource(R.string.quick_conflict_push_local))
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.btn_cancel))
+                }
+                TextButton(onClick = onAdoptRemote) {
+                    Text(stringResource(R.string.quick_conflict_adopt_remote))
+                }
+            }
+        },
+    )
+}
+
 @Composable
 private fun QuickEntryCard(
     entry: PhraseMatch,
@@ -368,12 +498,19 @@ private fun QuickEntryCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onRestore: () -> Unit,
+    onConflict: () -> Unit,
 ) {
     val rule = entry.entry
     val isRemote = info != null
     val overrideTrigger = info?.overrideTrigger
     val kindText = lookupKindLabel(rule.kind)
     val modeText = quickModeLabel(rule.mode)
+    // C2-3：折叠后的卡片正文取本地内容，来源仍要写明它是远端规则（并标注已覆盖）
+    val sourceText = when {
+        info == null -> rule.source
+        overrideTrigger != null -> stringResource(R.string.quick_source_remote_overridden)
+        else -> QuickSource.REMOTE
+    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -390,7 +527,7 @@ private fun QuickEntryCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "${rule.source} · $kindText · $modeText",
+                        text = "$sourceText · $kindText · $modeText",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -427,11 +564,25 @@ private fun QuickEntryCard(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
+                if (info?.conflict == true) {
+                    // C2-5：同 trigger 但正文不一致 —— 不自动改任何一侧，先让人看见
+                    Text(
+                        text = stringResource(R.string.quick_conflict_badge),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
             IconButton(onClick = onEdit) {
                 Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.btn_edit))
             }
             if (isRemote) {
+                if (info?.conflict == true) {
+                    TextButton(onClick = onConflict) {
+                        Text(stringResource(R.string.quick_conflict_badge))
+                    }
+                }
                 if (overrideTrigger != null) {
                     TextButton(onClick = onRestore) {
                         Text(stringResource(R.string.quick_remote_restore))
@@ -524,7 +675,7 @@ private fun QuickEditorDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    val triggerValid = isValidShortcutTrigger(editor.trigger)
+    val triggerValid = QuickTrigger.isValidShortcutTrigger(editor.trigger)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -543,17 +694,8 @@ private fun QuickEditorDialog(
                     },
                     label = { Text(stringResource(R.string.quick_trigger)) },
                     supportingText = {
-                        val showError = editor.trigger.isNotEmpty() && !triggerValid
-                        Text(
-                            text = stringResource(
-                                if (showError) R.string.quick_trigger_error else R.string.quick_trigger_hint
-                            ),
-                            color = if (showError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
+                        // 非法原因 / >4 位可达性 / 误弹警示都在这一处（C1-7、C1-9）
+                        QuickTriggerGuidance(editor.trigger, editor.mode)
                     },
                     isError = editor.trigger.isNotEmpty() && !triggerValid,
                     singleLine = true,
@@ -633,7 +775,7 @@ private fun RemoteShortcutEditorDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    val triggerValid = isValidShortcutTrigger(editor.trigger)
+    val triggerValid = QuickTrigger.isValidShortcutTrigger(editor.trigger)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.quick_remote_shortcut_title)) },
@@ -665,17 +807,8 @@ private fun RemoteShortcutEditorDialog(
                     },
                     label = { Text(stringResource(R.string.quick_trigger)) },
                     supportingText = {
-                        val showError = editor.trigger.isNotEmpty() && !triggerValid
-                        Text(
-                            text = stringResource(
-                                if (showError) R.string.quick_trigger_error else R.string.quick_trigger_hint
-                            ),
-                            color = if (showError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
+                        // 覆盖条目的匹配方式由 QuickTrigger 按长度给出，用户不选，因此这里只给非法原因与可达性提示
+                        QuickTriggerGuidance(editor.trigger)
                     },
                     isError = editor.trigger.isNotEmpty() && !triggerValid,
                     singleLine = true,
@@ -715,7 +848,7 @@ private fun CloudShortcutEditorDialog(
     onConfirm: () -> Unit,
 ) {
     // 云端 keyword 同步回本地后就是快捷字母，校验与本地规则弹窗保持一致
-    val keywordValid = isValidShortcutTrigger(editor.keyword)
+    val keywordValid = QuickTrigger.isValidShortcutTrigger(editor.keyword)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.quick_add_cloud_rule)) },
@@ -731,17 +864,8 @@ private fun CloudShortcutEditorDialog(
                     },
                     label = { Text(stringResource(R.string.quick_trigger)) },
                     supportingText = {
-                        val showError = editor.keyword.isNotEmpty() && !keywordValid
-                        Text(
-                            text = stringResource(
-                                if (showError) R.string.quick_trigger_error else R.string.quick_trigger_hint
-                            ),
-                            color = if (showError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
+                        // 云端简写同样是快捷字母：非法原因与 >4 位可达性口径与本地一致（C1-7）
+                        QuickTriggerGuidance(editor.keyword)
                     },
                     isError = editor.keyword.isNotEmpty() && !keywordValid,
                     singleLine = true,
