@@ -577,8 +577,9 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 | 关注点 | 位置 / 规则 |
 | --- | --- |
 | 数据 | `QuickEntry.trigger` 就是快捷字母；用户规则文件 `filesDir/quick_phrases_user.txt` 第一列 |
-| 录入 | 设置页「快捷短语」新增 / 编辑弹窗（本地规则与云端简写两处同一套校验）：只保留小写字母，2–4 位 |
-| 为什么限 4 位 | 五笔态组合缓冲上限 `MAX_CODE_LENGTH = 4`，第 5 个字母会先把当前首选上屏再重新起码，更长的简写永远打不全 |
+| 录入 | 设置页「快捷短语」新增 / 编辑弹窗（本地规则、云端简写、覆盖快捷字母三处同一套校验）：只保留小写字母，2–12 位（校验单一来源 `QuickTrigger.isValidShortcutTrigger`，ADR-0002 C1-1 / C1-2） |
+| 为什么限 **12** 位 | 拼音态组合串上限 `MAX_PINYIN_LENGTH = 12`，超过就永远敲不完整条（与 `check_quick_trigger.py` 的规则表判死同源，两边都从 `QuickTrigger.MIN/MAX_TRIGGER_LENGTH` 取值） |
+| 为什么 **>4 位要提示** | 五笔态组合缓冲上限 `MAX_CODE_LENGTH = 4`，第 5 个字母会先把当前首选上屏再重新起码，>4 位的简写在五笔态敲不全；编辑器因此给非阻断提示「走短语面板点选，或切拼音态敲全」（C1-7），不禁止录入 |
 | 排序 | `CandidateRanking`：精确码优先 → `LookupKind.order`（应用 0 < 短语 1 < 词库 2 …）；`QuickPhraseEngine.lookup` 保证**精确命中不受扫描上限截断**，规则表再大也排第一 |
 | 生效时机 | 保存即 `AppContainer.invalidateEngine()`，输入法无需重启 |
 | 可见性 | 输入法内「短语」面板每行右侧以角标显示快捷字母，用户不必回设置页查 |
@@ -602,20 +603,23 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 数据落点与识别规则：
 
 - 给远端规则设置快捷字母时**不改远端文件**，而是往用户文件追加一条覆盖条目：
-  `trigger = 快捷字母`、`label / content / kind` 复制远端规则、`mode = prefix`、
+  `trigger = 快捷字母`、`label / content / kind` 复制远端规则、
+  `mode` 按 `QuickTrigger.overrideMode(快捷字母)`：≤4 位 `PREFIX`、>4 位 `EXACT`（ADR-0002 C1-6）、
   `weight = 远端 weight + 1000`（`QuickPhrasesViewModel.REMOTE_OVERRIDE_WEIGHT_BONUS`）。
-- 用户文件里 `label + content` 与某条远端规则相同的条目，即视为该规则的覆盖条目
-  （`QuickOverride.matches`）；设置页把它折叠到远端卡片上显示「已覆盖为 xxx」，
-  不再单独显示成一条用户规则。普通用户规则仍显示来源「用户」。
-- 远端条目先按原文件展示；覆盖后卡片上的快捷字母、匹配方式切换为覆盖条目的值，
-  原本的 `label / content / 权重` 保持远端口径。
+- 用户文件里**归一化 trigger 相同**的条目，即视为该远端规则的覆盖条目（`QuickOverride.matches`
+  只看 trigger，不再看 `label + content`，ADR-0002 C2-2）；正文以本地为准，同一个 trigger
+  在设置页只出一张卡片，卡片来源标「远端 · 已覆盖」（C2-3）。普通用户规则仍显示来源「用户」。
+- 远端条目先按原文件展示；覆盖后卡片上的**快捷字母与匹配方式**取覆盖条目的值，
+  **正文取本地条目**（本地为准），权重仍为远端 weight + 加成。
 
 排序为什么能胜出：
 
-- `CandidateRanking` 的顺序是「精确码 → `LookupKind.order` → weight 降序 → display」；
-  覆盖条目是用户选择的完整快捷字母，输入完整字母时命中精确码，权重又比原远端高 1000。
-- `CompositeEngine` 先把所有引擎的候选合并、全局排序，再按 `display` 去重；覆盖条目排得更前，
-  先入者胜，原远端条目被去重。因此**不需要**调整 `QuickLocator.buildComposite` 的引擎顺序。
+- 正确性来自**输入侧去重**：`QuickOwnership.dedupe` 在候选池里按归一化 trigger 去重，
+  优先级 **用户 > 远端 > 内置**（ADR-0002 C2-4，`QuickLocator.buildQuickEngines` / `loadAll` 同一口径），
+  同一 trigger 只有一条候选进排序。
+- `CandidateRanking` 的顺序仍是「精确码 → `LookupKind.order` → weight 降序 → display」；
+  `weight + 1000` 的加成只影响同档之间的相对顺序，**不再是覆盖正确性的保证**
+  ——旧口径靠它 + `display` 去重压住原远端条目，正文一改就分裂成两张卡片、两条候选。
 
 恢复默认：
 
@@ -625,9 +629,30 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 
 同步边界：
 
-- 覆盖条目是本地别名，`SyncRepository.pushLocalRules` 会读取远端文件并跳过
-  `label + content` 能匹配上的用户条目（`QuickOverride.matchesAny`），避免在 csBaby 上
+- 覆盖条目是本地别名，`SyncRepository.pushLocalRules` 会读取远端文件并按 **归一化 trigger**
+  跳过覆盖条目（`QuickOverride.matchesAny`，C2-2 / C3-10），避免在 csBaby 上
   生成同内容的第二条远端规则。
+
+回写安全线（ADR-0002 C3，P0）：
+
+- **`filesDir/quick_phrases_remote_map.txt` 是远端规则的唯一同步身份。** 没有**有效**映射记录时，
+  同 keyword 的远端规则正文与本地不一致 → 判为**冲突**，不推送、不补映射、不计 `applied`
+  （`LocalRuleSyncPlan.decide`，C3-1）；正文一致才「只补映射」（C3-2）。
+  有映射且本地指纹变化才允许按 id 覆盖（C3-4，用户改的是自己拥有的规则）。
+- **映射是一条会失效的凭证，不是永久产权（C3-5′）**：远端不再返回映射里那个 id 时，这条映射视同无映射，
+  重新按 C3-1 / C3-2 / C3-3 分类。**同码被占且正文不一致时不新建重复规则**，判冲突交给用户处置
+  —— 弹窗两个动作，或在编辑器里把触发词改成别的码（改完就成了「无人占用」，下一轮自然新建）。
+  在云端留两条同 `keyword` 的规则，设备表达不了：本地主键是归一化 trigger，同码只留一条，
+  命中哪条取决于服务端返回顺序。判为冲突的失效映射同时从映射表清除，表里不留死凭证。
+- **参与身份判定的远端集合 = 未软删的条目（C3-11）**：`remoteById` / `remoteByKeyword` 都由它构建，
+  软删条目既不占码也不算所有权，orphan 清理对软删 id 只清映射、不再推 delete。
+- 冲突条数进 `RuleSyncReport.conflicts`，同步文案用独立的 `quick_synced_conflict` /
+  `sync_upload_conflict`（**不复用**语义为「后端不支持修改 / 删除」的 `*_partial`，C3-3），
+  界面报「N 条与云端同码冲突，本轮未上传」而不是报成功。
+- 冲突清单落盘 `filesDir/quick_phrases_conflicts.txt`（`trigger \t remoteId \t remoteFingerprint \t detectedAt`，C3-9），
+  跨多次同步可追踪；卡片上两个方向都由用户显式选择：「以本地为准并更新云端」（C3-7 唯一覆盖入口，
+  推后复验才更新映射）/「采用云端正文」（C2-6 不自动改写任何一侧文件，C2-7 收藏随迁移）。
+- 上传请求不再硬编码 `enabled = true`（C3-8）：本地没有 enabled 语义，云端已停用的规则不会被每次同步悄悄打开。
 
 ### 12.6 内置 5 位触发码：`dtwsl` → 泡池须知（2026-11-10 追加）
 
@@ -657,12 +682,17 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 - **拼音态（默认态）**：组合串上限 `MAX_PINYIN_LENGTH = 12`，`d t w s l` 能完整累积，
   第 5 个字母落下时精确命中，候选首位即「泡池须知」。**验收走这条路径。**
 - **五笔态**：组合缓冲区上限 `MAX_CODE_LENGTH = 4`，第 5 个字母到来前会先把当前首选上屏，
-  所以 `dtwsl` 在五笔态永远打不全；且 `AppContainer.loadQuickPhrases()` 在五笔态
-  `includeLocal = false`，内置规则整体不挂载。要让五笔态也支持，必须改 `MAX_CODE_LENGTH`
-  （牵动五笔码表「定长 4 位」的假设），不在本次范围。
+  所以 `dtwsl` 在五笔态**敲不全**——这是缓冲区限制，与规则挂载无关：
+  `IspeechImeService.loadQuickPhrases()` 的 `includeLocal` / `includeRemote` 只取设置开关，
+  输入方式不参与计算（C4-1，候选链路两态同挂；面板挂载五笔态的硬编码已由 `07214d6` 删除）。
+  五笔态的可达路径 = 短语面板筛选点选 / 切拼音态敲全（C4-3）。要让五笔态也敲得全，
+  必须改 `MAX_CODE_LENGTH`（牵动五笔码表「定长 4 位」的假设），不在本次范围。
 
-用户自己的「快捷字母」仍限 2–4 位（`QuickPhrasesScreen.isValidShortcutTrigger`）：
-那是为了让用户在任意输入态都能敲完，与内置码这条 5 位的取舍不冲突。
+用户自己的「快捷字母」**统一为 2–12 位**（`QuickTrigger.isValidShortcutTrigger`，与内置码同源）：
+这条与内置 `dtwsl` 的 5 位取舍**是冲突的**——旧口径「限 4 位」会把 5 位以上的内置码和自己的
+编辑器规则说成两套话。新口径的理由是 C1-6：>4 位的覆盖条目匹配方式取 `EXACT`（不是 `PREFIX`），
+因此在五笔态不会因为敲了前 4 位而误弹长文；长度上限只受拼音态组合串 12 位约束，
+>4 位时的五笔态可达性由编辑器提示（C1-7）与面板点选（C4-3）承担。
 
 #### 幂等写入（有则更新、无则新增）
 

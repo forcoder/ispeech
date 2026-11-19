@@ -21,7 +21,9 @@
     C. 端到端候选：敲 `ly` / `hxww` / 长码前 4 位都能命中，1 位码不污染其它输入；
     D. 落盘回读：224 条内容经 `QuickPhraseCodec` 转义 / 反转义后逐字相等；
     E. 源码接线：解码 / 解析 / ViewModel / 屏幕入口 / 中英文案都在；
-    F. 导入不破坏既有约束：手动录入仍是 2–4 位小写，`QuickPhraseCodec` 仍只转义 `\\r \\n \\t`。
+    F. 导入不破坏既有约束：手动录入口径与 QuickTrigger 同源（2–12 位小写，单一校验函数），
+       导入路径不放宽读取侧（不截断、不按长度校验，ADR-0002 C1-5）；`QuickPhraseCodec`
+       仍只转义 `\\r \\n \\t`。
 
 用法：``python3 tools/verify/check_phrase_csv_import.py [csv路径]``
       默认读 ``tools/verify/fixtures/general_phrases.csv``（真实导出文件的基线，随仓库提交）；
@@ -40,6 +42,8 @@ LEGACY_CSV = ROOT / "通用短语.csv"
 IMPORTER = ROOT / "app/src/main/java/com/ispeech/data/PhraseCsvImport.kt"
 QUICK_VM = ROOT / "app/src/main/java/com/ispeech/settings/quick/QuickPhrasesViewModel.kt"
 QUICK_SCREEN = ROOT / "app/src/main/java/com/ispeech/settings/QuickPhrasesScreen.kt"
+QUICK_TRIGGER = ROOT / "app/src/main/java/com/ispeech/engine/QuickTrigger.kt"
+QUICK_ENTRY = ROOT / "app/src/main/java/com/ispeech/engine/QuickEntry.kt"
 QUICK_TEST = ROOT / "app/src/test/java/com/ispeech/data/PhraseCsvImportTest.kt"
 STRINGS_ZH = ROOT / "app/src/main/res/values/strings.xml"
 STRINGS_EN = ROOT / "app/src/main/res/values-en/strings.xml"
@@ -74,6 +78,13 @@ _warned = 0
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 def ok(msg: str) -> None:
@@ -633,18 +644,65 @@ def check_source_wiring() -> None:
           f"文案：引用了未定义的键 {sorted(used - zh_keys)}")
 
 
+def quick_trigger_limits() -> tuple[int, int]:
+    """长度判定值只从 QuickTrigger.kt 取（ADR-0002 §7.3）：脚本侧不抄第二份常量。
+
+    读不到就 fail —— 本脚本与 check_quick_trigger.py 一旦各说一套，
+    「编辑器放宽到 12 位、导入校验仍按 4 位判死」这类分裂会重新出现。
+    """
+    text = read(QUICK_TRIGGER) if QUICK_TRIGGER.exists() else ""
+    found = []
+    for name in ("MIN_TRIGGER_LENGTH", "MAX_TRIGGER_LENGTH"):
+        match = re.search(rf"{name}\s*=\s*(\d+)", text)
+        found.append(int(match.group(1)) if match else -1)
+    if -1 in found:
+        fail(f"{rel(QUICK_TRIGGER)} 未提供 MIN/MAX_TRIGGER_LENGTH 常量（读得 {found}）")
+    return found[0], found[1]
+
+
 def check_existing_contract_unchanged() -> None:
-    """导入不能放宽手动录入的 2–4 位约束，也不能改落盘转义格式。"""
+    """导入路径不放宽**读取侧**（不截断、不校验长度，C1-5），手动录入口径与 QuickTrigger 同源。"""
     screen = read(QUICK_SCREEN)
+    lo, hi = quick_trigger_limits()
+    # ① 设置页不再写死旧的 2..4 区间（C1-2：校验只剩 QuickTrigger 一个实现）
     check(
-        "internal fun isValidShortcutTrigger(trigger: String): Boolean" in screen
-        and "trigger.length in 2..4" in screen,
-        "回归：手动录入仍是 2–4 位小写字母（导入路径独立，不放宽 UI 校验）",
-        "回归：手动录入的快捷字母校验被改动",
+        "2..4" not in screen,
+        "QuickPhrasesScreen 内不再出现 `2..4` 字面量（快捷字母长度不各抄一份）",
+        "QuickPhrasesScreen 仍写死 2..4，编辑器口径与 QuickTrigger 分裂",
     )
-    entry = read(ROOT / "app/src/main/java/com/ispeech/engine/QuickEntry.kt")
-    check("fun matchesAny(" in entry, "回归：QuickOverride 覆盖判定未被改动",
-          "回归：QuickOverride 被改动")
+    # ② 校验函数定义处 == 1，且就住在 QuickTrigger.kt
+    defs = {}
+    for path in sorted((ROOT / "app/src/main/java").rglob("*.kt")):
+        n = path.read_text(encoding="utf-8").count("fun isValidShortcutTrigger(")
+        if n:
+            defs[rel(path)] = n
+    trigger_text = read(QUICK_TRIGGER) if QUICK_TRIGGER.exists() else ""
+    check(
+        sum(defs.values()) == 1 and "QuickTrigger.kt" in str(defs)
+        and f"MIN_TRIGGER_LENGTH = {lo}" in trigger_text and f"MAX_TRIGGER_LENGTH = {hi}" in trigger_text,
+        f"手动录入校验定义处 == 1（QuickTrigger），口径 {lo}–{hi} 位小写字母（导入路径独立，不放宽 UI 校验）",
+        f"校验函数被复制或多处定义：{defs}；或长度常量不在 QuickTrigger.kt",
+    )
+    # 读取侧契约（C1-5）：解析与匹配从不按长度筛条目，编辑器校验器不得被读取侧调用
+    vm_text = read(QUICK_VM)
+    read_side = " ".join(
+        read(path)
+        for path in (ROOT / "app/src/main/java/com/ispeech/engine/QuickPhraseEngine.kt",
+                     ROOT / "app/src/main/java/com/ispeech/engine/QuickLocator.kt")
+    )
+    codec_parse = vm_text.split("fun parse(text: String)", 1)[1][:1500] if "fun parse(text: String)" in vm_text else ""
+    check(
+        "QuickPhraseCodec.parse(" in vm_text and codec_parse != ""
+        and not any(token in read_side + codec_parse for token in (
+            "isValidShortcutTrigger", "MIN_TRIGGER_LENGTH", "MAX_TRIGGER_LENGTH", "trigger.length",
+        )),
+        "读取侧（QuickPhraseCodec.parse / QuickPhraseEngine / QuickLocator）不调用编辑器校验器、不按长度判死（C1-5）",
+        "读取侧引用了快捷字母长度校验，导入的超 4 位历史条目会被静默丢弃",
+    )
+    entry = read(QUICK_ENTRY)
+    check("fun matchesAny(" in entry and "QuickTrigger.normalize" in entry,
+          "QuickOverride 覆盖判定按归一化 trigger（C2-2：判定基准已换，matchesAny 仍在用）",
+          "QuickOverride 覆盖判定缺失或没走归一化 trigger，同码条目会被当新规则推上云端")
     user_dict = read(ROOT / "app/src/main/java/com/ispeech/data/UserDictStore.kt")
     check(
         "internal fun unescapeLineText(text: String)" in user_dict and "'n' ->" in user_dict,

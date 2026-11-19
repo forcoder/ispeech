@@ -1,6 +1,7 @@
 package com.ispeech.data
 
 import android.content.Context
+import android.util.Log
 import com.ispeech.data.remote.RuleUpsertRequest
 import com.ispeech.data.remote.SyncPushRequest
 import com.ispeech.data.remote.SyncPushRule
@@ -10,12 +11,18 @@ import com.ispeech.engine.QuickLocator
 import com.ispeech.engine.QuickMatchMode
 import com.ispeech.engine.QuickOverride
 import com.ispeech.engine.QuickPhraseEngine
+import com.ispeech.engine.QuickTrigger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
 /** csBaby 同步仓库：拉取远端关键词规则并落盘为本地短语文件。 */
 object SyncRepository {
+
+    private const val TAG = "SyncRepository"
+
+    /** 日志里指纹只保留前缀：足够定位单次同步，又不把可逆哈希整段写进日志。 */
+    private const val FINGERPRINT_LOG_PREFIX = 12
 
     /** 远端规则文件名（与内置 quick_phrases.txt 同格式）。 */
     const val REMOTE_RULES_FILE_NAME = "quick_phrases_remote.txt"
@@ -33,6 +40,8 @@ object SyncRepository {
         val updatedApplied: Int = 0,
         val deleted: Int = 0,
         val deletedApplied: Int = 0,
+        /** 同码冲突条数：本轮没有上传，等用户在同步页选择（ADR-0002 C3-1 / C3-3）。 */
+        val conflicts: Int = 0,
     ) {
         /** 本次尝试推送的条数（新增 + 修改 + 删除）。 */
         val pushed: Int get() = created + updated + deleted
@@ -74,6 +83,10 @@ object SyncRepository {
      * （rules 带 id 表示按 id 覆盖，deletedIds 表示删除）。后端对单条规则没有 PUT / DELETE
      * 路由，且 push 的生效范围未经确认，因此推送后**重新拉取远端列表复核**：只有远端确实变了
      * 才计入 applied 并更新映射表，未生效的部分如实上报为 pending，不做「假装成功」。
+     *
+     * 写安全线（ADR-0002 C3）：哪些条目进新增、哪些进修改、哪些只补映射、哪些算冲突，
+     * 全部由 [LocalRuleSyncPlan.decide] 决定；没有**有效**映射记录的同码远端规则一律记冲突，
+     * 不会被本地正文覆盖，也不会另建一条同码重复规则（C3-5′）。
      */
     suspend fun pushLocalRules(context: Context): RuleSyncReport = withContext(Dispatchers.IO) {
         var auth = CsBabyAuthStore.load(context)
@@ -86,16 +99,60 @@ object SyncRepository {
         }
 
         // 快捷字母覆盖只在本地生效（见 QuickOverride）：跳过它们，避免云端出现同内容的重复规则
+        // （C3-10）。读取侧从不校验长度（C1-5），这里同样不按校验器裁剪上传集合。
         val remoteEntries = readRemoteEntries(context)
         val locals = readLocalUserEntries(context)
             .filterNot { entry -> QuickOverride.matchesAny(entry, remoteEntries) }
+
         val remote = client.listRules(auth)
         val mapFile = File(context.filesDir, REMOTE_RULE_MAP_FILE_NAME)
         val known = RemoteRuleMap.load(mapFile)
         val next = LinkedHashMap(known)
 
-        val remoteById = remote.associateBy { it.id }
-        val remoteByKeyword = remote.associateBy { it.keyword }
+        // C3-11：参与身份判定的只有未软删的远端条目。软删条目既不占码，也不算所有权 ——
+        // 否则映射指向软删 id 时会按软删 id 推送，复核永远不通过，条目永久卡在「未同步」。
+        val visible = visibleRules(remote)
+        val remoteById = visible.associateBy { it.id }
+        val remoteByKeyword = visible.associateBy { QuickTrigger.normalize(it.keyword) }
+
+        val decisions = LocalRuleSyncPlan.decide(
+            locals = locals,
+            known = known,
+            remoteById = remoteById,
+            remoteByKeyword = remoteByKeyword,
+            localFingerprintOf = { RemoteRuleMap.fingerprint(it.remoteFields()) },
+            remoteFingerprintOf = { LocalRuleSyncPlan.fingerprintOf(it.replyTemplate) },
+            remoteMatches = { rule, entry -> isRemoteRuleMatching(rule, entry) },
+        )
+
+        // C3-9：冲突先写盘、再动网络。写盘失败就整轮不上传（不降级成「盲推」），
+        // 否则用户看到的「已同步」会把没解决的冲突一起盖过去。
+        val conflictFile = File(context.filesDir, QuickConflictStore.FILE_NAME)
+        val conflicts = runCatching {
+            QuickConflictStore.save(
+                conflictFile,
+                QuickConflictStore.merge(
+                    existing = QuickConflictStore.load(conflictFile),
+                    detected = decisions.conflicts,
+                    evaluatedTriggers = locals.map { QuickTrigger.normalize(it.trigger) }.toSet(),
+                ),
+            )
+            decisions.conflicts
+        }.getOrElse { throwable ->
+            Log.w(TAG, "quick_sync_conflict_write_failed reason=${throwable.javaClass.simpleName}")
+            // 不降级：冲突一条都没解决就整轮不上传，条数如实上报（C3-3）
+            return@withContext RuleSyncReport(conflicts = decisions.conflicts.size)
+        }
+        conflicts.forEach { conflict ->
+            // C3-3 留痕：只记触发词、远端 id、正文长度与指纹前缀，不落任何正文（ADR-0002 §10）
+            Log.w(
+                TAG,
+                "quick_sync_conflict trigger=${conflict.trigger} remoteId=${conflict.remoteId} " +
+                    "localLen=${conflict.localContent.length} remoteLen=${conflict.remoteContent.length} " +
+                    "remoteFp=${conflict.remoteFingerprint.take(FINGERPRINT_LOG_PREFIX)}",
+            )
+        }
+
         val updates = ArrayList<SyncPushRule>()
         // ruleId / 触发词 / 本地条目：推送后逐条复核远端是否真的改了
         val updateTargets = ArrayList<Triple<String, String, QuickEntry>>()
@@ -104,31 +161,26 @@ object SyncRepository {
         val deleteTargets = ArrayList<Pair<String, String>>()
         var created = 0
 
-        for (entry in locals) {
-            if (entry.trigger.isBlank()) continue
+        decisions.creates.forEach { entry ->
+            val trigger = QuickTrigger.normalize(entry.trigger)
             val fingerprint = RemoteRuleMap.fingerprint(entry.remoteFields())
-            val ref = known[entry.trigger]
-            // 映射表里没有该触发词时按触发词兜底匹配（换机恢复 / 旧版本上传 / 远端手工建的同名规则）
-            val target = ref?.let { remoteById[it.id] } ?: remoteByKeyword[entry.trigger]
-            when {
-                target == null -> {
-                    val rule = client.createRule(auth, entry.toRuleRequest())
-                    if (rule.id.isNotBlank()) next[entry.trigger] = RemoteRuleRef(rule.id, fingerprint)
-                    created++
-                }
-                // 指纹一致且远端内容一致：无需推送
-                ref != null && ref.fingerprint == fingerprint && target.matches(entry) -> Unit
-                // 远端内容本来就一致，只是本地缺映射：补上映射即可
-                ref == null && target.matches(entry) ->
-                    next[entry.trigger] = RemoteRuleRef(target.id, fingerprint)
-                else -> {
-                    updates.add(entry.toPushRule(target.id))
-                    updateTargets.add(Triple(target.id, entry.trigger, entry))
-                }
-            }
+            val rule = client.createRule(auth, entry.toRuleRequest())
+            if (rule.id.isNotBlank()) next[trigger] = RemoteRuleRef(rule.id, fingerprint)
+            created++
+        }
+        decisions.bindings.forEach { binding ->
+            next[binding.trigger] = RemoteRuleRef(binding.remoteId, binding.fingerprint)
+        }
+        // C3-5′：判冲突的失效映射既不 create 也不 binding，映射表里那条死凭证没人改写。
+        // orphan 清理循环又被 `trigger in localTriggers` 挡掉，不清就会永久残留 —— 表里不留死凭证。
+        decisions.staleMappings.forEach { trigger -> next.remove(trigger) }
+        decisions.updates.forEach { update ->
+            val trigger = QuickTrigger.normalize(update.entry.trigger)
+            updates.add(update.entry.toPushRule(update.remoteId))
+            updateTargets.add(Triple(update.remoteId, trigger, update.entry))
         }
 
-        val localTriggers = locals.map { it.trigger }.toHashSet()
+        val localTriggers = locals.map { QuickTrigger.normalize(it.trigger) }.toHashSet()
         for ((trigger, ref) in known) {
             if (trigger in localTriggers) continue
             if (remoteById.containsKey(ref.id)) {
@@ -152,6 +204,14 @@ object SyncRepository {
                 if (rule != null && !rule.deleted && rule.matches(entry)) {
                     updatedApplied++
                     next[trigger] = RemoteRuleRef(id, RemoteRuleMap.fingerprint(entry.remoteFields()))
+                } else if (rule != null) {
+                    // 推了但远端没变：保留映射（下次仍按「修改」重试），不删映射，
+                    // 否则下一轮会把它当新规则 create，云端出现同码重复。
+                    Log.w(
+                        TAG,
+                        "quick_sync_update_not_applied trigger=$trigger remoteId=$id " +
+                            "remoteFp=${LocalRuleSyncPlan.fingerprintOf(rule.replyTemplate).take(FINGERPRINT_LOG_PREFIX)}",
+                    )
                 }
             }
             for ((id, trigger) in deleteTargets) {
@@ -170,8 +230,82 @@ object SyncRepository {
             updatedApplied = updatedApplied,
             deleted = deletes.size,
             deletedApplied = deletedApplied,
+            conflicts = conflicts.size,
         )
     }
+
+    /**
+     * 冲突「以本地为准并更新云端」（ADR-0002 C3-7）：只推这一条，推后复验，
+     * 生效才从冲突表移出并更新映射；未生效保持原状，下次同步会再次列出。
+     */
+    suspend fun resolveConflictWithLocal(context: Context, trigger: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val auth = CsBabyAuthStore.load(context) ?: return@withContext false
+            val normalized = QuickTrigger.normalize(trigger)
+            if (!QuickTrigger.isValidShortcutTrigger(normalized)) return@withContext false
+            val entry = readLocalUserEntries(context)
+                .firstOrNull { QuickTrigger.normalize(it.trigger) == normalized }
+                ?: return@withContext false
+
+            val client = CsBabyClient(context)
+            val mapFile = File(context.filesDir, REMOTE_RULE_MAP_FILE_NAME)
+            val known = RemoteRuleMap.load(mapFile)
+            val remote = runCatching { client.listRules(auth) }.getOrNull().orEmpty()
+            // 身份口径与 decide() 一致（C3-5′ / C3-11）：映射 id 必须是远端仍返回的未软删条目，
+            // 空 id 不是合法目标 —— 否则远端返回过一条 id 为空的规则就会被当成覆盖对象。
+            val mappedId = known[normalized]?.id?.takeIf { it.isNotBlank() }
+            val target = mappedId?.let { remoteById(remote)[it] }
+                ?: remoteByKeyword(remote)[normalized]
+                ?: return@withContext false
+
+            val pushed = runCatching {
+                client.pushSync(auth, SyncPushRequest(listOf(entry.toPushRule(target.id)), emptyList()))
+            }.isSuccess
+            val after = runCatching { client.listRules(auth) }.getOrElse { remote }
+            val applied = after.find { it.id == target.id }?.let { !it.deleted && it.matches(entry) } == true
+            if (!pushed || !applied) return@withContext false
+
+            val next = LinkedHashMap(known)
+            next[normalized] = RemoteRuleRef(target.id, RemoteRuleMap.fingerprint(entry.remoteFields()))
+            RemoteRuleMap.save(mapFile, next)
+            val conflictFile = File(context.filesDir, QuickConflictStore.FILE_NAME)
+            runCatching {
+                val records = QuickConflictStore.load(conflictFile)
+                records.remove(normalized)
+                QuickConflictStore.save(conflictFile, records)
+            }
+            true
+        }
+
+    /** 冲突清单（离线读落盘记录 + 本地文件 + pull 产物），供同步页逐条对比正文。 */
+    internal suspend fun loadConflicts(context: Context): List<LocalRuleSyncPlan.Conflict> =
+        withContext(Dispatchers.IO) {
+            val idByTrigger = runCatching {
+                RemoteRuleMap.load(File(context.filesDir, REMOTE_RULE_MAP_FILE_NAME))
+            }.getOrDefault(LinkedHashMap())
+                .entries.associate { (trigger, ref) -> trigger to ref.id }
+            LocalRuleSyncPlan.conflictsFromFiles(
+                locals = readLocalUserEntries(context),
+                remoteEntries = readRemoteEntries(context),
+                // pull 产物不带远端 id，用触发词反查映射表；查不到留空串，由界面显示「未知」
+                remoteIdOf = { entry -> idByTrigger[QuickTrigger.normalize(entry.trigger)].orEmpty() },
+            )
+        }
+
+    /**
+     * 参与身份判定的远端集合（ADR-0002 C3-11）：`listRules` 返回中未软删的条目。
+     *
+     * 软删条目既不占码也不算所有权：让它进索引，一条被别的设备删掉的规则会被当成合法推送目标，
+     * 而推送后的复核要求 `!deleted`，于是那条本地条目永远停在「未同步」——用户没有任何出路。
+     */
+    private fun visibleRules(rules: List<RemoteKeywordRule>): List<RemoteKeywordRule> =
+        rules.filterNot { it.deleted }
+
+    private fun remoteById(rules: List<RemoteKeywordRule>): Map<String, RemoteKeywordRule> =
+        visibleRules(rules).associateBy { it.id }
+
+    private fun remoteByKeyword(rules: List<RemoteKeywordRule>): Map<String, RemoteKeywordRule> =
+        visibleRules(rules).associateBy { QuickTrigger.normalize(it.keyword) }
 
     /** 读取本地用户自定义规则（filesDir/quick_phrases_user.txt），失败返回空列表。 */
     private fun readLocalUserEntries(context: Context): List<QuickEntry> {
@@ -199,7 +333,8 @@ object SyncRepository {
         replyTemplate = content,
         matchType = remoteMatchType(mode),
         priority = weight,
-        enabled = true,
+        // ADR-0002 C3-8：不写 enabled。带上 true 会让云端被用户停用的规则每次同步都偷偷打开。
+        enabled = null,
     )
 
     /** 本地用户规则 → 推送请求（带 id 表示覆盖远端已有条目）。 */
@@ -209,7 +344,8 @@ object SyncRepository {
         replyTemplate = content,
         matchType = remoteMatchType(mode),
         priority = weight,
-        enabled = true,
+        // ADR-0002 C3-8：同上，push 也不带 enabled
+        enabled = null,
     )
 
     /** 条目在远端可见的字段（推送与内容指纹共用，保证「改了才推」与「推了才算」口径一致）。 */
@@ -240,20 +376,24 @@ object SyncRepository {
         else -> "CONTAINS"
     }
 
-    /** 远端规则是否与本条目在远端可见字段上完全一致（enabled / deleted 由调用方另行判断）。 */
+    /**
+     * 远端规则与本地条目在远端可见字段上是否一致（enabled / deleted 由调用方另行判断）。
+     *
+     * 决策与单测都走 [isRemoteRuleMatching]，避免两处各写一份比较口径（ADR-0002 C2-5）。
+     */
     private fun RemoteKeywordRule.matches(entry: QuickEntry): Boolean =
-        keyword == entry.trigger &&
+        QuickTrigger.normalize(keyword) == QuickTrigger.normalize(entry.trigger) &&
             escapeForFile(replyTemplate) == entry.content &&
             normalizeRemoteMatchType(matchType) == remoteMatchType(entry.mode) &&
             normalizedPriority() == entry.weight
 
+    /** 一致口径的唯一出口：本地条目能不能算「远端正文已经是我要的内容」。 */
+    internal fun isRemoteRuleMatching(rule: RemoteKeywordRule, entry: QuickEntry): Boolean =
+        rule.matches(entry)
+
     /** 远端 priority 为 0 / 负数时按默认权重比较，避免与后端默认值不一致时反复重推。 */
     private fun RemoteKeywordRule.normalizedPriority(): Int =
         if (priority > 0) priority else DEFAULT_PRIORITY
-
-    /** 换行 / 制表符转成字面量：与写入本地文件、CsBabyClient.toQuickEntry 的转义口径一致。 */
-    private fun escapeForFile(text: String): String =
-        text.replace("\r", "").replace("\n", "\\n").replace("\t", "\\t")
 
     /** 按 trigger\tlabel\tcontent\tmode\tweight\ta 格式写入，首行为 # 注释。 */
     private fun writeEntries(file: File, entries: List<QuickEntry>) {
@@ -278,9 +418,20 @@ object SyncRepository {
 internal class RemoteRuleRef(val id: String, val fingerprint: String)
 
 /**
+ * 换行 / 制表符转成字面量：与写入本地文件、CsBabyClient.toQuickEntry 的转义口径一致。
+ *
+ * 对已转义的文本幂等（不含真实 CR/LF/TAB），所以联网正文与落盘正文可以用同一个函数比较，
+ * 这就是 ADR-0002 C2-5 要求的「比较口径 = 落盘转义口径」。
+ */
+internal fun escapeForFile(text: String): String =
+    text.replace("\r", "").replace("\n", "\\n").replace("\t", "\\t")
+
+/**
  * 远端规则映射表（filesDir/quick_phrases_remote_map.txt）：`trigger \t id \t fingerprint`。
  *
  * 与 PhraseUsageStore 同风格：TAB 分隔、`#` 注释、转义复用 escapeLineText / unescapeLineText。
+ * 主键一律经 [QuickTrigger.normalize] 归一化（ADR-0002 C3-1 与附录 Q1）：大小写或首尾空格的差异
+ * 不允许变成两条映射记录，否则同一远端规则会被反复重推甚至重复新建。
  * 坏行 / 缺字段直接跳过：映射表损坏的代价只是下次同步重推一遍，不值得抛异常打断保存。
  */
 internal object RemoteRuleMap {
@@ -298,7 +449,7 @@ internal object RemoteRuleMap {
                 if (line.isEmpty() || line.startsWith("#")) return@forEach
                 val fields = line.split(SEPARATOR)
                 if (fields.size < FIELD_COUNT) return@forEach
-                val trigger = unescapeLineText(fields[0]).trim()
+                val trigger = QuickTrigger.normalize(unescapeLineText(fields[0]))
                 val id = unescapeLineText(fields[1]).trim()
                 if (trigger.isEmpty() || id.isEmpty()) return@forEach
                 out[trigger] = RemoteRuleRef(id, fields[2].trim())
