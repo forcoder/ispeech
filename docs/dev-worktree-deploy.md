@@ -91,10 +91,17 @@ tools/deploy/deploy.sh --merge-all --target auto  # 先 land-all 再部署
 
 1. 校验分支是 `main` 且工作区干净（不干净直接失败，提示去 worktree）；
 2. `--merge-all` 时先 `tools/dev/worktree.sh land-all`；
-3. 跑 `check_static / input_logic / t9 / stats / phrase_usage / pinyin / crosscut / quick_trigger`
-   （失败即停；`--skip-verify` 可跳过但会打印醒目的风险告警）；
+3. **先**跑第五条门禁 `check_dist_manifest.py`（`dist/SHA256SUMS` 与包字节一致且穷尽覆盖，
+   **不受 `--skip-verify` 管辖** —— 跳过它等于允许带一份会说谎的清单出包，失败即停并提示 `--regen`）；
+   再跑 `check_static / input_logic / t9 / stats / phrase_usage / pinyin / crosscut / quick_trigger`
+   八项（失败即停；这八项 `--skip-verify` 可跳过，会打印醒目的风险告警）；
 4. `export JAVA_HOME=/opt/homebrew/opt/openjdk@17` 后 `./gradlew assembleDebug | assembleRelease`；
 5. 复制到 `dist/ispeech-<debug|release>-<versionName>-<yyyyMMdd-HHmm>.apk`，打印路径、大小、sha256；
+   **随后跑 `check_dist_manifest.py --regen` 重写 `dist/SHA256SUMS` 并整份回读校验**（FAIL 即中止，
+   不会继续装机）。两点后果要知道：① 跑一次 `--release` 出包会改动工作区里的 `dist/SHA256SUMS`
+   （生成物，须随新包一起提交），否则下一次出包会卡在流程 1 的「工作区不干净」；② **默认（debug）产物
+   被 `.gitignore` 排除，不会入册**，脚本会打 `[warn] 本包未入 dist/SHA256SUMS …` 并给出自查方式，
+   清单只覆盖 `--release` 路径，口径见 ADR-0003 D2；
 6. 解析设备：`emulator` 取 `emulator-*`；`phone` 取非 emulator 序列号；模拟器没起时自动
    `emulator -avd ispeech_test -no-snapshot -no-audio -no-boot-anim`（可用 `ISPEECH_AVD` 覆盖）并等 `sys.boot_completed=1`；
    无设备时打印 `adb devices` 与接真机命令后失败退出；
@@ -110,7 +117,8 @@ tools/deploy/deploy.sh --merge-all --target auto  # 先 land-all 再部署
     防止 tap 失效时把首页那行当成关于页版本给出假 PASS；
 11. 全流程日志写 `dist/deploy-<ts>.log`。
 
-其他参数：`--release`、`--no-build`（复用 `app/build/outputs/apk/...` 现有产物）、`--skip-verify`。
+其他参数：`--release`、`--no-build`（复用 `app/build/outputs/apk/...` 现有产物）、`--skip-verify`
+（只跳过上面八项 `check_*`，**跳不过 `check_dist_manifest`**）。
 
 版本显示门禁也可单独跑（装机后自查、或验收时复现）：
 
@@ -154,6 +162,11 @@ adb -s <serial> install -r dist/ispeech-debug-v1.5-<旧时间戳>.apk   # 回装
 回滚代码（**不推荐** `reset --hard`）：在 main 上用 `git revert <land 提交>` 生成反向提交，
 再走一次 `deploy.sh` 出包；这样历史可追溯、不影响其它 worktree。
 
+第五条门禁（`dist/SHA256SUMS`）的回滚**分两种粒度**，别一律整包 revert：整包回滚会把清单退回
+「2 条 FAILED + 3 个包漏记」的故障面；只想让出包不中断时，摘掉 `deploy.sh` ③ 段那 7 行即可
+（`--regen`、清单、门禁工具、⑤ 归档回写全部保留）。触发条件、阈值、实测时长与演练读数见
+ADR-0003 `docs/adr/VOCA-400-dist-checksum-manifest.md` §5；发布顺序、判定阈值与通知对象见同文 §7。
+
 ## 8. 常见坑
 
 | 现象 | 原因 / 修法 |
@@ -169,3 +182,5 @@ adb -s <serial> install -r dist/ispeech-debug-v1.5-<旧时间戳>.apk   # 回装
 | 新任务分支缺少已 land 的改动 | 本地 main 领先 origin/main 时会以本地为基准；若仍异常，手动 `git rebase main` |
 | `deploy.sh` 拒绝执行 | 当前不是 main 或 main 有未提交改动——去 worktree 干活，别在 main 改 |
 | release 包装不上 | 未配置 `keystore/keystore.properties` 时 release 不签名，只能用 debug 装机 |
+| 出包卡在 `dist/SHA256SUMS 与包字节不一致 …（本项不可 --skip-verify）` | 清单与字节漂移，`--skip-verify` 跳不过它（设计如此，见 ADR-0003 §4）。跑 `python3 tools/verify/check_dist_manifest.py --regen` 后重出；FAIL 行写「未跟踪」且体积超 100 MB 的，是 runtime 从工作目录扫进来的外来残留——先 `mv` 出 `dist/` 再 `--regen`，别提交 |
+| ⑤ 打了 `[warn] 本包未入 dist/SHA256SUMS` | **不是故障**：默认（debug）产物名被 `.gitignore` 排除，按政策不入库。要清单能回答这一包，改用 `--release`；自查走本次日志的 `sha256=` + 设备侧 `dumpsys package`（口径见 ADR-0003 D2） |
