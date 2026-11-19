@@ -32,6 +32,7 @@ build-voca30/
 .multica/
 .pi/
 AGENTS.md
+.qoder/
 
 # 临时 worktree / 本地运行时
 .claude/worktrees/
@@ -42,6 +43,8 @@ dist/deploy-*.log
 dist/screenshots/
 dist/ispeech-debug-*.apk
 dist/app-debug.apk
+# 133 MB，超过 GitHub 单文件 100 MB 硬限制，推上去会被 pre-receive 拒（GH001）
+dist/ispeech-release-1.5-20261115-1004.apk
 
 # 短语数据导出
 通用短语.csv
