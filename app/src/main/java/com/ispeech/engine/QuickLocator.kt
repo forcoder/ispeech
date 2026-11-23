@@ -156,7 +156,9 @@ object QuickLocator {
 
         if (includeRemote) {
             openRemote(context)?.use { input ->
-                QuickPhraseEngine.fromText(input.readTextUtf8(), minTriggerLength = minTriggerLength)
+                // 云端文件按 fromRemoteText 解析：升级前落盘的 >4 位 CONTAINS / PREFIX 存量行
+                // 要在读盘侧就按 EXACT 生效，否则装了拉取侧修复的设备不点第二次同步就永远照旧（VOCA-423）
+                QuickPhraseEngine.fromRemoteText(input.readTextUtf8(), minTriggerLength = minTriggerLength)
                     ?.let { engines.add(it) }
             }
         }
@@ -207,10 +209,14 @@ object QuickLocator {
         if (input == null) return
         runCatching {
             input.use { stream ->
-                val engine = QuickPhraseEngine.fromText(
-                    stream.readTextUtf8(),
-                    minTriggerLength = minTriggerLength,
-                ) ?: return@use
+                val text = stream.readTextUtf8()
+                // 远端来源按 fromRemoteText 解析，与 buildQuickEngines 同一口径（VOCA-423）：
+                // 面板展示的匹配方式必须和打字时的实际行为一致
+                val engine = if (source == QuickSource.REMOTE) {
+                    QuickPhraseEngine.fromRemoteText(text, minTriggerLength = minTriggerLength)
+                } else {
+                    QuickPhraseEngine.fromText(text, minTriggerLength = minTriggerLength)
+                } ?: return@use
                 for (entry in engine.entries) {
                     out.add(entry.copy(source = source))
                 }
