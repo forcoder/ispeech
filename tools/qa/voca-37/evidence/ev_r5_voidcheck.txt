@@ -1,0 +1,11 @@
+FRAME	440/fs1.0	dpi=440	old_ink_rows=1400..1441(+origin 1352)	old_ink_cols=41..187	cols=132	claim=ink 1400..1441 (42px) top47/bot35
+NEW	440/fs1.0	ok=True	reason=-	chip_right=205	x0=206	cand_count=0	ing_rows_outside_chip_px=0
+VERDICT	440/fs1.0	VOID(量的=chip/退化态)	cand_count=0	need=4
+FRAME	440/fs1.15	dpi=440	old_ink_rows=1397..1445(+origin 1352)	old_ink_cols=41..207	cols=150	claim=ink 1397..1445 (49px) top44/bot31
+NEW	440/fs1.15	ok=True	reason=-	chip_right=225	x0=226	cand_count=0	ing_rows_outside_chip_px=0
+VERDICT	440/fs1.15	VOID(量的=chip/退化态)	cand_count=0	need=4
+FRAME	520/fs1.15	dpi=520	old_ink_rows=1185..1284(+origin 1172)	old_ink_cols=49..432	cols=295	claim=ink 1185..1284 (100px) top12/bot36
+NEW	520/fs1.15	ok=True	reason=-	chip_right=162	x0=163	cand_count=1	ing_rows_outside_chip_px=270
+VERDICT	520/fs1.15	VOID(量的=chip/退化态)	cand_count=1	need=4
+SUMMARY	frames=3	below_gate(cand<4)=3	ink_entirely_inside_chip=440/fs1.0/440/fs1.15	cand_counts=440/fs1.0:0,440/fs1.15:0,520/fs1.15:1
+CONCLUSION	旧 §3 Δ 与 §4 截字读数作废：没有一帧的可见候选达到 4 条，其中墨迹完全落在 chip 盒内的帧按新口径一条候选都没有

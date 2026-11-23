@@ -1,0 +1,2 @@
+FS	fs=1.0	frame=833	top=1507	ink_top=35	ink_bot=199	ink_h=165	first=22	last=53	peak=159	flat=0.33	host='搜索设置'
+FS	fs=1.15	frame=833	top=1507	ink_top=35	ink_bot=199	ink_h=165	first=22	last=53	peak=159	flat=0.33	host='搜索设置'

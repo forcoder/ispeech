@@ -1,0 +1,18 @@
+# paths2 · 被测=78343a4（PR #18 head）· 规格锚=0e4eeb0（PR #17 head）
+# cmd: python3 paths2.py /Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk
+# ts=2026-11-18T02:32:53+0800  serial=emulator-5554
+# note(入库注记，非当场 stdout)：编排脚本原样写进了未展开的字面量 ${QA_SERIAL:-emulator-5554}。本轮 QA_SERIAL 未设置，drive.py 取默认 emulator-5554；同机 emulator-5556 也装着同一个被测包，所以串口无法只从本文件反证 —— 记入报告 §9 风险（工装缺陷，run_r7_all/b/c/d.sh 已改为盖展开后的 serial + ro.product.model）。
+INSTALL	out=Performing Streamed Install
+Success	rc=0	ts=2026-11-18T02:32:54+0800
+IDENT	name=start	t=02:32:54	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:32:54+0800
+HOST	ok=True	field=(143, 565, 926, 720)	top=1352	h=988	ts=2026-11-18T02:33:09+0800
+Q4_state	top=1352	kb_h=988	band_ink=199	host='电话'	ts=2026-11-18T02:33:18+0800
+Q4_reset	eq4_shift=236	err1=5.8	commit_shift=-594	err2=10.8	base_vs_after=690	err3=10.9	host='电话'	kb_h=988	ts=2026-11-18T02:33:23+0800
+Q4_assoc_scroll	shift2=396	err=0.7	ink=211	ts=2026-11-18T02:33:25+0800
+Q3_numrow	bands=[((2062, 2188), 2125, [502, 767])]	ts=2026-11-18T02:33:27+0800
+Q3_t9	kb_h=988	rows=[(1531, 2), (1574, 4), (1679, 3), (1827, 12), (1975, 7), (2125, 2)]	ts=2026-11-18T02:33:28+0800
+Q3_t9_cand	kb_h=1885	top=455	ink=152	host='7'	ts=2026-11-18T02:33:34+0800
+Q3_t9_scroll	shift2=0	err=0.0	ts=2026-11-18T02:33:35+0800
+Q_DOUBLE	wall_secs=0.09	host='7++'	kb_h=988	ts=2026-11-18T02:33:40+0800
+IDENT	name=end	t=02:33:40	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	ts=2026-11-18T02:33:40+0800
+# rc=0

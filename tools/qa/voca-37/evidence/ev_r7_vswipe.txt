@@ -1,0 +1,18 @@
+# vswipe · 被测=78343a4（PR #18 head）· 规格锚=0e4eeb0（PR #17 head）
+# cmd: python3 vswipe.py /Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk
+# ts=2026-11-18T02:29:22+0800  serial=emulator-5554
+# note(入库注记，非当场 stdout)：编排脚本原样写进了未展开的字面量 ${QA_SERIAL:-emulator-5554}。本轮 QA_SERIAL 未设置，drive.py 取默认 emulator-5554；同机 emulator-5556 也装着同一个被测包，所以串口无法只从本文件反证 —— 记入报告 §9 风险（工装缺陷，run_r7_all/b/c/d.sh 已改为盖展开后的 serial + ro.product.model）。
+INSTALL	out=Performing Streamed Install
+Success	rc=0	ts=2026-11-18T02:29:23+0800
+IDENT	stage=start	apk=app-debug.apk	match=True	head=78343a4	ts=2026-11-18T02:29:23+0800
+GEOM	dens=440	frame=988	band_top=1352	band=[1353,1477]	family=commit	mode=inband	start_offset=38	x=300	dx=0	dur=120	ts=2026-11-18T02:29:41+0800
+VSWIPE	case=commit_dy20_dx0_dur120_x300_inband38	start_y=1391	end_y=1411	dy=20	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='时'	ime_gone=False	committed=True	reading=以宿主文本差判定	h_shift=-796	h_err=11.78	h_verdict=unverifiable(err>5.0)	ts=2026-11-18T02:29:57+0800
+VSWIPE	case=commit_dy40_dx0_dur120_x300_inband38	start_y=1391	end_y=1431	dy=40	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='是'	ime_gone=False	committed=True	reading=以宿主文本差判定	h_shift=-832	h_err=12.03	h_verdict=unverifiable(err>5.0)	ts=2026-11-18T02:30:13+0800
+VSWIPE	case=commit_dy60_dx0_dur120_x300_inband38	start_y=1391	end_y=1451	dy=60	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='时'	ime_gone=False	committed=True	reading=以宿主文本差判定	h_shift=-796	h_err=11.78	h_verdict=unverifiable(err>5.0)	ts=2026-11-18T02:30:30+0800
+VSWIPE	case=commit_dy80_dx0_dur120_x300_inband38	start_y=1391	end_y=1471	dy=80	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='是'	ime_gone=False	committed=True	reading=以宿主文本差判定	h_shift=-832	h_err=12.03	h_verdict=unverifiable(err>5.0)	ts=2026-11-18T02:30:46+0800
+VSWIPE	case=commit_dy110_dx0_dur120_x300_inband38	start_y=1391	end_y=1501	dy=110	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok	ts=2026-11-18T02:31:03+0800
+VSWIPE	case=commit_dy150_dx0_dur120_x300_inband38	start_y=1391	end_y=1541	dy=150	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok	ts=2026-11-18T02:31:20+0800
+VSWIPE	case=commit_dy200_dx0_dur120_x300_inband38	start_y=1391	end_y=1591	dy=200	dx=0	dur=120	x=300	band_top=1352	band_h=988	before='shi'	after='shi'	ime_gone=False	committed=False	reading=以宿主文本差判定	h_shift=0	h_err=0.0	h_verdict=ok	ts=2026-11-18T02:31:36+0800
+VSWIPE	case=control_tap_x300	start_y=1412	dy=0	dur=0	x=300	before='shi'	after='时'	committed=True	h_shift=-796	h_err=11.78	h_verdict=unverifiable(err>5.0)	ts=2026-11-18T02:31:56+0800
+IDENT	stage=end	match=True	head=78343a4	ts=2026-11-18T02:31:56+0800
+# rc=0

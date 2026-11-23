@@ -1,0 +1,9 @@
+# ev_r7_g1_g3.txt · G1/G3 资源表面在 78343a4 当场重dump
+# ts=2026-11-18T02:30:29+0800
+APK	path=/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/app/build/outputs/apk/debug/app-debug.apk	bytes=145804535
+DUMP	tool=/opt/homebrew/share/android-commandlinetools/build-tools/34.0.0/aapt2
+DUMP_RC	0
+G1	grep_candidate_page=0	verdict=无页码绘制路径
+G3	grep_pager_controls=0
+G3_HIT	    resource 0x7f0700aa drawable/ic_settings_gear
+G1_CODE	grep_page_text_in_src=0

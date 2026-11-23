@@ -1,0 +1,4 @@
+SOGOU_NOW	v=(1338, 2340, 1002)
+HOST	ok=False
+ISPEECH_520_115	top=1407	h=933	pp=39.87	host='搜索设置'
+ISPEECH_520_EMPTY	h=933	pp=39.87

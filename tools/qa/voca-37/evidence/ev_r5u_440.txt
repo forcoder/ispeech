@@ -1,0 +1,91 @@
+HOST	dens=440	fs=1.0	code=shijian	ok=True	round=1	taps=4	top=1388	h=952
+KEYMAP	dens=440	fs=1.0	bands=[(1643, 1769), (1773, 1899), (1904, 2028), (2065, 2184)]	runs=[10, 9, 7, 3]	del_xy=(990, 1966)	space_xy=(531, 2124)	o_x=915	z_x=225
+IDENT	dens=440	fs=1.0	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	h=952
+SCROLL	step=0	shift=198	err=0.0	cum=198
+SCROLL	step=1	shift=198	err=0.0	cum=396
+SCROLL	step=2	shift=198	err=0.0	cum=594
+SCROLL	step=3	shift=198	err=0.0	cum=792
+SCROLL	step=4	shift=198	err=0.0	cum=990
+SCROLL	step=5	shift=198	err=0.0	cum=1188
+SCROLL	step=6	shift=198	err=0.0	cum=1386
+SCROLL	step=7	shift=198	err=0.0	cum=1584
+ORIGIN	shift_back=0	err=0.0	tol=6
+POOL	code=shijian	dens=440	fs=1.0	pool=21	need=8	verified_steps=8	offsets_sampled=9	cum_px=1584
+GATES	dens=440	fs=1.0	code=shijian	readback_equals_code=True	chip_text_equals_code=True	chip_box={'left': 22, 'right': 187, 'top': 1416, 'bot': 1486, 'n': 9252}	scrollview_visible=True	ink_cols_past_chip=5	pool_at_least=21	cand_visible=5	need_cand=4	need_pool=8
+RESULT	fs=1.0	dens=440	code=shijian	empty=952	comp=952	delta=0	band_px=126	band_inner=104	top1=1388	x0=188	chip_right=187	cand_count=5	full_count=4	pool_lower_bound=21	badge_px=38	ime_before=com.ispeech.ime/com.ispeech.input.IspeechImeService	ime_after=com.ispeech.ime/com.ispeech.input.IspeechImeService
+INK	fs=1.0	dens=440	code=shijian	kind=empty	cand_count=0	x0=None	detail=no_chip_fill
+INK	fs=1.0	dens=440	code=shijian	kind=comp	cand_count=5	x0=188	x_end=1064	ink_top=1429	ink_bot=1476	inner_top=1399	inner_bot=1503	band_inner=104	top_pad=30	bot_pad=26	tangent_items=0
+CAND	code=shijian	dens=440	fs=1.0	idx=0	x0=188	x1=400	glyph=[222, 362]	glyph_w_dp=51.3	ink_top=1429	ink_bot=1476	ink_h=48	pitch=None	badge=[363, 400]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=440	fs=1.0	idx=1	x0=401	x1=580	glyph=[454, 542]	glyph_w_dp=32.4	ink_top=1430	ink_bot=1476	ink_h=47	pitch=180	badge=[543, 580]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=440	fs=1.0	idx=2	x0=581	x1=760	glyph=[632, 722]	glyph_w_dp=33.1	ink_top=1429	ink_bot=1476	ink_h=48	pitch=180	badge=[723, 760]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=440	fs=1.0	idx=3	x0=761	x1=940	glyph=[813, 902]	glyph_w_dp=32.7	ink_top=1429	ink_bot=1475	ink_h=47	pitch=180	badge=[903, 940]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=440	fs=1.0	idx=4	x0=941	x1=1062	glyph=[992, 1062]	glyph_w_dp=25.8	ink_top=1429	ink_bot=1476	ink_h=48	pitch=None	badge=None	badge_clipped=True	tangent_top=False	tangent_bot=False	fully_visible=False
+AC10	code=shijian	dens=440	fs=1.0	full_count=4	need=4	verdict=PASS	pitch={'n': 3, 'min': 180, 'med': 180, 'max': 180, 'med_dp': 65.5}	kb_h=952	empty_h=952	delta=0
+HOST	dens=440	fs=1.0	code=dashu	ok=True	round=1	taps=1	top=1388	h=952
+KEYMAP	dens=440	fs=1.0	bands=[(1643, 1769), (1773, 1899), (1904, 2028), (2065, 2184)]	runs=[10, 9, 7, 3]	del_xy=(990, 1966)	space_xy=(531, 2124)	o_x=915	z_x=225
+IDENT	dens=440	fs=1.0	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	h=952
+SCROLL	step=0	shift=198	err=0.0	cum=198
+SCROLL	step=1	shift=198	err=0.0	cum=396
+SCROLL	step=2	shift=198	err=0.0	cum=594
+SCROLL	step=3	shift=198	err=0.0	cum=792
+SCROLL	step=4	shift=198	err=0.0	cum=990
+SCROLL	step=5	shift=198	err=0.0	cum=1188
+SCROLL	step=6	shift=198	err=0.0	cum=1386
+SCROLL	step=7	shift=198	err=0.0	cum=1584
+ORIGIN	shift_back=0	err=0.0	tol=6
+POOL	code=dashu	dens=440	fs=1.0	pool=21	need=8	verified_steps=8	offsets_sampled=9	cum_px=1584
+GATES	dens=440	fs=1.0	code=dashu	readback_equals_code=True	chip_text_equals_code=True	chip_box={'left': 22, 'right': 177, 'top': 1416, 'bot': 1486, 'n': 8714}	scrollview_visible=True	ink_cols_past_chip=5	pool_at_least=21	cand_visible=5	need_cand=4	need_pool=8
+RESULT	fs=1.0	dens=440	code=dashu	empty=952	comp=952	delta=0	band_px=126	band_inner=104	top1=1388	x0=178	chip_right=177	cand_count=5	full_count=4	pool_lower_bound=21	badge_px=38	ime_before=com.ispeech.ime/com.ispeech.input.IspeechImeService	ime_after=com.ispeech.ime/com.ispeech.input.IspeechImeService
+INK	fs=1.0	dens=440	code=dashu	kind=empty	cand_count=0	x0=None	detail=no_chip_fill
+INK	fs=1.0	dens=440	code=dashu	kind=comp	cand_count=5	x0=178	x_end=1064	ink_top=1429	ink_bot=1476	inner_top=1399	inner_bot=1503	band_inner=104	top_pad=30	bot_pad=26	tangent_items=0
+CAND	code=dashu	dens=440	fs=1.0	idx=0	x0=178	x1=341	glyph=[214, 303]	glyph_w_dp=32.7	ink_top=1429	ink_bot=1476	ink_h=48	pitch=None	badge=[304, 341]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=440	fs=1.0	idx=1	x0=342	x1=619	glyph=[394, 581]	glyph_w_dp=68.4	ink_top=1429	ink_bot=1476	ink_h=48	pitch=278	badge=[582, 619]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=440	fs=1.0	idx=2	x0=620	x1=799	glyph=[672, 761]	glyph_w_dp=32.7	ink_top=1429	ink_bot=1476	ink_h=48	pitch=180	badge=[762, 799]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=440	fs=1.0	idx=3	x0=800	x1=979	glyph=[852, 941]	glyph_w_dp=32.7	ink_top=1429	ink_bot=1476	ink_h=48	pitch=180	badge=[942, 979]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=440	fs=1.0	idx=4	x0=980	x1=1062	glyph=[1032, 1062]	glyph_w_dp=11.3	ink_top=1429	ink_bot=1475	ink_h=47	pitch=None	badge=None	badge_clipped=True	tangent_top=False	tangent_bot=False	fully_visible=False
+AC10	code=dashu	dens=440	fs=1.0	full_count=4	need=4	verdict=PASS	pitch={'n': 3, 'min': 180, 'med': 180, 'max': 278, 'med_dp': 65.5}	kb_h=952	empty_h=952	delta=0
+HOST	dens=440	fs=1.15	code=shijian	ok=True	round=1	taps=1	top=1388	h=952
+KEYMAP	dens=440	fs=1.15	bands=[(1643, 1769), (1773, 1899), (1904, 2028), (2065, 2184)]	runs=[10, 9, 7, 3]	del_xy=(990, 1966)	space_xy=(531, 2124)	o_x=915	z_x=225
+IDENT	dens=440	fs=1.15	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	h=952
+SCROLL	step=0	shift=198	err=0.0	cum=198
+SCROLL	step=1	shift=198	err=0.0	cum=396
+SCROLL	step=2	shift=198	err=0.0	cum=594
+SCROLL	step=3	shift=198	err=0.0	cum=792
+SCROLL	step=4	shift=198	err=0.0	cum=990
+SCROLL	step=5	shift=198	err=0.0	cum=1188
+SCROLL	step=6	shift=198	err=0.0	cum=1386
+SCROLL	step=7	shift=198	err=0.0	cum=1584
+ORIGIN	shift_back=0	err=0.0	tol=6
+POOL	code=shijian	dens=440	fs=1.15	pool=17	need=8	verified_steps=8	offsets_sampled=9	cum_px=1584
+GATES	dens=440	fs=1.15	code=shijian	readback_equals_code=True	chip_text_equals_code=True	chip_box={'left': 22, 'right': 203, 'top': 1412, 'bot': 1490, 'n': 11192}	scrollview_visible=True	ink_cols_past_chip=5	pool_at_least=17	cand_visible=5	need_cand=4	need_pool=8
+RESULT	fs=1.15	dens=440	code=shijian	empty=952	comp=952	delta=0	band_px=126	band_inner=104	top1=1388	x0=204	chip_right=203	cand_count=5	full_count=4	pool_lower_bound=17	badge_px=38	ime_before=com.ispeech.ime/com.ispeech.input.IspeechImeService	ime_after=com.ispeech.ime/com.ispeech.input.IspeechImeService
+INK	fs=1.15	dens=440	code=shijian	kind=empty	cand_count=0	x0=None	detail=no_chip_fill
+INK	fs=1.15	dens=440	code=shijian	kind=comp	cand_count=5	x0=204	x_end=1064	ink_top=1431	ink_bot=1483	inner_top=1399	inner_bot=1503	band_inner=104	top_pad=32	bot_pad=19	tangent_items=0
+CAND	code=shijian	dens=440	fs=1.15	idx=0	x0=204	x1=431	glyph=[238, 393]	glyph_w_dp=56.7	ink_top=1431	ink_bot=1483	ink_h=53	pitch=None	badge=[394, 431]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=440	fs=1.15	idx=1	x0=432	x1=621	glyph=[485, 583]	glyph_w_dp=36.0	ink_top=1432	ink_bot=1483	ink_h=52	pitch=190	badge=[584, 621]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=440	fs=1.15	idx=2	x0=622	x1=811	glyph=[673, 773]	glyph_w_dp=36.7	ink_top=1431	ink_bot=1483	ink_h=53	pitch=190	badge=[774, 811]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=440	fs=1.15	idx=3	x0=812	x1=1001	glyph=[865, 963]	glyph_w_dp=36.0	ink_top=1431	ink_bot=1482	ink_h=52	pitch=190	badge=[964, 1001]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=shijian	dens=440	fs=1.15	idx=4	x0=1002	x1=1062	glyph=[1053, 1062]	glyph_w_dp=3.6	ink_top=1432	ink_bot=1482	ink_h=51	pitch=None	badge=None	badge_clipped=True	tangent_top=False	tangent_bot=False	fully_visible=False
+AC10	code=shijian	dens=440	fs=1.15	full_count=4	need=4	verdict=PASS	pitch={'n': 3, 'min': 190, 'med': 190, 'max': 190, 'med_dp': 69.1}	kb_h=952	empty_h=952	delta=0
+HOST	dens=440	fs=1.15	code=dashu	ok=True	round=1	taps=1	top=1388	h=952
+KEYMAP	dens=440	fs=1.15	bands=[(1643, 1769), (1773, 1899), (1904, 2028), (2065, 2184)]	runs=[10, 9, 7, 3]	del_xy=(990, 1966)	space_xy=(531, 2124)	o_x=915	z_x=225
+IDENT	dens=440	fs=1.15	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	h=952
+SCROLL	step=0	shift=198	err=0.0	cum=198
+SCROLL	step=1	shift=198	err=0.0	cum=396
+SCROLL	step=2	shift=198	err=0.08	cum=594
+SCROLL	step=3	shift=198	err=0.09	cum=792
+SCROLL	step=4	shift=198	err=0.06	cum=990
+SCROLL	step=5	shift=198	err=0.06	cum=1188
+SCROLL	step=6	shift=198	err=0.12	cum=1386
+SCROLL	step=7	shift=198	err=0.07	cum=1584
+ORIGIN	shift_back=0	err=0.0	tol=6
+POOL	code=dashu	dens=440	fs=1.15	pool=15	need=8	verified_steps=8	offsets_sampled=9	cum_px=1584
+GATES	dens=440	fs=1.15	code=dashu	readback_equals_code=True	chip_text_equals_code=True	chip_box={'left': 22, 'right': 192, 'top': 1412, 'bot': 1490, 'n': 10535}	scrollview_visible=True	ink_cols_past_chip=4	pool_at_least=15	cand_visible=4	need_cand=4	need_pool=8
+RESULT	fs=1.15	dens=440	code=dashu	empty=952	comp=952	delta=0	band_px=126	band_inner=104	top1=1388	x0=193	chip_right=192	cand_count=4	full_count=4	pool_lower_bound=15	badge_px=38	ime_before=com.ispeech.ime/com.ispeech.input.IspeechImeService	ime_after=com.ispeech.ime/com.ispeech.input.IspeechImeService
+INK	fs=1.15	dens=440	code=dashu	kind=empty	cand_count=0	x0=None	detail=no_chip_fill
+INK	fs=1.15	dens=440	code=dashu	kind=comp	cand_count=4	x0=193	x_end=1064	ink_top=1431	ink_bot=1483	inner_top=1399	inner_bot=1503	band_inner=104	top_pad=32	bot_pad=19	tangent_items=0
+CAND	code=dashu	dens=440	fs=1.15	idx=0	x0=193	x1=366	glyph=[229, 328]	glyph_w_dp=36.4	ink_top=1431	ink_bot=1483	ink_h=53	pitch=None	badge=[329, 366]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=440	fs=1.15	idx=1	x0=367	x1=664	glyph=[419, 626]	glyph_w_dp=75.6	ink_top=1431	ink_bot=1482	ink_h=52	pitch=298	badge=[627, 664]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=440	fs=1.15	idx=2	x0=665	x1=854	glyph=[717, 816]	glyph_w_dp=36.4	ink_top=1432	ink_bot=1483	ink_h=52	pitch=190	badge=[817, 854]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+CAND	code=dashu	dens=440	fs=1.15	idx=3	x0=855	x1=1044	glyph=[907, 1006]	glyph_w_dp=36.4	ink_top=1432	ink_bot=1482	ink_h=51	pitch=190	badge=[1007, 1044]	badge_clipped=False	tangent_top=False	tangent_bot=False	fully_visible=True
+AC10	code=dashu	dens=440	fs=1.15	full_count=4	need=4	verdict=PASS	pitch={'n': 3, 'min': 190, 'med': 190, 'max': 298, 'med_dp': 69.1}	kb_h=952	empty_h=952	delta=0

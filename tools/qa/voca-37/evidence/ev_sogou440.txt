@@ -1,0 +1,2 @@
+SOGOU_440	fs=1.0	top=1507	h=833	pp=35.6	ime=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+SOGOU_440	fs=1.15	top=1507	h=833	pp=35.6	ime=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME

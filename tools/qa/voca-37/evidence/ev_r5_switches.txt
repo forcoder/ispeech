@@ -1,0 +1,3 @@
+DS	reason=no_persisted_blob	tried=files/datastore/ispeech_settings.preferences_pb|datastore/ispeech_settings.preferences_pb	retries=4	files=files: cell_dicts input_stats.txt profileInstalled user_dict.txt  files/cell_dicts: c1-454cd882beff4f99.txt index.txt 
+SWITCH	key=chinese_punctuation	value=True	source=code_default(never_written)	code_default=True
+SWITCH	key=double_space_period	value=False	source=code_default(never_written)	code_default=False

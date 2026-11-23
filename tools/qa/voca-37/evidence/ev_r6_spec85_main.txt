@@ -1,0 +1,154 @@
+# VOCA-47 第六轮 · 打回项 6 附：规格 §8.5 那份 main 锚清单**当场重跑**（裁决 §9.4 要求「代码行号别手抄」）
+# 清单来源：规格 8324b03 §8.5 的 54 条「文档断言 → 代码行」对照，脚本 = 本目录 spec85_anchors.sh（原样搬来，未改判据）
+$ bash spec85_anchors.sh fa57a07        # BASE = main
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:24
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:67
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:69
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:76
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:77
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:79
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:81
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:90
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:92
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:106
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:116
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:117
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:141
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:139
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:142
+PASS  app/src/main/java/com/ispeech/input/InputMode.kt:5
+PASS  app/src/main/java/com/ispeech/input/InputMode.kt:6
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:179
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:199
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:146
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:264
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:415
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:475
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:516
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:684
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:759
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:765
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:956
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:962
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:988
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:103
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:181
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:182
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:447
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:525
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:585
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:590
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:601
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:603
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:707
+PASS  app/src/main/java/com/ispeech/input/IspeechImeService.kt:728
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:5
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:18
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:19
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:21
+PASS  app/src/main/java/com/ispeech/input/keyboard/KeyboardLayouts.kt:73
+PASS  app/src/main/res/layout/candidate_view.xml:8
+PASS  app/src/main/res/layout/candidate_view.xml:9
+PASS  app/src/main/res/layout/candidate_view.xml:11
+PASS  app/src/main/res/layout/candidate_view.xml:33
+PASS  app/src/main/res/layout/candidate_view.xml:38
+PASS  app/src/main/res/layout/candidate_view.xml:39
+PASS  app/src/main/res/layout/candidate_view.xml:40
+PASS  app/src/main/res/values/colors.xml:4
+== 共 54 条，失败 0 条 ==
+
+$ bash spec85_anchors.sh c524351        # BASE = PR #18 head（被测 A 包）—— 同一份清单换 BASE
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:24
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:67
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:69
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:76
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:77
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:79
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:81
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:90
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:92
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:106
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:116
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:117
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:141
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:139
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:142
+PASS  app/src/main/java/com/ispeech/input/InputMode.kt:5
+PASS  app/src/main/java/com/ispeech/input/InputMode.kt:6
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:179
+PASS  app/src/main/java/com/ispeech/input/CandidateView.kt:199
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:146
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:264
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:415
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:475
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:516
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:684
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:759
+PASS  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:765
+FAIL  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:956  期望含[const val DEFAULT_KEY_HEIGHT_DP = 52]  实际[/** 键高兜底值，与 KeyboardSettings.keyHeightDp 默认值同口径（规格 §6.2 方案 B1：46dp）。 */]
+FAIL  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:962  期望含[const val TOOLBAR_HEIGHT_DP = 34]  实际[const val MAX_KEY_HEIGHT_DP = 72]
+FAIL  app/src/main/java/com/ispeech/input/SoftKeyboardView.kt:988  期望含[const val DOUBLE_TAP_MS = 320L]  实际[/** Shift 双击判定窗口（毫秒） */]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:103  期望含[private const val CANDIDATE_POOL_FACTOR = 3]  实际[* 让用户左右拖动时能浏览到与旧版三页相同数量的候选。]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:181  期望含[private val candidatePoolLimit: Int]  实际[]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:182  期望含[get() = settings.candidatePageSize * CANDIDATE_POOL_FACTOR]  实际[/** 当前候选（候选条横向滑动浏览的全部候选） */]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:447  期望含[KeyAction.SPACE -> handleSpace()]  实际[val digit = T9Layouts.codeDigitOf(key)]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:525  期望含[override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {]  实际[softKeyboard?.setEnglishMode(mode == InputMode.ENGLISH)]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:585  期望含[if (keyCode == KeyEvent.KEYCODE_SPACE) handleSpace() else handleEnter()]  实际[if (keyCode == KeyEvent.KEYCODE_ESCAPE) {]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:590  期望含[if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {]  实际[]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:601  期望含[if (keyCode == KeyEvent.KEYCODE_MINUS]  实际[if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:603  期望含[candidateView?.scrollCandidates(if (keyCode == KeyEvent.KEYCODE_MINUS) -1 else 1)]  实际[val index = keyCode - KeyEvent.KEYCODE_1]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:707  期望含[private fun handleSpace() {]  实际[clearAssociation()]
+FAIL  app/src/main/java/com/ispeech/input/IspeechImeService.kt:728  期望含[commitDirect(" ", CommitType.PUNCTUATION)]  实际[t9Pending = t9Digits.isNotEmpty(),]
+PASS  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:5
+FAIL  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:18  期望含[val keyHeightDp: Int = 52,]  实际[// 默认走「紧凑」档：规格 §6.2 方案 B1，键高 52 → 46 把占屏压到相对搜狗 +0.46 pp（≤ 1 pp 门限内）]
+FAIL  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:19  期望含[val candidatePageSize: Int = 9,]  实际[val keyHeightDp: Int = 46,]
+FAIL  app/src/main/java/com/ispeech/settings/store/KeyboardSettings.kt:21  期望含[val chinesePunctuation: Boolean = true,]  实际[val vibrate: Boolean = true,]
+PASS  app/src/main/java/com/ispeech/input/keyboard/KeyboardLayouts.kt:73
+FAIL  app/src/main/res/layout/candidate_view.xml:8  期望含[android:layout_height="wrap_content"]  实际[android:id="@+id/candidate_bar"]
+FAIL  app/src/main/res/layout/candidate_view.xml:9  期望含[android:background="#F4F5F7"]  实际[android:layout_width="match_parent"]
+FAIL  app/src/main/res/layout/candidate_view.xml:11  期望含[android:minHeight="44dp"]  实际[android:background="#F4F5F7"]
+FAIL  app/src/main/res/layout/candidate_view.xml:33  期望含[<HorizontalScrollView]  实际[<!-- 候选区：横向滚动，候选项动态添加 -->]
+FAIL  app/src/main/res/layout/candidate_view.xml:38  期望含[android:minHeight="38dp"]  实际[android:layout_weight="1"]
+FAIL  app/src/main/res/layout/candidate_view.xml:39  期望含[android:overScrollMode="never"]  实际[android:minHeight="38dp"]
+FAIL  app/src/main/res/layout/candidate_view.xml:40  期望含[android:scrollbars="none"]  实际[android:overScrollMode="never"]
+PASS  app/src/main/res/values/colors.xml:4
+== 共 54 条，失败 24 条 ==
+
+# 读法：main 上 54/0 → §12 引用的每一个行号都不是抄来的；A 包上出现的 FAIL **不是回归**，
+#   而是规格 §8.5 那份清单本身锚的是 main 现状（PR #18 动了其中几处，如候选条恒高 46dp / 双击空格判定链），
+#   逐条差异见报告 §3.1 与 §12 的说明行。
+
+## 附：A 包那 24 条 FAIL 的性质分类（漂移 vs 实质变更）
+$ bash spec85_anchors.sh c524351 | grep ^FAIL |  # 对每条取回期望串，再在 c524351 的同一文件里 grep -cF
+#   present≥1 = 断言还在、只是行号漂了（PR #18 在这些文件里加/删了行）；present=0 = 该断言在 A 包上已不成立（实质变更）
+SoftKeyboardView.kt      956  present=0 at=     [const val DEFAULT_KEY_HEIGHT_DP = 52]
+SoftKeyboardView.kt      962  present=1 at=963  [const val TOOLBAR_HEIGHT_DP = 34]
+SoftKeyboardView.kt      988  present=1 at=989  [const val DOUBLE_TAP_MS = 320L]
+IspeechImeService.kt     103  present=1 at=105  [private const val CANDIDATE_POOL_FACTOR = 3]
+IspeechImeService.kt     181  present=1 at=186  [private val candidatePoolLimit: Int]
+IspeechImeService.kt     182  present=1 at=187  [get() = settings.candidatePageSize * CANDIDATE_POOL_FACTOR]
+IspeechImeService.kt     447  present=1 at=458  [KeyAction.SPACE -> handleSpace()]
+IspeechImeService.kt     525  present=1 at=536  [override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {]
+IspeechImeService.kt     585  present=1 at=596  [if (keyCode == KeyEvent.KEYCODE_SPACE) handleSpace() else handleEnter()]
+IspeechImeService.kt     590  present=1 at=601  [if (keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {]
+IspeechImeService.kt     601  present=2 at=612  [if (keyCode == KeyEvent.KEYCODE_MINUS]
+IspeechImeService.kt     603  present=1 at=614  [candidateView?.scrollCandidates(if (keyCode == KeyEvent.KEYCODE_MINUS) -1 else 1)]
+IspeechImeService.kt     707  present=1 at=724  [private fun handleSpace() {]
+IspeechImeService.kt     728  present=1 at=748  [commitDirect(" ", CommitType.PUNCTUATION)]
+KeyboardSettings.kt      18   present=0 at=     [val keyHeightDp: Int = 52,]
+KeyboardSettings.kt      19   present=1 at=20   [val candidatePageSize: Int = 9,]
+KeyboardSettings.kt      21   present=1 at=22   [val chinesePunctuation: Boolean = true,]
+candidate_view.xml       8    present=3 at=23   [android:layout_height="wrap_content"]
+candidate_view.xml       9    present=1 at=11   [android:background="#F4F5F7"]
+candidate_view.xml       11   present=0 at=     [android:minHeight="44dp"]
+candidate_view.xml       33   present=1 at=34   [<HorizontalScrollView]
+candidate_view.xml       38   present=1 at=39   [android:minHeight="38dp"]
+candidate_view.xml       39   present=1 at=40   [android:overScrollMode="never"]
+candidate_view.xml       40   present=1 at=41   [android:scrollbars="none"]
+
+# 小结：24 条 = 21 条纯行号漂移 + 3 条实质变更。这 3 条恰好就是本轮采纳项的落点，不是缺陷：
+#   SoftKeyboardView.kt:956  DEFAULT_KEY_HEIGHT_DP 52 → 46（键高默认压低）
+#   KeyboardSettings.kt:18   keyHeightDp 52 → 46（同上，设置层）
+#   candidate_view.xml:11    minHeight 44dp → 恒高 46dp（§2.1 单行改造）
+# → 交付含义：规格 §8.5 那份清单是锚 main(fa57a07) 现状写的，PR #18 合并后必须重锚，否则下一轮又会出现
+#   「文档说 :38、代码在 :39」这类核空（裁决 §2-3 为同类问题付过代价）。归 UX/架构，本轮只报不改。

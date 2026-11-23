@@ -1,0 +1,1 @@
+SOGOU_520_115	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1338	h=1002	pp=42.82

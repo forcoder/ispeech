@@ -1,0 +1,9 @@
+# 工装闸门自检（打回项 4 的验收）：把 default_input_method 切到 Gboard 后重跑 fs115.py
+$ adb shell settings put secure default_input_method com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+$ 当前 = com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+$ python3 fs115.py <c524351 apk> 440 1.0
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=07:38:50	match=True	ime=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME	pid=	h=833
+SKIP	reason=current_ime_not_ispeech	current=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME	hint=adb shell ime set com.ispeech.ime/com.ispeech.input.IspeechImeService
+$ exit=3  (期望 3，且 stdout 里没有 RESULT/delta)

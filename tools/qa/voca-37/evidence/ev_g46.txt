@@ -1,0 +1,8 @@
+G4	case=键区横滑	shift=0	err=0.0	host='shi'
+G4	case=工具栏横滑	shift=0	err=0.0	host='shi'
+G4	case=候选条竖滑	shift=-870	err=11.4	host='事'
+G4	case=候选条斜滑	shift=-870	err=11.4	host='事'
+G4_INBAND	shift=646	err=12.08
+G6_SCROLLED	shift=762	err=10.4
+G6_AFTER_EDIT	shift=0	err=0.0
+HOSTTEXT	v='shi'

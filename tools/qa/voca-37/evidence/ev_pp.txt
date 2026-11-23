@@ -1,0 +1,4 @@
+SOGOU	ime=com.sohu.inputmethod.sogou/.SogouIME	top=1362	h=978	pp=41.79
+SOGOU_COMP	top=1362	h=978	pp=41.79
+ISPEECH	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	top=1352	h=988	pp=42.22
+PID	v=1140

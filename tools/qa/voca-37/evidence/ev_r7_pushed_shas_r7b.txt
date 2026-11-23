@@ -1,0 +1,12 @@
+# ev_r7_pushed_shas_r7b.txt · 打回项 4(a)：报告引用的 SHA 必须是**推送后的** SHA，这份是「本地形态 ↔ 推送形态」逐条目自证
+# 远端分支 head（git ls-remote origin refs/heads/test/voca-37-stage3-regression 现算）=b83969b64f55fc4a1f7c2cba41994f8a16516e56
+# 生成命令：python3 逐条 git ls-tree -r 两边比对（本文件由该脚本当场写出，非人工誊抄）· ts=2026-11-18T03:12:02+0800
+# 推送形态 = 本地形态去掉 2 个不该进 GitHub 的路径：dist/ispeech-release-1.5-20261115-1004.apk（139 MiB 基线包，只留在本地 worktree）
+#   与 tools/verify/__pycache__/check_crosscut.cpython-315.pyc（字节码缓存）。其余条目 blob 必须逐字节同。
+# 结论：四对 commit 共比 1988 条 blob，identical=1988，differing/missing=0；推送形态里最大 blob = 22795894 B（<100 MiB，无新增大对象）
+
+PUSHFORM	local=aaa07f6	pushed=db5b171	blobs_compared=495	blob_identical=495	differing=0	missing_in_pushed=0	ts=2026-11-18T03:12:02+0800
+PUSHFORM	local=e5635d1	pushed=e5c4a5b	blobs_compared=495	blob_identical=495	differing=0	missing_in_pushed=0	ts=2026-11-18T03:12:02+0800
+PUSHFORM	local=4adda21	pushed=2a25e91	blobs_compared=496	blob_identical=496	differing=0	missing_in_pushed=0	ts=2026-11-18T03:12:02+0800
+PUSHFORM	local=6882830	pushed=b83969b	blobs_compared=502	blob_identical=502	differing=0	missing_in_pushed=0	ts=2026-11-18T03:12:02+0800
+PUSHFORM_SUMMARY	pairs=4	blobs_identical=1988	differing=0	remote_head=b83969b64f55fc4a1f7c2cba41994f8a16516e56	ts=2026-11-18T03:12:02+0800

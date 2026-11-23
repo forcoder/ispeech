@@ -1,0 +1,3 @@
+AC9	hold_ms=200	len_before=40	len_after=39	deleted=1
+AC9	hold_ms=1000	len_before=55	len_after=50	deleted=5
+AC9	hold_ms=2000	len_before=65	len_after=50	deleted=15

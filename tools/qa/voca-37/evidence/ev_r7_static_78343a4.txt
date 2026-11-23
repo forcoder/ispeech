@@ -1,0 +1,78 @@
+# ev_r7_static_78343a4.txt · 静态门禁＋JVM单测 在 78343a4 仓库根当场执行
+# ts=2026-11-18T02:34:52+0800  repo=/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4
+# git_head=78343a4580ca9804126b7034a155d76cd4fb87ae
+
+== check_static.py ==
+PASS: 资源引用：扫描 240 处 R.id/layout/string/color/style，全部存在（id=13 layout=2 string=199 color=15 style=1）
+PASS: 自定义 View：layout 中 8 个带包名标签均在 Kotlin 中找到同名 class
+PASS: 括号配平：94 个 Kotlin 文件的 {} () [] 全部配对
+PASS: 孤立右花括号：未发现任何没有匹配 { 的顶层 }
+PASS: 默认模型源 delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com 走 HTTPS（系统默认信任，无需放行明文）
+SUMMARY: passed=6 failed=0 warned=0
+# rc=0
+
+== check_input_logic.py ==
+PASS: 候选排序：同一编码 wqiy 下用户词（权重 100130）排在系统单字（权重 1534）前，实际顺序=['妳（用户）', '你']
+PASS: 候选排序（快捷短语→单字→词组/句子，组内精确码→档位→权重）：实际=['应用B', '短语A', '短语前缀F', '五笔C', '前缀五笔D', '词库词组E']（期望=['应用B', '短语A', '短语前缀F', '五笔C', '前缀五笔D', '词库词组E']）
+PASS: 真实词库排序 wqiy：首选应为「你」（实际候选前 4 = ['你', '𠉎', '仰泳']），词组「仰泳」仍在候选内
+PASS: 真实词库排序 trnt：首选应为「我」（实际候选前 4 = ['我', '选择性', '特性']），词组「选择性」仍在候选内
+PASS: 真实词库排序 vbg：首选应为「好」（实际候选前 4 = ['好', '㛅']）
+SUMMARY: passed=40 failed=0 warned=0
+# rc=0
+
+== check_t9.py ==
+PASS: 数字页第 1 行 10 个数字键未动（digitKeys()）
+PASS: 数字页底行仍保留 ABC / 空格 / ↵（只插入 9键，没替换任何键）
+PASS: t9SwitchKey() = KeyDef.fn(KeyAction.LAYOUT, "9键", 1.5f, KeyStyle.SPECIAL, KeyboardLayoutKind.T9)
+PASS: 数字页数字键仍是 10 个（DIGIT_ORDER 共 10 个）
+PASS: 数字页 2-4 行键数：[9, 7, 4]（期望 [9, 7, 4]，底行新增 9键）
+SUMMARY: passed=87 failed=0 warned=1
+# rc=0
+
+== gradle :app:testDebugUnitTest (78343a4) ==
+# start=2026-11-18T02:35:01+0800
+
+* What went wrong:
+Could not determine the dependencies of task ':app:testDebugUnitTest'.
+> SDK location not found. Define a valid SDK location with an ANDROID_HOME environment variable or by setting the sdk.dir path in your project's local properties file at '/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4/local.properties'.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1s
+# rc=0 end=2026-11-18T02:35:03+0800
+XML	name="com.ispeech.input.SpaceKeyPolicyTest" tests="16" skipped="0" failures="0" errors="0"
+XML	name="com.ispeech.input.InputModePolicyTest" tests="7" skipped="0" failures="0" errors="0"
+XML	
+
+== gradle targeted (78343a4, ANDROID_HOME=/opt/homebrew/share/android-commandlinetools) ==
+# start=2026-11-18T02:35:24+0800
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 1s
+24 actionable tasks: 2 executed, 22 up-to-date
+# gradle_rc=0 end=2026-11-18T02:35:25+0800
+XML	file=TEST-com.ispeech.input.InputModePolicyTest.xml	tests="7" skipped="0" failures="0" errors="0"	mtime=Nov 18 02:35:25 2026
+XML	file=TEST-com.ispeech.input.SpaceKeyPolicyTest.xml	tests="16" skipped="0" failures="0" errors="0"	mtime=Nov 18 02:35:25 2026
+
+== gradle FULL :app:testDebugUnitTest --rerun (78343a4) ==
+# ts=2026-11-18T02:35:46+0800
+FULL	65 tests completed, 1 failed	BUILD FAILED rc=1
+XML	file=TEST-com.ispeech.agent.AgentDispatcherTest.xml	tests="1" skipped="0" failures="1" errors="0"
+XML	file=TEST-com.ispeech.data.FunAsrModelStoreTest.xml	tests="16" skipped="0" failures="0" errors="0"
+XML	file=TEST-com.ispeech.data.PhraseCsvImportTest.xml	tests="13" skipped="0" failures="0" errors="0"
+XML	file=TEST-com.ispeech.engine.QuickPhraseDtwslTest.xml	tests="7" skipped="0" failures="0" errors="0"
+XML	file=TEST-com.ispeech.engine.QuickPhrasePinyinModeTest.xml	tests="5" skipped="0" failures="0" errors="0"
+XML	file=TEST-com.ispeech.input.InputModePolicyTest.xml	tests="7" skipped="0" failures="0" errors="0"
+XML	file=TEST-com.ispeech.input.SpaceKeyPolicyTest.xml	tests="16" skipped="0" failures="0" errors="0"
+MISSING	KeyboardViewModelInitOrderTest=present? 
+MISSING	KeyHitTesterTest=present? 0
+FAILURE	testcase name="initializationError" classname="com.ispeech.agent.AgentDispatcherTest" time="0.001">
+TAKEOVER_TESTS	testcase name="超过窗口的两连发只出两个空格" testcase name="组合中有候选时第一次空格上屏首选 不出句号" testcase name="链条被接管时双击一律不参与" testcase name="链条优先级按规格顺序 前面的状态压住后面的" testcase name="链条上有别的接管项时保持既有放行口径 本单不扩大键路径行为面" testcase name="两连发在窗口内出句号" testcase name="硬件键长按的自动重复不算双击" testcase name="英文态连按两次空格出两个空格" testcase name="无障碍模式下判定窗口放宽到 600ms" testcase name="空缓冲的硬件键空格由输入法接管 判定链才收得到第二下" testcase name="开关关闭 连按两次都只出空格" testcase name="开关关闭时硬件键空格交回宿主 行为与修复前一致" testcase name="中文标点关闭时不转换句号" testcase name="三连发出句号加一个空格 第三下不吞也不多出句号" testcase name="时间窗成立但光标前不是空格 不做破坏性删除" testcase name="开关开启 窗口内的第二次空格出句号" 

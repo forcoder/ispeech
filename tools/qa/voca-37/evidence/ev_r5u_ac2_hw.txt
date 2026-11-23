@@ -1,0 +1,22 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+PKG	path_kind=keyevent	pkg_ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+IDENT	end=start	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+HOST	ok=True	round=1	taps=4	top=1388	h=952
+FRAME	top=1388	h=952	keymap_ok=True	runs=[10, 9, 7, 3]	space_xy=(531, 2124)	gear_xy=(1005, 1552)
+MODE	path=keyevent	mode=chinese	host='z中国'	attempt=1
+DS_BEFORE	file=-	bytes=0
+TOUCH	y=1652	diff={'double_space_period': True}	verdict=hit_target
+DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True
+SWITCH	want=ON	state=True	src=datastore	raw_hex=12020801	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period
+AC2	path=keyevent	case=2x_single_injection	times=2	wall_between_ms=0(single_injection)	before='搜索设置'	host='  '	switch_state=True	switch_src=datastore
+AC2	path=keyevent	case=2x_two_adb_calls	times=2	wall_between_ms=53.4	before='搜索设置'	host='  '	switch_state=True	switch_src=datastore
+AC2	path=keyevent	case=2x_gap500ms_control	times=2	wall_between_ms=549.6	before='搜索设置'	host='  '	switch_state=True	switch_src=datastore
+AC2	path=keyevent	case=3x_single_injection	times=3	wall_between_ms=0(single_injection)	before='搜索设置'	host='   '	switch_state=True	switch_src=datastore
+DS_BEFORE	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=True
+TOUCH	y=1652	diff={'double_space_period': False}	verdict=hit_target
+DS_AFTER	file=files/datastore/ispeech_settings.preferences_pb	bytes=27	double_space_period=False
+SWITCH	want=OFF	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb	route=ime_panel@1652	default_when_absent=false	key=double_space_period
+AC2	path=keyevent	case=2x_single_injection	times=2	wall_between_ms=0(single_injection)	before='搜索设置'	host='  '	switch_state=False	switch_src=datastore
+FINAL_SWITCH	state=False	src=datastore	raw_hex=12020800	file=files/datastore/ispeech_settings.preferences_pb
+IDENT	end=end	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService

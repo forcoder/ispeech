@@ -1,0 +1,50 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=14:06:39	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+KEYMAP	fwd=keyevent70(EQUALS→scrollCandidates(+1))	rev=keyevent69(MINUS→scrollCandidates(-1))	step_dp=72	step_px_expect=198	source=IspeechImeService.kt:612-614 + CandidateView.kt:90-92,199	sign_conv=drive.shift(): 正=候选内容左移=视口向右=看后面的候选
+HOST	ok=True	round=1	taps=4	top=1352	h=988
+PREP	host='shi'	frame=988	band_top=1352	bg_match_pct=77.6	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+PRE_PROBE	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.85	verdict=ok	note=左端起步按 fwd 必须动一档；0 且可判 = 前提不成立，不出数
+START	frame=988	top=1352	band=[1353,1477]	host='shi'
+AC4_STEP	i=1	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.85	cum=198	verdict=ok
+AC4_STEP	i=2	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.72	cum=396	verdict=ok
+AC4_STEP	i=3	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.61	cum=594	verdict=ok
+AC4_STEP	i=4	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.58	cum=792	verdict=ok
+AC4_STEP	i=5	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.68	cum=990	verdict=ok
+AC4_STEP	i=6	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.71	cum=1188	verdict=ok
+AC4_STEP	i=7	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.4	cum=1386	verdict=ok
+AC4_STEP	i=8	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=1.95	cum=1584	verdict=ok
+AC4_STEP	i=9	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.36	cum=1782	verdict=ok
+AC4_STEP	i=10	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.2	cum=1980	verdict=ok
+CLAMP_TAIL	press=None	cum_px=1980	reached_by=keyevent70(EQUALS→scrollCandidates(+1))	end=右端（scrollX 到最大，看的是最后一批候选）
+AC6_TAIL	i=1	diff_bbox=None
+AC6_TAIL	i=2	diff_bbox=(253, 196, 259, 252)
+AC6_TAIL	i=3	diff_bbox=(253, 196, 259, 252)
+AC6_TAIL	i=4	diff_bbox=None
+AC6_TAIL	i=5	diff_bbox=(253, 196, 259, 252)
+AC6_TAIL_SUMMARY	identical_pairs=2
+AC5_REV	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.2	verdict=ok
+AC5_REV_STEP	i=1	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.36	cum=-198	verdict=ok
+AC5_REV_STEP	i=2	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.95	cum=-396	verdict=ok
+AC5_REV_STEP	i=3	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.4	cum=-594	verdict=ok
+AC5_REV_STEP	i=4	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.71	cum=-792	verdict=ok
+AC5_REV_STEP	i=5	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.68	cum=-990	verdict=ok
+AC5_REV_STEP	i=6	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.58	cum=-1188	verdict=ok
+AC5_REV_STEP	i=7	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.61	cum=-1386	verdict=ok
+AC5_REV_STEP	i=8	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=1.72	cum=-1584	verdict=ok
+AC5_REV_STEP	i=9	key=keyevent69(MINUS→scrollCandidates(-1))	shift=-198	err=2.85	cum=-1782	verdict=ok
+AC5_REV_STEP	i=10	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-1782	verdict=ok
+AC5_REV_STEP	i=11	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-1782	verdict=ok
+AC5_REV_STEP	i=12	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-1782	verdict=ok
+CLAMP_AT	press=10	cum_px=-1782	key=keyevent69(MINUS→scrollCandidates(-1))	note=连续 3 次位移为 0 = 到端钳制（不绕回）
+AC5_REV_STEP	i=13	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-1782	verdict=ok
+AC5_REV_STEP	i=14	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	cum=-1782	verdict=ok
+LEFT_CLAMP_AT	press=10	cum_from_right=-1782	key=keyevent69(MINUS→scrollCandidates(-1))	end=左端（scrollX=0，回到首批候选）
+AC6_TAIL	i=1	diff_bbox=(253, 196, 259, 252)
+AC6_TAIL	i=2	diff_bbox=(253, 196, 259, 252)
+AC6_TAIL	i=3	diff_bbox=None
+LEFT_CLAMP_TAIL	identical_pairs=1
+AC7_FROM_LEFT	key=keyevent70(EQUALS→scrollCandidates(+1))	shift=198	err=2.85	verdict=ok	note=端点起步可动：停在左端后按 +1 方向的键应立即一档
+HOSTTEXT	v='shi'	note=全程滚动键不得污染宿主文本
+SUMMARY	right_end_reached_by=keyevent70(EQUALS→scrollCandidates(+1))	right_end_cum_px=1980	left_end_reached_by=keyevent69(MINUS→scrollCandidates(-1))	left_clamp_press=10	fwd_step_expect=198	rev_step_expect=-198
+IDENT	name=end	t=14:07:57	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=6756	h=988

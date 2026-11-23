@@ -1,0 +1,174 @@
+# ev_r7_crosscut_78343a4.txt · 结构门禁跑在 PR#18 head 78343a4（含 13.6 D1 断言）· 2026-11-17T16:49:57Z
+== check_crosscut.py == 仓库根：/Users/cookie/multica_workspaces_desktop-api.multica.ai/vocation-d18f8ab6510e/voca-47-1a7ac9fe79f3/build-78343a4
+-- 1. LookupKind（WUBIPHRASE / PINYIN）--
+PASS: LookupKind 枚举值 = ['PHRASE', 'PINYIN', 'QUICKAPPLY', 'WUBI', 'WUBIPHRASE']
+PASS: LookupKind.order：{'QUICKAPPLY': '0', 'PHRASE': '1', 'WUBI': '2', 'WUBIPHRASE': '3', 'PINYIN': '4'}（应用<短语<单字<词组<拼音）
+PASS: CandidateRanking 用 kind.order 排序（声明有被使用）
+PASS: CompositeEngine.lookup 走 CandidateRanking 排序
+PASS: 所有 when(LookupKind) 均覆盖全部 5 个分支
+PASS: QuickPhrasesScreen 下拉过滤排除 WUBIPHRASE / PINYIN（引擎产出，不人工指定）
+PASS: app/src/main/res/values/strings.xml 含全部 5 个 lookup_kind_* 字符串
+PASS: app/src/main/res/values-en/strings.xml 含全部 5 个 lookup_kind_* 字符串
+PASS: lookupKindRes：WUBIPHRASE->lookup_kind_wubi_phrase、PINYIN->lookup_kind_pinyin
+-- 2. KeyAction.SWITCH_IME 全链路 --
+PASS: KeyAction 声明了 SWITCH_IME
+PASS: SoftKeyboardView 工具栏含 KeyAction.SWITCH_IME（「⌨输入法」）
+PASS: IspeechImeService.handleSoftKey 处理 SWITCH_IME -> Panel.SWITCH_IME
+PASS: Service Panel 枚举含 SWITCH_IME
+PASS: updatePanelVisibility 用 Panel.SWITCH_IME 控制 inputMethodPanel 显隐
+PASS: layout ime_input_view.xml 声明 @+id/input_method_panel（InputMethodPanel）
+PASS: InputMethodPanel 暴露 onPick / onClose / onSystemPicker / submit
+PASS: 服务绑定 input_method_panel 并接上 onPick/onClose/onSystemPicker
+PASS: 切换走 setInputMethod(window token)，失败兜底 showInputMethodPicker
+PASS: 面板键盘分支加 QUICK_PHRASE 守卫（4 处），SWITCH_IME 面板下字母不会误进筛选
+PASS: handleSoftKey 覆盖全部 27 个 KeyAction（无声明未接线的按键行为）
+-- 3. KeyboardLayoutKind.T9 --
+PASS: KeyboardLayoutKind 声明了 T9
+PASS: KeyboardLayouts.pages() 的 when 覆盖 ['EMOJI', 'LETTER', 'NUMBER', 'SYMBOL', 'T9']
+PASS: pages() 把 T9 分派给 T9Layouts.pages()
+PASS: T9Layouts.pages() = 数字页 + `1` 标点页两页
+PASS: 数字页（123）底行含 t9SwitchKey() -> KeyboardLayoutKind.T9 入口
+PASS: moreSymbolFirstPage / kaomojiFirstPage 按总页数反推（不硬编码）
+PASS: KeyboardLayouts.symbols()/emoji() 末尾确实追加了更多符号 / 颜文字页
+PASS: T9 服务侧缓冲已接线（引用 T9Layouts 或 isT9CodeKey）
+PASS: T9 缓冲链路完整：t9Digits -> handleT9Digit -> refreshT9Candidates -> commitT9
+PASS: T9 查询源是九宫格专用拼音引擎（AppContainer.pinyinEngine），与「拼音混输」开关解耦
+PASS: AppContainer 暴露引擎代次，供服务判断「设置变了要重建引擎」
+PASS: 候选展示前按字形过滤（无字形生僻字不再显示成豆腐块）
+-- 4. 新增设置项闭环 --
+PASS: SettingsStore 声明持久化 key：['fuzzy_pinyin', 'pinyin_mixed', 'traditional_output']
+PASS: KeyboardSettings 含字段 ['fuzzyPinyin', 'pinyinMixed', 'traditionalOutput']
+PASS: keyboardSettingsFlow 读取三个新 key（带默认值兜底）
+PASS: SettingsStore 三个 setter 齐全
+PASS: KeyboardViewModel 暴露三个 setter
+PASS: 拼音混输 / 模糊音 setter 均调用 AppContainer.invalidateEngine()
+PASS: KeyboardScreen 三个开关均绑定 ViewModel
+PASS: AppContainer.buildEngineFromSettings 把 pinyinMixed/fuzzyPinyin 透传给 buildComposite
+PASS: QuickLocator.buildComposite 支持 pinyin/fuzzyPinyin 参数并挂 PINYIN 档位
+PASS: 服务 convertHan 读 settings.traditionalOutput 并调用 HanConversion.toTraditional
+PASS: HanConversion 惰性装载（AppContainer 兜底），无需显式 install
+PASS: 服务按引擎代次重取引擎（AppContainer.engineGeneration -> refreshEngineIfStale），改「拼音混输 / 模糊音」不必重启输入法进程
+-- 5. 输入统计 + 导航 --
+PASS: InputStats.get 进程内单例
+PASS: 服务埋点：recordCommit / recordQuery 均落到 InputStats.get
+PASS: StatsViewModel 读 InputStats.get
+PASS: StatsScreen 签名与导航调用一致（onBack 参数）
+PASS: 导航注册 STATS 路由 -> StatsScreen
+PASS: 首页「输入统计」卡片 -> onOpenStats -> 导航 STATS
+-- 6. PhraseUsageStore 单例 --
+PASS: PhraseUsageStore.open( 只在 AppContainer 出现（全局单例，避免整文件重写互相覆盖）
+PASS: 服务通过 AppContainer.phraseUsage(this) 取单例
+PASS: QuickPhrasePanel 零 IO / 零 AppContainer（暂停存与渲染分离）
+-- 7. 口径一致性 --
+PASS: 版本号一致：gradle versionName=1.5 == ISPEECH_VERSION=1.5
+PASS: app/src/main/java/com/ispeech/engine/LookupEngine.kt 排序注释包含 PINYIN 档位口径
+PASS: app/src/main/java/com/ispeech/engine/CompositeEngine.kt 排序注释包含 PINYIN 档位口径
+PASS: SoftKeyboardView 使用 HorizontalScrollView 的正确属性 isFillViewport
+PASS: check_t9.py 断言口径与源码一致（isFillViewport = true）
+PASS: check_input_logic.expected_kinds 与 KeyboardLayoutKind 声明一致（含 T9）
+PASS: app/src/main/res/layout/ime_input_view.xml 可被 ElementTree 解析
+PASS: docs/t9-and-symbols.md 声明的服务侧 T9 缓冲已兑现
+-- 8. 语音输入（VOICE / ASR）全链路 --
+PASS: KeyAction 声明了 VOICE
+PASS: SoftKeyboardView 工具栏含 KeyAction.VOICE（「🎤」）
+PASS: handleSoftKey 把 VOICE 接到 toggleVoiceInput()
+PASS: 按住说话对两种引擎都接线（VOSK / 系统识别）：按下开始收音、抬起收尾上屏
+PASS: VoiceInputController 提供 finish()：松手收尾但保留回调（结果仍要上屏）
+PASS: VoiceInputController 覆盖系统识别器 / 忙重试 / 释放麦克风 / 宿主包名 / 自定义组件
+PASS: 服务接线完整：创建 / 销毁 Controller + 语音候选上屏 / 取消 + 编码区「语音」
+PASS: Manifest 声明 RECORD_AUDIO 且 queries 暴露 RecognitionService（targetSdk 34 包可见性）
+PASS: 输入法服务未授权时请求麦克风（requestMicPermission -> 设置页 extra）
+PASS: 设置页按 REQUEST_MIC_EXTRA 拉起系统麦克风授权（输入法无法自弹对话框）
+PASS: AsrEngine 含 SYSTEM / CUSTOM（系统识别器 / 指定服务组件）
+PASS: AsrSettings 含模型透传 extra 与 zh-CN 默认语言
+PASS: SettingsStore 提供 ASR 持久化键与 asrSettingsFlow / setAsrSettings 读写
+PASS: 设置导航注册 ASR 路由并挂载 AsrSettingsScreen
+PASS: 首页 ASR 卡片接 onOpenAsr 并显示 asr_title / asr_description
+PASS: AsrSettingsScreen 经 ViewModel 保存（setAsrSettings）到 DataStore
+PASS: SettingsPanel 含 ASR 分项（引擎 / 语言 / 参数）并暴露 onAsrChange
+PASS: layout ime_input_view.xml 声明 @+id/settings_panel（SettingsPanel）
+PASS: 服务绑定 settingsPanel.onAsrChange -> applyAsrChange（设置即时生效）
+PASS: 语音 / ASR 文案中英各齐 14 项
+PASS: 语音 / ASR 文案中英键名一致（39 项）
+-- 9. 用户词库（模式 / 自造词 / 拼音态）--
+PASS: UserDictMode 声明 WUBI(wb) / PINYIN(cn)（对齐搜狗 wb_dict_user / cn_dict_user）
+PASS: UserDictMode.parse 缺列 / 未知值兜底五笔
+PASS: persist 写出第 4 列 mode
+PASS: 历史 3 列行仍解析为 wb（不丢老数据）
+PASS: 4 列行解析出 cn 模式
+PASS: 文本含未转义制表符的老数据仍按 3 列解析（mode 列不会被误判）
+PASS: 计数非法时整行跳过（4 列亦然）
+PASS: 2 列简写按次数 1 导入（导入格式）
+PASS: 「编码 词条」空白分隔两段式可导入
+PASS: 编码归一：大小写 / 音节间空格被清成拼音串（jiudian）
+PASS: 无模式列的行落到导入时选的词库（cn）
+PASS: 读盘与导入共用同一套行解析（只有一处实现）
+PASS: UserDictEngine 持有 mode（默认五笔）
+PASS: UserDictEngine 把 mode 透传给 store 的查询与联想
+PASS: AppContainer.pinyinLookupEngine = 用户词库 cn + 拼音词表
+PASS: 拼音态 lookupSource 走 pinyinLookupEngine
+PASS: invalidateEngine 同时丢弃 pinyinLookupEngine 缓存
+PASS: CandidateView 暴露长按回调（自造词入口）
+PASS: 服务把长按接到 rememberCandidate（自造词）
+PASS: rememberCandidate 按 dictMode 写入用户词库
+PASS: learn 不再整体禁用拼音态（改为按候选来源分流）
+PASS: learn 用 dictModeOf 分流模式
+PASS: dictModeOf 覆盖全部 LookupKind（短语 / 应用 -> null）
+PASS: dictModeOf 只让 PHRASE / QUICKAPPLY 落到 null（不写词库）
+PASS: 设置页删除用户词条时带上模式
+PASS: QuickLocator.buildComposite 支持指定用户词库模式
+PASS: UserDictStore 提供 exportText / importText
+PASS: 导入按 mode+code+text 合并，已存在取较大 count
+PASS: DictionaryViewModel 走 contentResolver 读 / 写并调用 store
+PASS: 词典页接上 SAF 文件选择器（导入 / 导出）
+PASS: 词典页把孤儿字符串 dict_import_hint 接上（不再悬空）
+PASS: 用户词库导入 / 导出文案中英各齐 9 项
+-- 10. 分类词库（细胞词库）--
+PASS: CellDictStore 以 cell_dicts/index.txt 为唯一索引
+PASS: 分类词库正文复用用户词库行解析（无第二套规则）
+PASS: CellDictStore 提供 列表 / 取词条 / 安装 / 删除 / 启停
+PASS: 索引行解析出 id / 显示名 / 分类 / 启用
+PASS: 启用位 0 解析为停用
+PASS: 注释 / 缺列 / 非法启用位 / 空 id 的索引行全部跳过（孤儿行不炸）
+PASS: 词库 id = c1- + FNV-1a64(名 + \u0001 + 正文)（重复安装幂等，不同正文不撞号）
+PASS: id 生成只有一处实现（cellDictId）
+PASS: 分类头 `# category: X` 解析一致（读不到返回 null）
+PASS: entries(enabledOnly) 真的过滤掉停用词库
+PASS: CellDictEngine 实现 LookupEngine + AssociationSource
+PASS: CellDictEngine 查询与联想都按模式过滤（wb / cn 编码空间隔离）
+PASS: 权重 8 万（让位用户词 / 压过系统词），多字条目走 WUBIPHRASE（不混入快捷短语组）
+PASS: 权重关系自洽：用户词(10万) > 分类词库(8万) > 系统五笔词(65535) > 拼音词(9999)
+PASS: QuickLocator.buildComposite 并入已启用的分类词库
+PASS: AppContainer 提供 cellDict 单例与 invalidateCellDict
+PASS: 五笔态（buildEngineFromSettings）与拼音态（pinyinLookupEngine）都接上分类词库
+PASS: invalidateCellDict 同时让查询引擎重建（装了词库立刻生效）
+PASS: DictionaryViewModel 提供 安装 / 删除 / 启停
+PASS: 词典页走 contentResolver 读文件并落库 + 失效缓存
+PASS: 词典页接上 SAF 安装入口与每库开关 / 删除
+PASS: 词典页新增分类词库行（名称 / 分类 / 词条数 + 开关）
+PASS: 分类词库文案中英各齐 10 项
+PASS: 分类词库文案全部接线（10 项无孤儿）
+-- 11. 中文输入法（默认拼音 / 五笔 + 中英切换）--
+PASS: ChineseInputMethod 枚举含拼音 / 五笔，未知值回落拼音
+PASS: SettingsStore 提供中文输入法 flow / 阻塞读取 / 写入（沿用旧 key）
+PASS: KeyboardViewModel 订阅并暴露中文输入法设置
+PASS: 设置页新增「中文输入法」卡片并接单选
+PASS: 键盘内置设置面板新增中文输入法切换行
+PASS: 输入法服务按设置做「中文 ⇄ 英文」两态切换
+PASS: 旧的三态循环（五笔 → 拼音 → 英文）已移除
+PASS: InputModePolicy 只做中文态 / 英文态两态切换
+PASS: 回归测试覆盖默认五笔 / 默认拼音两条中英切换路径
+PASS: 中文输入法内置面板文案中英各齐
+-- 12. 候选条字重（VOCA-56）--
+PASS: 候选词文本常规字重（createItemView 用 Typeface.DEFAULT）
+PASS: 首选与非首选靠颜色 / 底色区分（字重一致，首选走主题色）
+PASS: CandidateView 类注释已去掉「加粗」口径
+-- 13. 双击空格出句号（VOCA-46）--
+PASS: 非空格上屏一律清零 lastSpaceCommitAt（R3：每个 commitText 落点都在清零的函数里）
+PASS: 双击判定含「删除前确认光标前是空格」这道保险（未确认即退回普通空格）
+PASS: handleSpace 把「光标前一个字符」喂给判定
+PASS: 双击判定不在 View 层（R8：不与 installSpaceGesture 抢事件）
+PASS: 双击空格设置项闭环（默认关 + key / 持久化 / UI / 中英文案齐全）
+PASS: 硬件 / 注入键空格经 takesHardwareSpace 进 handleSpace（D1：两条键路径同一条判定链，自动重复不接管）
+SUMMARY: passed=157 failed=0 warned=0
+crosscut_rc=0

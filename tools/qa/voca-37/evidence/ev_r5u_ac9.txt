@@ -1,0 +1,10 @@
+KEYMAP	bands=[(1643, 1769), (1773, 1899), (1904, 2028), (2065, 2184)]	runs=[10, 9, 7, 3]	del_xy=(990, 1966)	space_xy=(531, 2124)	top=1388	h=952
+PROBE_RETRY	first_deleted=0
+PROBE_HOLD	ms=200	before=60	after=59	deleted=1
+AC9	hold_ms=200	before=59	after=58	deleted=1	wall_s=15.41	rate_ms=200.0	spec_ac9_gt3=n/a
+AC9	hold_ms=1000	before=58	after=50	deleted=8	wall_s=16.21	rate_ms=125.0	spec_ac9_gt3=n/a
+REFILL	len=60
+AC9	hold_ms=1500	before=60	after=51	deleted=9	wall_s=16.34	rate_ms=166.7	spec_ac9_gt3=PASS
+REFILL	len=60
+AC9	hold_ms=2000	before=60	after=43	deleted=17	wall_s=16.74	rate_ms=117.6	spec_ac9_gt3=n/a
+NOTE	text=1500ms 档为实测；旧 ev_ac9.txt 的 1.5s≈10 字是按 1000/2000 两点内插的非实测值

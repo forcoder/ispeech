@@ -1,0 +1,6 @@
+SETUP	ok=True	attempt=1	secs=8.2	top=1352	h=988
+AC2_fast2x	host='  '
+AC2_slow2x_gap550ms	host='  '
+AC2_gap250ms	host='  '
+AC3_buffer_then_space	after_first='是'	after_second='是疑是地上霜'
+AC2_triple	host='   '

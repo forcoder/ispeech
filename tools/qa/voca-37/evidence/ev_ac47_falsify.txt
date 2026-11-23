@@ -1,0 +1,14 @@
+# VOCA-37 §3 返修项 2 的反向证伪档：把 fwd/rev 对调（--fwd 69 --rev 70），脚本必须在左端探针处拒绝出数——当场 stdout 原文，未剪辑
+# 结论口径：键↔方向不是靠人记的。停在左端按 keyevent69(`-`→scrollCandidates(-1)) 实测位移 0（err 0.0，可判），
+#   而同一台机、同一数据态、2 分钟前按 keyevent70(`=`→scrollCandidates(+1)) 是 +198（ev_ac47_probe.txt 的 PRE_PROBE 行）
+#   → 方向由代码与数据同时钉死；把参数反过来，脚本不再产出「看着像钳制」的恒 0 sweep，而是 rc=4 拒绝
+# 被测包：c524351 assembleDebug，sha256=52911cf22393b8292ec705a3dfef7fdf668fa37448bb8bc4d10d3fdb5afb1d5b
+$ python3 tools/qa/voca-37/ac47.py <apk> 440 --fwd 69 --rev 70    # rc=4
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=13:13:50	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+KEYMAP	fwd=keyevent69(MINUS→scrollCandidates(-1))	rev=keyevent70(EQUALS→scrollCandidates(+1))	step_dp=72	step_px_expect=198	source=IspeechImeService.kt:612-614 + CandidateView.kt:90-92,199	sign_conv=drive.shift(): 正=候选内容左移=视口向右=看后面的候选
+HOST	ok=True	round=1	taps=2	top=1352	h=988
+PREP	host='shi'	frame=988	band_top=1352	bg_match_pct=77.5	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+PRE_PROBE	key=keyevent69(MINUS→scrollCandidates(-1))	shift=0	err=0.0	verdict=ok	note=左端起步按 fwd 必须动一档；0 且可判 = 前提不成立，不出数
+GATE	blocked=前提不成立：缓冲不是 'shi'，或左端按 fwd 无位移（键↔方向对调 / 候选池≤1 条 / 键盘没画在 inset 上）	host='shi'

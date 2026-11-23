@@ -1,0 +1,16 @@
+HOST	ok=True	round=1	taps=1	top=1352	h=988
+IME_START	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService
+HOST2	ok=True	round=1	taps=1	top=1352	h=988
+FRAME_1	top=1352	h=988	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=18755
+CARD	bounds=[193,851][423,917]	tap=308,884
+VERDICT	fatal_count=2	keyboardviewmodel_frames=8	ime_end=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid_after=19089	page=topResumedActivity=ActivityRecord{5218902 u0 com.google.android.settings.intelligence/.modules.search.SearchActivity t28	d2=STILL_CRASHING
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: FATAL EXCEPTION: main
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: Process: com.ispeech.ime, PID: 18755
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: 	at com.ispeech.settings.store.SettingsStore$chineseInputMethodFlow$$inlined$map$1$2.emit(Emitters.kt:219)
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: FATAL EXCEPTION: main
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: Process: com.ispeech.ime, PID: 18755
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: 	at com.ispeech.settings.keyboard.KeyboardViewModel$2$1.emit(KeyboardViewModel.kt:35)
+STACK	line=11-17 17:12:15.034 18755 18755 E AndroidRuntime: 	at com.ispeech.settings.store.SettingsStore$chineseInputMethodFlow$$inlined$map$1$2.emit(Emitters.kt:219)

@@ -1,0 +1,3 @@
+SINGLE_INJECT_2x	host='  '
+SINGLE_INJECT_3x	host='   '
+LOGCAT_KEYEVENT_LINES	n=0

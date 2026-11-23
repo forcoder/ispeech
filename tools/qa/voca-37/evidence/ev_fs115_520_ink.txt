@@ -1,0 +1,8 @@
+INSTALL	out=Performing Streamed Install
+Success	rc=0
+IDENT	name=start	t=07:37:50	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=	h=None
+HOST	fs=1.15	ok=True	round=1	taps=4	top=1172	h=1168
+RESULT	fs=1.15	dens=520	empty=1168	comp=1168	delta=0	band_px=150	top1=1172	ime_before=com.ispeech.ime/com.ispeech.input.IspeechImeService	ime_after=com.ispeech.ime/com.ispeech.input.IspeechImeService
+INK	fs=1.15	kind=empty	none=True	band_inner=148
+INK	fs=1.15	kind=comp	bg=(244, 245, 247)	top_pad=12	bot_pad=36	ink_h=100	band=148	ink_top=1185	ink_bot=1284	band_inner=148
+IDENT	name=end	t=07:38:22	match=True	ime=com.ispeech.ime/com.ispeech.input.IspeechImeService	pid=29223	h=1168
