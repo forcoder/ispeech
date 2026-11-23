@@ -25,10 +25,11 @@
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
 11. 中文输入法（默认拼音 / 五笔 + 中英切换）：枚举 -> 持久化 -> 设置页 / 内置面板 -> 服务两态切换
 12. 候选条字重（VOCA-56）：候选词常规字重、首选靠颜色 / 底色区分、类注释口径一致
-13. 联想词上屏去重（VOCA-121）：AssociationCommit 规则 -> 服务 pickCandidate 联想分支接线 ->
+13. 远端规则刷新链（VOCA-293）：拉取写盘 -> 变更信号 -> 快捷短语页重新读盘，顺序与文档口径锁定
+14. 联想词上屏去重（VOCA-121）：AssociationCommit 规则 -> 服务 pickCandidate 联想分支接线 ->
     规则本身用 Python 复刻跑用例（「你」+「你好」不能变「你你好」；
     多字候选「指导老师」+「师专」不能变「指导老师师专」）
-14. 词组自学习（VOCA-65 条目 3 / ADR-0001）：PhraseCodeDeriver / PhraseLearningTracker 纯函数
+15. 词组自学习（VOCA-65 条目 3 / ADR-0001）：PhraseCodeDeriver / PhraseLearningTracker 纯函数
      -> WubiEngine 反向索引 -> 服务接线（onCommit / onInterrupt / reset / onUpdateSelection）
      -> 写盘线程与学习开关
 
@@ -104,6 +105,13 @@ HOME_SCREEN = JAVA / "settings" / "HomeScreen.kt"
 ABOUT_SCREEN = JAVA / "settings" / "AboutScreen.kt"
 MAIN_ACTIVITY = JAVA / "settings" / "MainActivity.kt"
 BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
+
+# 13. 远端规则刷新链（VOCA-293）
+SYNC_REPO = JAVA / "data" / "SyncRepository.kt"
+REMOTE_CHANGES = JAVA / "data" / "RemoteRulesChanges.kt"
+QUICK_VM = JAVA / "settings" / "quick" / "QuickPhrasesViewModel.kt"
+SYNC_VM = JAVA / "settings" / "sync" / "SyncViewModel.kt"
+QUICK_DOC = ROOT / "docs" / "quick-phrase-enhancement.md"
 
 VERIFY_DIR = ROOT / "tools" / "verify"
 
@@ -1906,11 +1914,100 @@ def check_candidate_style() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
-# 13. 联想词上屏去重（VOCA-121）
+# 13. 远端规则刷新链（VOCA-293）：写盘 → 信号 → 重新读盘
+# ═════════════════════════════════════════════════════════════
+
+def check_remote_rules_refresh() -> None:
+    """VOCA-293：点「从远程同步」拉回的新规则与角标，必须不回退页面就出现在快捷短语列表里。
+
+    缺陷形态是「链路上少一环」，而不是某个函数写错：写盘方不通知、读盘方只在构造时读盘，
+    两边各自都「没毛病」。所以这里断言的是**三环齐全 + 顺序正确**，任何一环被删都判红。
+    """
+    changes = strip_comments(read(REMOTE_CHANGES))
+    check(
+        "object RemoteRulesChanges" in changes
+        and "val version: StateFlow<Long>" in changes
+        and "fun publish(" in changes,
+        "远端规则变更信号源存在（RemoteRulesChanges：version + publish）",
+        f"{rel(REMOTE_CHANGES)} 缺少 RemoteRulesChanges（version StateFlow + publish()）"
+        "——同步写盘后没有任何人知道文件变了",
+    )
+
+    repo = read(SYNC_REPO)
+    pull = strip_comments(function_region(repo, r"suspend fun pullAndWriteRemoteRules\("))
+    write_at = pull.find("writeEntries(")
+    publish_at = pull.find("RemoteRulesChanges.publish()")
+    check(
+        write_at >= 0 and publish_at > write_at,
+        "pullAndWriteRemoteRules 先写盘、后 publish（顺序即契约）",
+        f"{rel(SYNC_REPO)} pullAndWriteRemoteRules 里 publish 没有紧跟在 writeEntries 之后"
+        "（先通知后写盘会让订阅方读到旧文件）",
+    )
+
+    publishers = [
+        rel(p) for p in sorted(JAVA.rglob("*.kt"))
+        if "RemoteRulesChanges.publish()" in strip_comments(read(p))
+    ]
+    check(
+        publishers == [rel(SYNC_REPO)],
+        "全仓库只有拉取写盘会发布远端变更信号（通知不会散成第二处）",
+        f"RemoteRulesChanges.publish() 出现在 {publishers}，应只在 {rel(SYNC_REPO)}",
+    )
+
+    vm_raw = read(QUICK_VM)
+    init_m = re.search(r"\n    init \{\n(.*?)\n    \}\n", vm_raw, re.S)
+    init_block = strip_comments(init_m.group(1)) if init_m else ""
+    check(
+        "load()" in init_block and "remoteRulesReload.start(viewModelScope)" in init_block,
+        "QuickPhrasesViewModel 构造时既首屏读盘、也启动远端变更订阅",
+        f"{rel(QUICK_VM)} 的 init 块没有同时调用 load() 与 remoteRulesReload.start(viewModelScope)"
+        "（VOCA-293 的原始症状：列表只在构造时读一次盘）",
+    )
+    check(
+        re.search(
+            r"RemoteRulesReload\(\s*RemoteRulesChanges\.version\s*,\s*::load\s*\)",
+            strip_comments(vm_raw),
+        )
+        is not None,
+        "订阅器接的是全局信号、重载指回 load()（新条目 / 来源角标 / 已覆盖 / 恢复默认一并重建）",
+        f"{rel(QUICK_VM)} 未用 RemoteRulesReload(RemoteRulesChanges.version, ::load) 接线",
+    )
+
+    load_region = strip_comments(function_region(vm_raw, r"fun load\(\) \{"))
+    mark_at = load_region.find("markReadStarted()")
+    io_at = load_region.find("withContext(Dispatchers.IO)")
+    check(
+        mark_at >= 0 and io_at >= 0 and mark_at < io_at,
+        "load() 在碰磁盘之前记录已观察版本（读盘期间的变更不会被漏掉）",
+        f"{rel(QUICK_VM)} load() 里 markReadStarted() 缺失或晚于 withContext(Dispatchers.IO)",
+    )
+    check(
+        "quickPhrasesRemoteFile" in load_region,
+        "load() 整体重读远端规则文件（刷新的是磁盘真值，不是内存补丁）",
+        f"{rel(QUICK_VM)} load() 不再读取 quickPhrasesRemoteFile，重载等于白跑",
+    )
+
+    sync_vm = strip_comments(function_region(read(SYNC_VM), r"fun syncNow\(\) \{"))
+    check(
+        "AppContainer.invalidateEngine()" in sync_vm,
+        "同步成功仍重建输入法引擎（设置页与输入法同一批生效）",
+        f"{rel(SYNC_VM)} syncNow 里 invalidateEngine() 被删，输入法侧要重启才生效",
+    )
+
+    doc = read(QUICK_DOC)
+    check(
+        "### 12.7" in doc and "RemoteRulesChanges" in doc,
+        "docs/quick-phrase-enhancement.md 12.7 记录了刷新链口径",
+        f"{rel(QUICK_DOC)} 缺 12.7 刷新链小节（代码与文档又一次各说一套）",
+    )
+
+
+# ═════════════════════════════════════════════════════════════
+# 14. 联想词上屏去重（VOCA-121）
 # ═════════════════════════════════════════════════════════════
 
 def check_association_commit() -> None:
-    """13. 联想词上屏去重（VOCA-121）：「你」上屏后点联想词「你好」不能得到「你你好」."""
+    """14. 联想词上屏去重（VOCA-121）：「你」上屏后点联想词「你好」不能得到「你你好」."""
     commit = read(ASSOCIATION_COMMIT)
     service = read(SERVICE)
     check(
@@ -2002,7 +2099,7 @@ def check_association_commit() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
-# 13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：纯函数 + 接线 + 写盘线程
+# 15. 词组自学习（VOCA-65 条目 3 / ADR-0001）：纯函数 + 接线 + 写盘线程
 # ═════════════════════════════════════════════════════════════
 
 def check_phrase_learning() -> None:
@@ -2090,9 +2187,11 @@ def main() -> int:
     check_chinese_input_method()
     print("-- 12. 候选条字重（VOCA-56）--")
     check_candidate_style()
-    print("-- 13. 联想词上屏去重（VOCA-121）--")
+    print("-- 13. 远端规则刷新链（VOCA-293）--")
+    check_remote_rules_refresh()
+    print("-- 14. 联想词上屏去重（VOCA-121）--")
     check_association_commit()
-    print("-- 14. 词组自学习（VOCA-65 条目 3）--")
+    print("-- 15. 词组自学习（VOCA-65 条目 3）--")
     check_phrase_learning()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
