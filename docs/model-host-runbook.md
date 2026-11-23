@@ -284,10 +284,14 @@ jobs:
 |---|---|
 | 配置项 | `app/build.gradle.kts` 的 `voskModelUrl` → `BuildConfig.VOSK_MODEL_URL`（`-PvoskModelUrl=https://…` 可覆盖，机制同 §4） |
 | 默认源 | `https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip`（Vosk 官方，境外单源） |
-| 实测元数据 | 2026-11-18 本机：`200` / `application/zip` / `Content-Length 43898754` / `Accept-Ranges: bytes`；整包 sha256 `3af8b0e7e0f835ae9d414ce5df580237a3cfb08d586c9fbbb0f7ff29ad5b14ba`（`unzip -t` 无错误后固定） |
-| Range 行为（与 §6 相反） | 2026-11-18 实测 `Range: bytes=1048576-` → `206` + `Content-Length 42850178`；`Range: bytes=43898754-`（断点恰好在整包处）→ **`416` + `text/html`** —— 该源**会**回 416，`.part` 走 `RETRY_FROM_START` 自愈（整包重下一次，不会循环）；OSS 同情形回 200，两侧都在 `AsrDownloadPolicy` 里有对应用例 |
+| 实测元数据 | 2026-11-18 首测、**2026-11-23 复测一致**：`200` / `application/zip` / `Content-Length 43898754` / `Accept-Ranges: bytes`；整包 sha256 `3af8b0e7e0f835ae9d414ce5df580237a3cfb08d586c9fbbb0f7ff29ad5b14ba`（`unzip -t` 无错误后固定） |
+| Range 行为（与 §6 相反） | 2026-11-23 复测 `Range: bytes=1048576-` → `206` + `Content-Length 42850178`；`Range: bytes=43898754-`（断点恰好在整包处）→ **`416` + `text/html`**(213 B) —— 该源**会**回 416，`.part` 走 `RETRY_FROM_START` 自愈（整包重下一次，不会循环）；OSS 同情形回 200，两侧都在 `AsrDownloadPolicy` 里有对应用例 |
 | 客户端校验 | 与 FunASR 共用 `AsrDownloadPolicy` / `AsrModelDownloader`（`.part` + `Range` + 类型 / 长度 / 摘要），解压带 zip-slip 防护 —— 见 `VoskModelStoreTest` |
 | 权威值落点 | `VoskModelStore.EXPECTED_BYTES` / `EXPECTED_SHA256`（改源必须同时改这两处与 `VoskModelStoreTest` 的断言） |
+
+> **镜像约束（2026-11-23 补）**：`EXPECTED_BYTES` / `EXPECTED_SHA256` 是写死的常量，`-PvoskModelUrl` 只换地址。
+> 镜像到自有 OSS 时包体必须**逐字节同源**（同一次下载的产物直接上传、禁止重新打包），否则字节数或摘要
+> 必然变化，客户端 3 次全部失败。要「同源换包」得把包长 / 摘要也做成配置项，属新 issue。
 
 > 未做（属外部资源变更，需人类拍板后由 SRE 执行）：把该 zip 镜像到 `delivery-service-smzk`
 > 以摆脱境外单源；`check_model_host.py` 目前只探测 FunASR 的 `asrModelUrl`，不覆盖本条。
@@ -298,4 +302,4 @@ jobs:
 |---|---|---|
 | 2026-11-09 | 新建；实测 `cvm` 被备案拦截、官方源可用、探测脚本上线 | 见 §1 与 issue VOCA-35 评论 |
 | 2026-11-09 | **默认源切到阿里云 OSS**；§1 复测 `cvm`（302 → dnspod 拦截页后 502 / 166 B）；新增 §5.1 落地配置、§6 OSS 行为差异、§7 成本与恢复、§8 检查表 OSS 项 | `check_model_host.py --sha256` 9/9 全绿、无参数探测 7/7 全绿、`check_static` 6/6、`check_crosscut` 138/138；见 VOCA-35 评论 |
-| 2026-11-18 | 新增 §10：Vosk 活链路（`voskModelUrl`）成为第二个模型源，客户端下载器与 FunASR 合一 | VOCA-474：`./gradlew :app:testDebugUnitTest --tests "com.ispeech.data.*"` 48/48、`check_crosscut` 151/151、`check_static` 6/6 |
+| 2026-11-18 | 新增 §10：Vosk 活链路（`voskModelUrl`）成为第二个模型源，客户端下载器与 FunASR 合一 | VOCA-474：`./gradlew :app:testDebugUnitTest --tests "com.ispeech.data.*"` 69/69（AsrModelInstall 19 + FunAsr 16 + PhraseCsvImport 13 + Vosk 21）、`check_crosscut` 183/183、`check_static` 6/6（2026-11-23 复跑） |

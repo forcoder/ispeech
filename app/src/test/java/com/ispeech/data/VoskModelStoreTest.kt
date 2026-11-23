@@ -210,7 +210,7 @@ class VoskModelStoreTest {
     }
 
     @Test
-    fun `摘要不符判为 DIGEST_MISMATCH 由下载器删包后重下`() {
+    fun `摘要不符判为 DIGEST_MISMATCH（删包重下由集成层覆盖，见 PR 说明）`() {
         val plan = AsrDownloadPolicy.planForDigest(
             actualSha256 = "deadbeef".repeat(8),
             expectedSha256 = sha256,
@@ -219,6 +219,8 @@ class VoskModelStoreTest {
         assertEquals(AsrDownloadPolicy.Action.REJECT, plan.action)
         assertEquals("DIGEST_MISMATCH", plan.category)
         assertTrue(plan.detail.contains("sha256="))
+        // 本用例只钉住**判定**；「AsrModelDownloader 真删 .part 并重试」需要 Looper，
+        // 纯 JVM 下建不起来，该项属集成层证据，由 VOCA-476 真机回归与代码路径评审覆盖。
     }
 
     @Test
@@ -266,23 +268,28 @@ class VoskModelStoreTest {
     fun `含上级目录条目的 zip 被拒且不留任何半成品文件`() {
         val outside = File(tmp.root, "outside")
         assertTrue(outside.mkdirs())
+        // dest 比 outside 深两级：越界条目必须落在 outside/work/ 里才证明它真的逃出了 dest
         val dest = File(outside, "work/model")
-        val evil = File(outside, "evil.txt")
+        val escaped = File(outside, "work/evil.txt")
 
         val zip = zipOf(
             "vosk-model-small-cn-0.22/conf/model.conf" to "am-mvn",
-            // 相对顶层目录之后仍是 ../：必须被 canonicalPath 前缀校验挡下
-            "vosk-model-small-cn-0.22/../../evil.txt" to "pwned",
+            // 这一条落在 dest 之内、且排在越界条目**之前**：它一定会被先解出来，
+            // 用它证明「先解出来的条目也被清理」，而不是靠异常提前抛出蒙混过去
             "vosk-model-small-cn-0.22/grafana/service" to "still-pwned",
+            // 越界条目放最后：确保前面几条已实打实写盘
+            "vosk-model-small-cn-0.22/../evil.txt" to "pwned",
         )
 
         val thrown = runCatching { VoskModelStore.extractZip(zip, dest) }.exceptionOrNull()
         assertTrue("越界条目必须以异常失败，实际=$thrown", thrown is AsrDownloadException)
         assertEquals("ARCHIVE_ENTRY_ESCAPE", (thrown as AsrDownloadException).category)
 
-        // 越界产物没落盘，先解出来的条目也被清理，目录本身不残留
-        assertFalse(evil.exists())
-        assertFalse(File(outside, "grafana/service").exists())
+        // 越界产物没落盘（目标点是 outside/work/evil.txt，不是 outside/evil.txt）
+        assertEquals(File(outside, "work/evil.txt").canonicalPath, escaped.canonicalPath)
+        assertFalse("越界条目不得写到模型目录之外：${escaped.path}", escaped.exists())
+        // 越界之前已解出的条目同样被清理
+        assertFalse("已解出的条目必须随目录一起清掉", File(dest, "grafana/service").exists())
         assertFalse("解压目录不得留下半个模型", dest.exists())
     }
 
