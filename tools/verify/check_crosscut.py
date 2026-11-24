@@ -19,7 +19,22 @@
      校验脚本 vs 源码
   8. 语音输入（VOICE / ASR）全链路：KeyDef -> 工具栏 -> 服务状态机 -> VoiceInputController
      -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风授权提示
-     （VOCA-166：未授权跳转只由用户点候选条「去授权」触发，语音键路径不再自动跳页）
+     （VOCA-166：未授权跳转只由用户点候选条「去授权」触发，语音键路径不再自动跳页）；
+     含 8.2b「识别服务枚举」专项（VOCA-310）：枚举必须用服务方声明的
+     `android.speech.RecognitionService`（不是调用方的 RECOGNIZE_SPEECH）、必须保留
+     BIND_RECOGNITION_SERVICE 真服务过滤、判定计数必须进 AsrTrace、拦下会话的 reason
+     必须走 RecognitionServices.REASON_*，且 ev=blocked 的两个打点出口（服务侧 traceVoiceBlocked
+     / 控制器侧 startListening 的绑定失败）逐个钉住，少钉一个也 FAIL。
+     拦下出口按**发射器**的调用点采集，不按 `AsrTrace.EV_BLOCKED` 这个 token 采集（打回项 4）：
+     引用常量、把事件名写成裸串、把点号折下一行、ev 绕本地 `val`，这四种走
+     `AsrTrace.w(` / `AsrTrace.i(` / `AsrTrace.line(` 的写法多一个没断言的出口都 FAIL。
+     绕过封装直接 `Log.x(AsrTrace.TAG, …)` 也单独拦一条（条件项 C1），`AsrTrace.kt` 内部
+     不带限定名的 `Log.w(TAG, line(…))` 是发射器本体，不在采集里。
+     经 `import … as` 别名发射、把 TAG 存进变量、把 TAG 写成字面串 `"AsrTrace"` 三种写法实测走得出
+     采集，明确记为不在采集范围（`tools/verify/check_voca310_gate.py` 的 N1 / N2 / N3 ——
+     条件项 C1′），它们照样打出一行 `ev=blocked`，破的是覆盖面被写成全称，不是「拦下必有归类」这条契约。
+     上面这几句措辞与变异结果是否一致、条数是否漂了，由 `python3 tools/verify/check_voca310_gate.py`
+     逐只复跑核对，不靠人肉对照
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -91,6 +106,12 @@ INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "
 ASSOCIATION_COMMIT = JAVA / "engine" / "AssociationCommit.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
+ASR_TRACE = JAVA / "input" / "AsrTrace.kt"
+RECOGNITION_SERVICES_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "RecognitionServicesTest.kt"
+# 识别服务**自己**声明的 action（服务方），与调用方发起识别用的
+# `android.speech.action.RECOGNIZE_SPEECH` 不是一回事 —— 拿后者枚举服务，命中永远是 0 条（VOCA-310）。
+RECOGNITION_SERVICE_ACTION = "android.speech.RecognitionService"
+BIND_RECOGNITION_PERMISSION = "android.permission.BIND_RECOGNITION_SERVICE"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
 ASR_SETTINGS = JAVA / "settings" / "store" / "AsrSettings.kt"
 ASR_SCREEN = JAVA / "settings" / "asr" / "AsrSettingsScreen.kt"
@@ -236,6 +257,16 @@ def function_region(text: str, header_regex: str) -> str:
     stop = re.search(r"\n    (?://|private fun |fun )", text[m.end():])
     end = m.end() + stop.start() if stop else len(text)
     return text[m.start():end]
+
+
+def enclosing_fun(text: str, idx: int) -> str:
+    """返回 text[idx] 落在哪个 `fun` 体内（顶层 / 匹配不到返回 ""）。
+
+    用来把一次埋点调用归到它的**出口函数**上：这样「新增了没人断言的出口」和「把某个出口删了」
+    都能被同一条断言抓到，不依赖调用点顺序或行号。
+    """
+    names = re.findall(r"\n[ \t]*(?:(?:private|internal|protected|suspend|override|open)\s+)*fun\s+(\w+)\s*[(<]", text[:idx])
+    return names[-1] if names else ""
 
 
 def when_subject_blocks(text: str):
@@ -930,6 +961,238 @@ def check_voice_chain() -> None:
         not missing,
         "VoiceInputController 覆盖系统识别器 / 忙重试 / 释放麦克风 / 宿主包名 / 自定义组件",
         f"{rel(VOICE_CONTROLLER)} 缺少关键实现：{missing}",
+    )
+
+    # 8.2b 识别服务枚举：action 用对 + 真服务过滤留住 + 判定结果有埋点（VOCA-310）
+    #      这类错误的代价不对称：不崩、不报错，只是每次静默返回 0 条，语音键于是永远进不到
+    #      「识别中」。所以正反两个方向都查——枚举处不许出现调用方 action，
+    #      发起识别处也不许被「顺手改」成服务方 action。
+    #      打回项 2 补的是另一半：拦下会话的三条 reason 逐个钉住打点出口，
+    #      「点了语音键却没进识别中」不允许存在查不到日志的路径。出口有两个（服务侧统一入口
+    #      traceVoiceBlocked / 控制器侧 startListening 的绑定失败），两处各有一条断言，
+    #      外加一条「main 里 ev=blocked 的出口集合就是这两个」的结构性断言——多一个没钉住的出口也 FAIL。
+    #      打回项 4 改的是这条集合断言的**采集口径**：抓发射器（AsrTrace.w/i 的调用点），
+    #      不抓 `AsrTrace.EV_BLOCKED` 这个 token——ev 形参是无类型 String，新出口写裸串 "blocked"
+    #      与引用常量在编译期、字节码、logcat 上一模一样，按 token 采集会从断言底下走过去。
+    query_region = strip_comments(function_region(controller, r"private fun queryRecognizers\("))
+    probe_region = strip_comments(function_region(controller, r"fun probeUsableServices\("))
+    intent_region = strip_comments(function_region(controller, r"private fun buildIntent\("))
+    usable_region = strip_comments(function_region(controller, r"fun usable\("))
+    blocked_region = strip_comments(function_region(controller, r"fun blockedReason\("))
+    reason_consts = strip_comments(controller)
+    svc = strip_comments(service)
+    toggle_region = strip_comments(function_region(svc, r"private fun toggleVoiceInput\("))
+    blocked_trace = strip_comments(function_region(svc, r"private fun traceVoiceBlocked\("))
+    bind_region = strip_comments(function_region(controller, r"private fun startListening\("))
+    recognition_test = read(RECOGNITION_SERVICES_TEST)
+    # ev=blocked 的打点出口，按 (文件, 所在函数) 归属；下面几条断言一一对着它。
+    # 采的是**发射器**（AsrTrace.w / AsrTrace.i / AsrTrace.line 的调用点）：ev 传的是常量还是裸串，
+    # 行为完全相同，所以两种写法都要算进出口集合（VOCA-310 打回项 4）。
+    # 条件项 C1 补的两个方向：点号与实参之间允许换行（`AsrTrace` ↵ `.w(…)` 是同一条语句），
+    # 以及 `AsrTrace.line()` —— 它和 w/i 的形参同序（第二个实参就是事件名），走它拼日志同样算发射。
+    # 事件名的取值从 AsrTrace.kt 现读，门禁里不另抄一份字面量。
+    # 采集只到**带限定名**的调用点：`import … as` 别名、TAG 存进变量、TAG 写成字面串这三种走得出
+    # （check_voca310_gate.py 的 N1/N2/N3 实测），别把下面两条正则当成全称覆盖。
+    m_ev_blocked = re.search(r'const val EV_BLOCKED\s*=\s*"([^"]+)"', strip_comments(read(ASR_TRACE)))
+    ev_blocked_value = m_ev_blocked.group(1) if m_ev_blocked else ""
+
+    def top_level_arg(body: str, i: int):
+        """从下标 i 读到下一个顶层逗号 / 右括号，返回 (实参文本, 该逗号的下标)。
+
+        按括号与引号配平，是为了让 `if (x) AsrTrace.EV_EMPTY else AsrTrace.EV_RESULT` 这种
+        ev 写法（PR #12 里就有）不被切成半截 —— 只按 [^,] 截会误报成违规。
+        """
+        depth, quote, chars = 0, None, []
+        while i < len(body):
+            c = body[i]
+            if quote is not None:
+                if c == quote:
+                    quote = None
+            elif c in '"\'':
+                quote = c
+            elif c in "([{":
+                depth += 1
+            elif c in ")]}":
+                if depth == 0 and c == ")":
+                    break
+                depth -= 1
+            elif c == "," and depth == 0:
+                break
+            chars.append(c)
+            i += 1
+        return "".join(chars).strip(), i
+
+    blocked_sites = set()
+    ev_sites = []
+    raw_tag_sites = []
+    for kt in sorted(JAVA.rglob("*.kt")):
+        kt_body = strip_comments(read(kt))
+        for m in re.finditer(r"AsrTrace\s*\.\s*(?:w|i|line)\s*\(", kt_body):
+            _, comma = top_level_arg(kt_body, m.end())  # 第一实参 = sessionId
+            ev, _ = top_level_arg(kt_body, comma + 1)   # 第二实参 = 事件名
+            site = (kt.name, enclosing_fun(kt_body, m.start()), ev)
+            ev_sites.append(site)
+            literals = re.findall(r'"([^"]*)"', ev)
+            if re.search(r"AsrTrace\.EV_BLOCKED\b", ev) or ev_blocked_value in literals:
+                blocked_sites.add(site[:2])
+        # 绕过封装、自己拿 AsrTrace.TAG 发日志：事件名不再经过任何形参，
+        # 上面的 ev 常量断言与出口集合都读不到它（条件项 C1 的第三种写法）。
+        # AsrTrace.kt 内部的 `Log.w(TAG, line(…))` 不带限定名，正是发射器本体，不在采集范围。
+        for m in re.finditer(r"Log\s*\.\s*\w+\s*\(\s*AsrTrace\s*\.\s*TAG\s*,", kt_body):
+            raw_tag_sites.append((kt.name, enclosing_fun(kt_body, m.start())))
+    off_ev = sorted(
+        s for s in ev_sites
+        if re.search(r'"[^"]*"', s[2]) or not re.search(r"AsrTrace\.EV_\w+", s[2])
+    )
+    check(
+        bool(ev_sites) and not off_ev,
+        "AsrTrace 打点的 ev 实参只由 AsrTrace.EV_* 常量给出（不写字面量、不绕本地常量）",
+        f"app/src/main 下这些打点调用点的第二个实参不是 AsrTrace.EV_* 常量引用：{off_ev} —— "
+        f"ev 形参是无类型 String，写成裸串 \"blocked\"（或绕一道本地常量）与引用常量编出来的字节码、"
+        f"打进 logcat 的一模一样，上面的出口集合与 docs 里的 grep 口径都抓不到这种新出口"
+        f"（VOCA-310 打回项 4）",
+    )
+    check(
+        not raw_tag_sites,
+        "事件名一律经 AsrTrace 封装发射（main 里没有直接 Log.x(AsrTrace.TAG, …) 的调用点）",
+        f"app/src/main 下这些调用点绕过 AsrTrace.w / i / line 直接拿 AsrTrace.TAG 发日志：{raw_tag_sites} —— "
+        f"这种写法的事件名不经过形参，ev 常量断言与下面的出口集合都读不到它，"
+        f"拦下会话可以再加一个没断言的出口（VOCA-310 条件项 C1）",
+    )
+
+    m_action = re.search(r'const val SERVICE_INTERFACE\s*=\s*"([^"]+)"', strip_comments(controller))
+    action_value = m_action.group(1) if m_action else ""
+    check(
+        action_value == RECOGNITION_SERVICE_ACTION,
+        f"识别服务 action 常量取值正确（SERVICE_INTERFACE={action_value or '<缺失>'}）",
+        f"{rel(VOICE_CONTROLLER)} 的 SERVICE_INTERFACE 取值是 {action_value!r}，应为 "
+        f"{RECOGNITION_SERVICE_ACTION!r}（VOCA-310：写成调用方的 RECOGNIZE_SPEECH 就查不到任何服务）",
+    )
+
+    m_queries = re.search(r"<queries>.*?</queries>", manifest, re.S)
+    declared = set(re.findall(r'<action\s+android:name="([^"]+)"', m_queries.group(0))) if m_queries else set()
+    check(
+        bool(action_value) and action_value in declared,
+        "枚举用的 action 与 Manifest <queries> 声明同一个值（targetSdk 34 包可见性）",
+        f"SERVICE_INTERFACE={action_value!r} 不在 {rel(MANIFEST)} 的 <queries> action 名单 {sorted(declared)} 里："
+        f"包可见性没放行，查询照样拿不到服务",
+    )
+    check(
+        "queryIntentServices" in query_region and "RecognitionServices.SERVICE_INTERFACE" in query_region,
+        "枚举识别服务走服务方 action（RecognitionServices.SERVICE_INTERFACE）",
+        f"{rel(VOICE_CONTROLLER)} 的 queryIntentServices 没用 RecognitionServices.SERVICE_INTERFACE "
+        f"（VOCA-310 回归：命中集合恒为 0，前置判定把有服务的机器也判成「无可用服务」）",
+    )
+    check(
+        bool(query_region) and "ACTION_RECOGNIZE_SPEECH" not in query_region,
+        "枚举处没有再出现调用方 action",
+        f"{rel(VOICE_CONTROLLER)} queryRecognizers() 里仍拿 RecognizerIntent.ACTION_RECOGNIZE_SPEECH 枚举服务"
+        f"（VOCA-310 原缺陷）",
+    )
+    check(
+        "RecognizerIntent.ACTION_RECOGNIZE_SPEECH" in intent_region,
+        "发起识别仍用调用方 action（buildIntent 没被顺手改掉）",
+        f"{rel(VOICE_CONTROLLER)} buildIntent() 不再用 RecognizerIntent.ACTION_RECOGNIZE_SPEECH："
+        f"两个 action 又被混为一谈",
+    )
+    check(
+        "RecognitionServices.usable(candidates)" in probe_region,
+        "前置判定保留真服务过滤（BIND_RECOGNITION_SERVICE），桩服务不会被重新放进来",
+        f"{rel(VOICE_CONTROLLER)} probeUsableServices() 未调用 RecognitionServices.usable()："
+        f"丢掉 BIND_PERMISSION 过滤，华为 FakeRecognitionService 会以「说完不出字」复发",
+    )
+    check(
+        bool(usable_region) and "BIND_PERMISSION" in usable_region,
+        "真服务判据 = 服务声明了 BIND_RECOGNITION_SERVICE",
+        f"{rel(VOICE_CONTROLLER)} RecognitionServices.usable() 不再按 BIND_PERMISSION 过滤",
+    )
+    check(
+        all(t in probe_region for t in ("AsrTrace.EV_BIND", '"services" to', '"usable" to', '"dropped" to')),
+        "探测结果进 AsrTrace：候选数 / 真服务数 / 被过滤数一行可见",
+        f"{rel(VOICE_CONTROLLER)} probeUsableServices() 缺 ev=bind 计数埋点（VOCA-310 验收口径 3）",
+    )
+    check(
+        "controller.probeBlockedReason(asr)" in toggle_region,
+        "语音键的前置判定走纯函数 probeBlockedReason（判定与埋点不脱节）",
+        f"{rel(SERVICE)} toggleVoiceInput() 不再问 controller.probeBlockedReason(asr)："
+        f"判定又散回调用点，单测与门禁都管不到（VOCA-310 打回项 2）",
+    )
+    check(
+        "traceVoiceBlocked(RecognitionServices.REASON_NO_RECOGNITION_AVAILABLE)" in toggle_region,
+        "拦下分支之一：控制器为空的会话走 traceVoiceBlocked 归类",
+        f"{rel(SERVICE)} toggleVoiceInput() 的 controller == null 分支不再调用"
+        f" traceVoiceBlocked(REASON_NO_RECOGNITION_AVAILABLE)：输入法销毁后的那一按又是静默出口"
+        f"（VOCA-310 打回项 2）",
+    )
+    check(
+        "traceVoiceBlocked(blocked)" in toggle_region,
+        "拦下分支之二：探测判定拦下的会话走 traceVoiceBlocked（no_usable_service 的实际出口）",
+        f"{rel(SERVICE)} toggleVoiceInput() 里 probeBlockedReason 返回非空后不再调用"
+        f" traceVoiceBlocked(blocked)：桩服务机型「点了语音键却没进识别中」只剩文案、"
+        f"logcat 里没有 ev=blocked（VOCA-310 打回项 2 的探测分支）",
+    )
+    check(
+        "AsrTrace.EV_BLOCKED" in blocked_trace and '"reason" to reason' in blocked_trace,
+        "服务侧统一入口 traceVoiceBlocked 把 reason 打进 AsrTrace",
+        f"{rel(SERVICE)} traceVoiceBlocked() 不再打 AsrTrace ev=blocked + reason："
+        f"拦下会话的三种原因（no_recognition_available / no_usable_service / service_bind_failed）在日志里消失",
+    )
+    check(
+        "AsrTrace.EV_BLOCKED" in bind_region
+        and "RecognitionServices.REASON_SERVICE_BIND_FAILED" in bind_region,
+        "拦下分支之三：绑定失败在 startListening 里就地打 ev=blocked（不经服务侧入口）",
+        f"{rel(VOICE_CONTROLLER)} startListening() 不再打 AsrTrace.EV_BLOCKED +"
+        f" RecognitionServices.REASON_SERVICE_BIND_FAILED：探测放行、识别器却建不起来那条路"
+        f"又回到只有文案没有归类（VOCA-310 验收口径 1(b)）",
+    )
+    check(
+        blocked_sites == {("IspeechImeService.kt", "traceVoiceBlocked"),
+                          ("VoiceInputController.kt", "startListening")},
+        "ev=blocked 的打点出口有两个、逐个被上面钉住（采集范围内不存在第三处未断言的出口：仅指写成 "
+        "`AsrTrace.w/i/line(` 或 `Log.x(AsrTrace.TAG, …)` 这两种带限定名的调用点）",
+        f"app/src/main 下 AsrTrace 打点里 ev=blocked 的实际出口（按发射器调用点采集：`AsrTrace.w/i/line`，"
+        f"点号换行与写裸串都算；绕过封装的 `Log.x(AsrTrace.TAG, …)` 由上面一条单独拦）是 "
+        f"{sorted(blocked_sites)}，应为 "
+        f"[('IspeechImeService.kt', 'traceVoiceBlocked'), ('VoiceInputController.kt', 'startListening')]："
+        f"少一个说明拦下会话又出现查不到日志的路径，多一个说明新增了没配断言、也没进 docs 表格的出口"
+        f"（VOCA-310 打回项 2）。采集范围只到带限定名的调用点为止：`import … as` 别名发射、TAG 存进变量、"
+        f"TAG 写成字面串 `\"AsrTrace\"` 三种写法走得出这一条（见 check_voca310_gate.py 的 N1/N2/N3）",
+    )
+    check(
+        not re.search(r'"reason"\s+to\s*"', toggle_region + bind_region)
+        and not re.search(
+            r'"(no_usable_service|no_recognition_available|service_bind_failed)"',
+            toggle_region + bind_region,
+        ),
+        "服务侧与控制器侧都不写裸 reason 字面量（词汇单一来源 = RecognitionServices.REASON_*）",
+        f"{rel(SERVICE)} toggleVoiceInput() 或 {rel(VOICE_CONTROLLER)} startListening() 里把 reason"
+        f" 写成了内联字面量：绕过 RecognitionServices.REASON_* 会让改名时漏改一处，取证命令按不到（VOCA-310）",
+    )
+    check(
+        all(
+            m in reason_consts
+            for m in (
+                'REASON_NO_RECOGNITION_AVAILABLE = "no_recognition_available"',
+                'REASON_NO_USABLE_SERVICE = "no_usable_service"',
+                'REASON_SERVICE_BIND_FAILED = "service_bind_failed"',
+            )
+        ),
+        "三个 reason 字面量稳定（docs/voice-input.md 的取证命令按它们 grep）",
+        f"{rel(VOICE_CONTROLLER)} 的 REASON_* 常量取值变了：docs 里的 grep 关键字与历史日志都对不上",
+    )
+    check(
+        "!recognitionAvailable -> REASON_NO_RECOGNITION_AVAILABLE" in blocked_region
+        and "usableServices == 0 -> REASON_NO_USABLE_SERVICE" in blocked_region,
+        "「服务可绑定 / 不可绑定」两态分别归到两个 reason（纯函数，单测覆盖）",
+        f"{rel(VOICE_CONTROLLER)} RecognitionServices.blockedReason() 不再按 available / usable 两态分流："
+        f"桩服务机型与无服务机型又在日志里混成一类",
+    )
+    check(
+        RECOGNITION_SERVICES_TEST.exists()
+        and "REASON_NO_RECOGNITION_AVAILABLE" in recognition_test
+        and "REASON_NO_USABLE_SERVICE" in recognition_test,
+        "单测覆盖前置判定两态（放行 / 拦下），不只守 action 取值",
+        f"{rel(RECOGNITION_SERVICES_TEST)} 缺 blockedReason 两态断言：判定改回去没人拦",
     )
 
     # 8.3 服务接线：创建 / 销毁 / 语音态上屏与取消
