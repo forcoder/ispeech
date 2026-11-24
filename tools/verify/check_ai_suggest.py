@@ -30,6 +30,7 @@ HOME = ROOT / "app/src/main/java/com/ispeech/settings/HomeScreen.kt"
 NAV = ROOT / "app/src/main/java/com/ispeech/settings/nav/IspeechNavGraph.kt"
 PANEL = ROOT / "app/src/main/java/com/ispeech/input/AiReplyPanel.kt"
 GUARD = ROOT / "app/src/main/java/com/ispeech/input/AiSourceGuard.kt"
+ADB_SCRIPT = ROOT / "tools/verify/voca628_ai_one_tap_adb.py"
 LAYOUT = ROOT / "app/src/main/res/layout/ime_input_view.xml"
 
 _passed = 0
@@ -237,6 +238,35 @@ def check_one_tap_fill() -> None:
         "aiReplyPanel?.submit(emptyList())" in service,
         "一步填入：无结果 / 失败时清空面板（AC-5a.4）",
         "dismissAiState 未清空面板结果",
+    )
+    # ── adb 取证脚本自身的判据（VOCA-628 质检三轮打回的地方）──
+    # 脚本是 AC 的唯一复现入口，它的判据烂了会让「真机上通过」这件事无从核实，
+    # 所以这里把三处已裁决的口径钉成静态断言，避免下一轮又按坐标猜 / 又空断言 PASS。
+    adb = read(ADB_SCRIPT)
+    check(
+        "def find_result_rows(" in adb and "w - 210" in adb,
+        "取证脚本：结果行与「…」按截图自扫定位，不按 W−16dp 猜",
+        "voca628 脚本未自扫白底行带 / 行尾暗列",
+    )
+    check(
+        "skipped: bool = False" in adb and "def skip(" in adb,
+        "取证脚本：区分 PASS / FAIL / SKIP，未取证不冒充通过",
+        "脚本缺 SKIP 档，快捷短语模式会把 5a.5 空断言报成 PASS",
+    )
+    check(
+        "if not d.open_ai_panel():" in adb and "return 2" in adb,
+        "取证脚本：5a.0 前置失败硬停，不继续判后续用例",
+        "open_ai_panel 失败后仍往下执行",
+    )
+    check(
+        "expect_results=False" in adb and "def panel_open(" in adb,
+        "取证脚本：空态面板与「AI 键点不中」分开判",
+        "空态面板会被误报成 AI 键定位失败",
+    )
+    check(
+        "args.strict_device and \"emulator\" in args.serial" in adb,
+        "取证脚本：非真机跑 5a.3 不给 PASS（issue 明文要求真机）",
+        "--strict-device 未拦截模拟器上的 5a.3",
     )
     check(
         "submitAiResults(" in service,

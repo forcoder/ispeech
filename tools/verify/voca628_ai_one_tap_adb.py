@@ -24,15 +24,26 @@
 
 输出
 ----
-逐条打印 `PASS` / `FAIL` 与判定依据（logcat 原文 + 输入框文本），最后给出汇总。
-每条 FAIL 都会带一句「怎么补证据」，与 issue 的打回项一一对应。
+逐条打印 `PASS` / `FAIL` / `SKIP` 与判定依据（logcat 原文 + 输入框文本 + 截图读数），
+最后给出汇总。三档的含义：
+
+- `PASS`：拿到了本条 AC 要求的实测证据；
+- `SKIP`：前置不满足，本次没取证 —— 快捷短语模式下的 5a.5（按设计不计采纳率）、
+  非真机上的 5a.3（issue 明文要求真机，`--strict-device` 下才算 PASS）。
+  SKIP 不进失败数，也不冒充通过；
+- `FAIL`：拿到了证据但不符合 AC。`5a.0`（AI 面板开不出来）是硬门，失败即返回非 0、
+  后续用例一律不执行 —— 否则整批读数都建在一个开不出来的面板上，没有意义。
+
+退出码：0 = 无真失败；1 = 有 FAIL；2 = 前置整体不可用（宿主输入框 / AI 面板）。
 
 已知限制
 --------
-- 5a.3 的时序证据（生成后用户改输入框）在模拟器上也能跑，但 issue 要求真机，
-  脚本不区分设备类型，`--strict-device` 可强制要求非 emulator。
+- 5a.3 的时序证据（生成后用户改输入框）在模拟器上也能跑出读数，但只记作补充证据、
+  判 `SKIP`；真机到位后加 `--strict-device` 才判 `PASS` / `FAIL`。
 - 输入法窗口不在 uiautomator 的层级里，键盘 / 面板坐标按截图色块定位，
-  依赖 debug 包的配色（#F2F3F5 面板底 / #FFFFFF 行底 / #CFD4DB 功能键）。
+  依赖 debug 包的配色（#F2F3F5 面板底 / #FFFFFF 行底 / #5B6CFF 主色）。
+- 结果行与行尾「…」每轮重开面板后重新自扫（[Driver.find_result_rows]），不复用别处
+  算出的坐标 —— 「…」字形只有 24px 宽，按 dp 猜落点会点到行主体上去。
 """
 
 from __future__ import annotations
@@ -58,6 +69,10 @@ class Case:
     ac: str
     ok: bool
     detail: str
+    #: 前置不满足（例如快捷短语模式天然不产生采纳统计）时记为 SKIP。
+    #: 以前这种情况给的是 `ok=True`，正文却写「按设计不计采纳率」——空断言冒充 PASS，
+    #: 质检按「PASS 必须有统计 +1 与语料行」打回，所以这里单列一档，不进失败数也不假装通过。
+    skipped: bool = False
 
 
 class Driver:
@@ -70,7 +85,7 @@ class Driver:
         self.last_stats_after = ""
         self.keyboard_baseline = 0
         self.last_pick_text = ""
-        self.row_offset = None
+        self.row_scan: list[tuple[int, int, int]] = []
         self.ai_key_xy = None
         self.needle = ""
         # 流式抓 logcat 到文件：模拟器上 GMS / Chrome 的噪声能在 3 秒内把 2 MiB 环形
@@ -194,34 +209,38 @@ class Driver:
         self.adb("shell", "input", "tap", str(self.screen_width() // 4), str(y))
 
     def find_result_y(self) -> int | None:
-        """自校准：在面板内自上而下试几个候选纵坐标，谁点出了 `ai_adopt` 就是结果行。
+        """定位第一行结果，并验证「点它真的会上屏」。
 
-        为什么不按颜色 / 布局常量算：结果行的实际像素高度随设备密度换算（本机 38dp
-        实测 94px，按 3.25 换算会算成 123px），行底色又会随按下态 / 主题变；写死任何
-        一个都会在换机型后落到行外。这里用「点了到底有没有上屏」这个产品行为本身来
-        定位 —— 拿到了 `ai_adopt` 才算找到，定位与断言是同一条证据，不会自欺。
+        两步，先看像素再验证行为：
+        1. [find_result_rows] 自扫白底行带，取第一条的行中心 —— 不依赖密度换算或
+           布局常量，换机型 / 换主题都不用改；
+        2. 在该行左侧（屏幕 1/4 处，避开行尾「…」）真点一次，拿到 `ai_adopt` 才算
+           定位成功。定位与断言是同一条证据，不会自欺。
+        第 2 步拿到的那次上屏就是 5a.1 的实测数据，调用方直接复用。
 
-        代价是要先点一次（会真的上屏一条），所以调用方应在 5a.1 里做这件事，
-        把结果留到后面的用例复用。
+        备选：截图扫描没找到行（面板配色变了 / Pillow 缺失）时，才退到旧的「试几个
+        候选纵坐标」办法，避免整套脚本直接失效。
         """
         top = self.panel_top()
         if top is None:
             return None
-        for off in (110, 100, 130, 90, 150, 80, 170, 200, 230):
-            y = top + off
-            if y >= self.ime_frame()[1]:
+        rows = self.find_result_rows("rows_scan")
+        candidates = [yc for yc, _xc, _y1 in rows]
+        if not candidates:
+            candidates = [top + off for off in (110, 100, 130, 90, 150, 80, 170, 200, 230)]
+        for y in candidates:
+            if y >= (self.ime_frame() or (0, 0))[1]:
                 continue
             self.logcat_clear()
             self.tap_result(y)
             time.sleep(2.2)
             if "ai_adopt" in self.logcat():
-                self.row_offset = y - top
+                self.row_scan = rows
                 return y
-            # 没上屏：若面板已被点掉（误触空白 / 关闭），重新打开再试
+            # 没上屏：面板可能已被点掉，重开后继续下一个候选
             if not self.keyboard_shown():
-                continue
-            if self.panel_top() is None:
-                return None
+                self.open_host_field(self.needle)
+                self.open_ai_panel()
         return None
 
     # ── 场景 ──────────────────────────────────
@@ -355,17 +374,31 @@ class Driver:
         height = f[1] - f[0]
         return height >= self.keyboard_baseline * 0.8
 
-    def open_ai_panel(self, retries: int = 2) -> bool:
-        """点工具栏 AI 键，直到 `ai_results` 日志出现（= 面板真的出了结果）。
+    def panel_open(self) -> bool:
+        """面板是否已展开（不论有没有结果）。判据：IME 窗口明显矮于键盘态。
 
-        为什么不信「键盘收起」：空面板（未登录 / 生成失败）也会收起键盘，用高度判据会
-        把「面板开了但 0 条」和「面板开了有结果」混为一谈，于是 5a.1 在空面板上失败时
-        看起来像「点行不上屏」。这里直接用 `ai_results` 这个产品自身的结构化日志做判据，
-        和 setOnClickListener 的实际效果强绑定。
+        键盘态 = 工具 + 页码条 + 字母行（本机 1201px）；面板态只剩面板
+        （有结果 1078px，空态 429px）。空面板（未登录 / 生成失败 / 输入为空）
+        **也会**收起键盘，所以「矮了」只能说明面板开了，不能说明有结果 ——
+        这正是上一轮把空态误报成「AI 键没找到」的地方。
+        """
+        f = self.ime_frame()
+        if not f or not self.keyboard_baseline:
+            return False
+        return (f[1] - f[0]) < self.keyboard_baseline * 0.8
+
+    def open_ai_panel(self, retries: int = 2, expect_results: bool = True) -> bool:
+        """点工具栏 AI 键，直到面板展开（`expect_results` 时还要有 `ai_results` 日志）。
+
+        两个判据分工明确，别混用：
+        - 「面板开没开」→ [panel_open]（IME 高度）；空态也算开，5a.4 就靠它取证；
+        - 「有没有结果」→ `ai_results` 日志（只有真的拿到结果才打）。
+        以前只认 `ai_results`，于是空态面板被当成「AI 键点不中」，5a.0 连报 FAIL，
+        还把后面的用例一并带偏（质检 14:45Z 打回项 3）。
 
         AI 键的绝对坐标随「候选条行数 / 页码条 / 设备密度」浮动，所以横纵都不写死：
-        候选扫描点是「工具栏行 × 等分列」，谁点出 `ai_results` 谁就是 AI 键，命中后
-        记进 `self.ai_key_xy` 供本轮后续复用。
+        先复用本轮已命中过的坐标，再按「工具栏行 × 等分列」扫描，命中后记进
+        `self.ai_key_xy` 供后续复用。总点击数封顶 20，避免找不到键时空转。
         """
         frame = self.ime_frame()
         if not frame:
@@ -375,38 +408,46 @@ class Driver:
         # 基准 = 键盘态高度（此时面板未开）。多点几次取最大值，避免候选条动画中途取样。
         baseline = 0
         for _ in range(2):
-            baseline = max(baseline, (self.ime_frame() or (0, 0))[1] - (self.ime_frame() or (0, 0))[0])
+            f = self.ime_frame() or (0, 0)
+            baseline = max(baseline, f[1] - f[0])
             time.sleep(0.4)
         self.keyboard_baseline = baseline
 
-        if self.ai_key_xy and self._try_tap_ai(*self.ai_key_xy):
+        if self.ai_key_xy and self._try_tap_ai(*self.ai_key_xy, expect_results=expect_results):
             return True
 
         w = self.screen_width()
         # 工具栏在候选行之下、字母行之上；高度比例 0.17~0.30 覆盖 1~2 行候选条。
         # 候选顺序：先试最可能的「8 键等宽 × 第 6 个」（实测命中率最高的组合），
-        # 再在少数几个纵坐标上扫，最后才换 7/9 键布局。总点击次数封顶 20，避免在
-        # 找不到键的设备上空转十几分钟（每点一次要等 2s 落日志）。
+        # 再在少数几个纵坐标上扫，最后才换 7/9 键布局。
         primary_x = w * 11 // 16
-        candidates = [(primary_x, top + int((bottom - top) * f))
-                      for f in (0.22, 0.20, 0.24, 0.18, 0.26)]
+        candidates = [(primary_x, top + int((bottom - top) * frac))
+                      for frac in (0.22, 0.20, 0.24, 0.18, 0.26)]
         for i in (5, 4, 6, 3, 7):
             candidates.append((w * i // 8, candidates[0][1]))
         for i in (5, 4):
             candidates.append((w * i // 7, candidates[1][1]))
         for x, y in candidates:
-            if self._try_tap_ai(x, y):
+            if self._try_tap_ai(x, y, expect_results=expect_results):
                 self.ai_key_xy = (x, y)
                 return True
-        self.fail("5a.0", f"点了 {retries} 轮仍没找到能产出 ai_results 的 AI 键（面板没展开）")
+        what = "面板没展开" if expect_results else "空态面板没展开"
+        self.fail("5a.0", f"点了 {retries} 轮仍没找到 AI 键（{what}）")
         return False
 
-    def _try_tap_ai(self, x: int, y: int) -> bool:
-        """点一次 (x,y)，看有没有 `ai_results`；没命中就把宿主输入框复位后返回 False。"""
+    def _try_tap_ai(self, x: int, y: int, expect_results: bool = True) -> bool:
+        """点一次 (x,y)，判断 AI 键是否命中；没命中就把宿主输入框复位后返回 False。
+
+        `expect_results=False`（5a.4 空态）时以「面板已展开」为准：空面板没有
+        `ai_results`，只认日志会永远判不中。
+        """
         self.logcat_clear()
         self.adb("shell", "input", "tap", str(x), str(y))
         time.sleep(2.0)
-        if "ai_results" in self.logcat():
+        if expect_results:
+            if "ai_results" in self.logcat():
+                return True
+        elif self.panel_open():
             return True
         # 点歪了会往宿主里打字 / 收键盘，复位一次再继续扫
         if self.edit_text().strip() != self.needle:
@@ -418,23 +459,32 @@ class Driver:
     def panel_fingerprint(self, tag: str) -> dict:
         """面板区几何 / 颜色指纹，用来区分「列表态」与「详情态」。
 
-        详情页底部固定有「上屏」（`#5B6CFF` 主色）+「关闭」两个按钮，列表态一次都不出现
-        主色；这是比 IME 高度稳的判据——面板是 `WRAP_CONTENT`，3 条列表（3*38+4dp）与
-        详情（10*38dp）的高度差会被设备密度吃掉（实测模拟器 831→831，为 0）。
+        三个判据合起来看，任一单独都不可靠：
+        - `lower_primary`：主色（#5B6CFF）在 IME 窗口**下三分之一**的像素数。详情页底部
+          「上屏」按钮是主色文字，列表态下三分之一全是白行 / 面板灰底，实测模拟器
+          列表 0 → 详情 167。不能用全窗口主色总数当判据：工具栏 AI 键本身就是主色，
+          列表 / 详情都占 5800 上下，差值只有一两百，和噪声同量级（上一轮按
+          `primary_px > list+100` 判，恰好落在噪声边缘）。
+        - `white_rows`：白底结果行的像素行数，列表态每行一条、详情态只剩正文块，
+          实测 597 → 122。
+        - `h`：IME 窗口高度，列表 1078 → 详情 1795（详情是 10 行高 + 按钮）。
         """
         path = self.shot(tag)
         frame = self.ime_frame()
         if not frame:
-            return {"primary_px": 0, "white_rows": 0, "h": 0, "path": path}
+            return {"primary_px": 0, "lower_primary": 0, "white_rows": 0, "h": 0, "path": path}
         try:
             from PIL import Image  # noqa: PLC0415
         except ImportError:
-            return {"primary_px": 0, "white_rows": 0, "h": frame[1] - frame[0], "path": path}
+            return {"primary_px": 0, "lower_primary": 0, "white_rows": 0,
+                    "h": frame[1] - frame[0], "path": path}
         im = Image.open(path).convert("RGB")
         px = im.load()
         w, h = im.size
         top, bot = frame[0], min(frame[1], h)
+        lower_from = top + int((bot - top) * 0.66)
         primary = 0
+        lower_primary = 0
         white_rows = 0
         for y in range(top, bot):
             cnt = sum(1 for x in range(0, w, 4) if px[x, y] == (255, 255, 255))
@@ -443,13 +493,69 @@ class Driver:
             for x in range(0, w, 2):
                 if px[x, y] == (91, 108, 255):
                     primary += 1
-        return {"primary_px": primary, "white_rows": white_rows, "h": bot - top, "path": path}
+                    if y >= lower_from:
+                        lower_primary += 1
+        return {"primary_px": primary, "lower_primary": lower_primary,
+                "white_rows": white_rows, "h": bot - top, "path": path}
+
+    def find_result_rows(self, tag: str = "rows") -> list[tuple[int, int, int]]:
+        """自扫面板里的白底结果行，返回 [(行中心 y, 「…」中点 x, 行底 y)]。
+
+        不再按 `W − 16dp` 猜「…」的落点：实测该式算出 x=1208，而「…」字形只占
+        x[1182,1206]，差 2px 就点回行主体 → 触发一步上屏、面板关闭，被误判成
+        「详情没展开」（质检 14:45Z 打回项 1 的现场）。这里改成客观量：
+        1. 在 IME 窗口内逐行统计纯白（#FFFFFF）像素，连成白底行带 —— 每带的中心
+           就是结果行中心，行高由截图自己说话，不依赖密度换算；
+        2. 在该行带内、屏幕右侧 210px 范围找「有暗像素」的列，取首末列中点作为
+           「…」的 x（「…」是该行唯一的暗色内容，正文预览止于左侧）。
+        找不到白底行（空态 / 面板没开）时返回空列表，由调用方如实判 FAIL / SKIP。
+        """
+        path = self.shot(tag)
+        frame = self.ime_frame()
+        try:
+            from PIL import Image  # noqa: PLC0415
+        except ImportError:
+            return []
+        if not frame:
+            return []
+        im = Image.open(path).convert("RGB")
+        px = im.load()
+        w, h = im.size
+        top, bot = frame[0], min(frame[1], h)
+        bands: list[tuple[int, int]] = []
+        band: list[int] | None = None
+        for y in range(top, bot):
+            cnt = sum(1 for x in range(0, w, 4) if px[x, y] == (255, 255, 255))
+            if cnt > w // 8:
+                band = [y, y] if band is None else [band[0], y]
+            elif band is not None:
+                bands.append((band[0], band[1]))
+                band = None
+        if band is not None:
+            bands.append((band[0], band[1]))
+
+        rows: list[tuple[int, int, int]] = []
+        # 行带矮于 20px 的是正文里的白边 / 分隔线，不是结果行。
+        for y0, y1 in bands:
+            if y1 - y0 < 20:
+                continue
+            yc = (y0 + y1) // 2
+            cols = [x for x in range(max(0, w - 210), w)
+                    if any(min(px[x, y]) < 240 for y in range(y0, y1 + 1, 2))]
+            if not cols:
+                continue
+            rows.append((yc, (min(cols) + max(cols)) // 2, y1))
+        return rows
 
     def fail(self, ac: str, detail: str) -> None:
         self.results.append(Case(ac, False, detail))
 
     def pass_(self, ac: str, detail: str) -> None:
         self.results.append(Case(ac, True, detail))
+
+    def skip(self, ac: str, detail: str) -> None:
+        """前置不满足、本次无法取证：既不算通过也不算失败，汇总里单独列出。"""
+        self.results.append(Case(ac, True, detail, skipped=True))
 
 
 def pref_blob(items: dict[str, str]) -> bytes:
@@ -494,9 +600,17 @@ def report(d: Driver, rc: int) -> None:
         return
     print()
     for c in d.results:
-        print(f"{'PASS' if c.ok else 'FAIL'} {c.ac}  {c.detail}")
-    failed = [c for c in d.results if not c.ok]
-    print(f"\n合计 {len(d.results)} 条，失败 {len(failed)} 条")
+        mark = "SKIP" if c.skipped else ("PASS" if c.ok else "FAIL")
+        print(f"{mark} {c.ac}  {c.detail}")
+    failed = [c for c in d.results if not c.ok and not c.skipped]
+    skipped = [c for c in d.results if c.skipped]
+    tail = f"合计 {len(d.results)} 条，失败 {len(failed)} 条"
+    if skipped:
+        # 不把 SKIP 混进「通过」里：质检的判据是「PASS 必须有实测证据」，
+        # 空断言给 PASS 会被打回，所以这里显式报出来有几条没取证。
+        tail += f"，跳过 {len(skipped)} 条（前置不满足，未取证：" + \
+                "、".join(c.ac for c in skipped) + "）"
+    print("\n" + tail)
 
 
 def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = None) -> int:
@@ -507,23 +621,27 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
         print(f"宿主输入框不是 {needle!r}，放弃（当前 {got!r}）")
         return 2
 
+    # ── AC-5a.0 前置：AI 面板必须能开 ──
+    # 打回项 3：这一条以前 FAIL 了还继续往下判，后面每条都建在开不出来的面板上，
+    # 结果整批读数都是垃圾。现在它是硬门：开不出来就立刻返回非 0，不再出声判后面的用例。
     if not d.open_ai_panel():
+        print("5a.0 前置失败：AI 面板没能展开，后续用例全部未执行（硬停）")
         return 2
     logs = d.logcat()
     if "ai_results" not in logs:
-        d.fail("5a.1", f"AI 键没产出结果，logcat={logs.strip()[-400:]!r}")
+        d.fail("5a.0", f"面板开了但没有 ai_results，logcat={logs.strip()[-300:]!r}")
         return 1
     count = re.search(r"ai_results source=(\w+) count=(\d+)", logs)
     print(f"生成结果：{count.group(0) if count else '?'}")
     source = count.group(1) if count else "?"
+    d.pass_("5a.0", f"{count.group(0) if count else 'ai_results 存在'}（面板展开且产出结果）")
 
-    # ── 定位结果行（自校准：点出 ai_adopt 的 y 就是结果行） ──
-    # 面板行的实际像素位置随设备密度 / 候选条行数浮动，颜色也会随主题变，所以不写死，
-    # 用「点下去有没有真的上屏」来定位；拿到的 y 会复用给 5a.2 的长按。
+    # ── AC-5a.1 点行即上屏、面板关闭、不进详情 ──
+    # 结果行坐标由截图自扫（[find_result_rows]），第一次点击同时就是 5a.1 的证据。
     d.last_stats_before = d.read_file("ai_learning_stats.txt")
     row_y = d.find_result_y()
     if row_y is None:
-        d.fail("5a.1", "面板里点不中结果行（找不到一行能触发 ai_adopt）")
+        d.fail("5a.1", "面板里点不中结果行（自扫白底行带没找到可上屏的一行）")
         return 1
     adopt_log = [ln.strip() for ln in d.logcat().splitlines() if "ai_adopt" in ln]
     text_after_pick = d.edit_text()
@@ -537,57 +655,61 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
     d.last_adopt_log = d.logcat()
     d.last_pick_text = text_after_pick
 
-    # ── AC-5a.2 进详情页，不上屏 ──
-    # AC 原文「长按第 1 行（或点行尾「…」）」是等价入口：`AiReplyPanel.buildRow` 里
-    # 长按与 `textButton(ELLIPSIS)` 都绑 `showDetail(index)`。模拟器的 `input swipe`
-    # 同点 900ms 不触发 `setOnLongClickListener`（实测差异 bbox 只有一个光标闪烁区），
-    # 所以这里走「…」分支取证，长按分支单独如实记录、不记为 PASS。
+    # ── AC-5a.2 详情页入口（长按 / 行尾「…」），不上屏 ──
+    # AC 原文是「长按第 1 行（或点行尾「…」）」，两者等价（`AiReplyPanel.buildRow` 里
+    # 长按与 `textButton(ELLIPSIS)` 都绑 `showDetail(index)`）。模拟器的 `input swipe`
+    # 同点 900ms 不触发 `setOnLongClickListener`，所以主证据走「…」分支，长按分支
+    # 单独 NOTE。
+    # 打回项 1：「…」落点不再按 `W − 16dp` 算（实测算出 1208，字形只占 1182~1206，
+    # 差 2px 就点回行主体 → 一步上屏 → 被误判成「详情没展开」）。改为每轮重开面板后
+    # 重新自扫行带 + 在该行右侧找暗列中点。
     d.open_host_field(needle)
     d.open_ai_panel()
     before = d.edit_text()
     d.logcat_clear()
-    if d.row_offset is None:
-        d.fail("5a.2", "拿不到结果行坐标（5a.1 未定位成功）")
+    rows = d.find_result_rows("5a2_rows")
+    if not rows:
+        d.fail("5a.2", "面板里没扫到白底结果行，无法定位「…」入口")
     else:
-        y = d.panel_top() + d.row_offset
+        yc, more_x, _y1 = rows[0]
         list_fp = d.panel_fingerprint("5a2_list_before")
-        # 行尾「…」：按钮有 10dp 左右内边距，取右侧 16dp 处稳妥落点
-        dens = d.density()
-        more_x = d.screen_width() - int(16 * dens)
-        d.adb("shell", "input", "tap", str(more_x), str(y))
+        d.adb("shell", "input", "tap", str(more_x), str(yc))
         time.sleep(2.5)
         text = d.edit_text()
         adopt = d.logcat()
         detail_fp = d.panel_fingerprint("5a2_detail_after")
-        # 详情态判据：底部出现主色「上屏」按钮（列表态没有主色块），且高度 / 白块布局变化。
-        # 不用「IME 高度变大」当唯一判据：面板是 WRAP_CONTENT，3 条 vs 10 行差 111px 会被
-        # 设备密度吃掉；而 #5B6CFF 主色按钮在列表态一次都不出现，是详情页特有的。
-        expanded = detail_fp["primary_px"] > list_fp["primary_px"] + 100
+        # 详情态判据（三路取其二，见 [panel_fingerprint] 的说明）：
+        # 底部主色「上屏」按钮出现 + 白底行带消失 / 高度增大。
+        lower_ok = detail_fp["lower_primary"] > max(40, list_fp["lower_primary"] + 30)
+        layout_ok = (detail_fp["h"] > list_fp["h"] * 1.2
+                     or detail_fp["white_rows"] < list_fp["white_rows"] * 0.6)
+        expanded = lower_ok and layout_ok
         ok = text == before and "ai_adopt" not in adopt and expanded
         (d.pass_ if ok else d.fail)(
             "5a.2",
-            f"点行尾「…」后输入框={text!r}（应不变），详情页展开={expanded}"
-            f"（主色像素 {list_fp['primary_px']}→{detail_fp['primary_px']}，"
-            f"白块行 {list_fp['white_rows']}→{detail_fp['white_rows']}，"
-            f"IME 高度 {list_fp['h']}→{detail_fp['h']}），"
+            f"点行尾「…」({more_x},{yc}) 后输入框={text!r}（应不变），"
+            f"详情页展开={expanded}（下三分之一主色 {list_fp['lower_primary']}→"
+            f"{detail_fp['lower_primary']}，白块行 {list_fp['white_rows']}→"
+            f"{detail_fp['white_rows']}，IME 高度 {list_fp['h']}→{detail_fp['h']}），"
             f"adopt 日志={'有' if 'ai_adopt' in adopt else '无'}",
         )
         d.adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(1.5)
 
-        # 长按分支：如实探测，不记为 PASS（模拟器上 input swipe 不触发长按监听）
+        # 长按分支：如实探测、不计 PASS（模拟器 input swipe 不触发长按监听，需真机）
         d.open_host_field(needle)
         d.open_ai_panel()
-        if d.row_offset is not None:
-            y2 = d.panel_top() + d.row_offset
+        lp_rows = d.find_result_rows("5a2_lp_rows")
+        if lp_rows:
+            lp_y = lp_rows[0][0]
             lp_before = d.panel_fingerprint("5a2_longpress_before")
-            d.adb("shell", "input", "swipe", str(d.screen_width() // 4), str(y2),
-                  str(d.screen_width() // 4), str(y2), "900")
+            d.adb("shell", "input", "swipe", str(d.screen_width() // 4), str(lp_y),
+                  str(d.screen_width() // 4), str(lp_y), "900")
             time.sleep(2.5)
             lp_after = d.panel_fingerprint("5a2_longpress_after")
-            lp_ok = lp_after["primary_px"] > lp_before["primary_px"] + 100
+            lp_ok = lp_after["lower_primary"] > max(40, lp_before["lower_primary"] + 30)
             print(f"NOTE 5a.2 长按分支：input swipe 900ms 后详情展开={lp_ok}"
-                  f"（主色像素 {lp_before['primary_px']}→{lp_after['primary_px']}）"
+                  f"（下三分之一主色 {lp_before['lower_primary']}→{lp_after['lower_primary']}）"
                   f"；该分支需真机，模拟器不作为通过依据")
             if not lp_ok:
                 d.adb("shell", "input", "keyevent", "KEYCODE_BACK")
@@ -599,31 +721,42 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
     original = d.edit_text()
     d.adb("shell", "input", "text", "xy")
     modified = d.edit_text()
+    rows = d.find_result_rows("5a3_rows")
     if modified == original:
         d.fail("5a.3", f"未能构造「用户改过输入框」场景（原文 {original!r} 改成 {modified!r}）")
+    elif not rows:
+        d.fail("5a.3", "面板里没扫到白底结果行，无法点击上屏")
     else:
         d.logcat_clear()
-        d.tap_result(d.panel_top() + d.row_offset)
+        d.tap_result(rows[0][0])
         time.sleep(2.5)
         text = d.edit_text()
+        adopt = [ln.strip() for ln in d.logcat().splitlines() if "ai_adopt" in ln]
         ok = text.startswith(modified) and modified in text and len(text) > len(modified)
-        (d.pass_ if ok else d.fail)(
-            "5a.3",
+        detail = (
             f"改后={modified!r} → 上屏后={text!r}；"
-            f"{'原样保留用户新内容' if ok else '用户新内容被删/被覆盖'}",
+            f"{'原样保留用户新内容' if ok else '用户新内容被删/被覆盖'}；"
+            f"guard 路径={'ai_adopt 已打' if adopt else '无 ai_adopt'}"
         )
+        # issue 明文要求「5a.3 必须真机验」：模拟器上的读数只作为补充证据，不再是 PASS。
+        if strict_device:
+            (d.pass_ if ok else d.fail)("5a.3", "真机 " + detail)
+        else:
+            note = "模拟器读数（issue 要求真机，本条不计 PASS）"
+            (d.fail if not ok else d.skip)("5a.3", note + "：" + detail)
 
     # ── AC-5a.4 空态：点面板空白区无上屏无崩溃 ──
-    # 两种空态都覆盖：短语模式「生成 0 条」，mock 模式「生成失败」（假端点回 500）
+    # 两种空态都覆盖：短语模式「生成 0 条」，mock 模式「生成失败」（假端点回 500）。
+    # 空态面板没有 ai_results，所以这里用 expect_results=False（只看面板是否展开）。
     blank = FAIL_MARKER if mock_llm else "zzzznohit"
     d.open_host_field(blank)
-    d.open_ai_panel()
+    opened = d.open_ai_panel(expect_results=False)
     before = d.edit_text()
     top2 = d.panel_top()
-    if top2 is None:
+    if not opened or top2 is None:
         d.fail("5a.4", "空态下没打开面板")
     else:
-        # 空面板里没有任何结果行，点面板中部空白
+        rows = d.find_result_rows("5a4_rows")
         mid_y = top2 + (d.ime_frame()[1] - top2) // 2
         d.logcat_clear()
         d.tap_result(mid_y)
@@ -635,12 +768,15 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
         ok = text == before and bool(pid) and not crashed and not adopt
         (d.pass_ if ok else d.fail)(
             "5a.4",
-            f"空态点击后输入框={text!r}（应不变），进程仍在={'是' if pid else '否'}，"
-            f"崩溃={'是' if crashed else '否'}，误上屏={adopt}",
+            f"空态点击后输入框={text!r}（应不变），白底结果行={len(rows)}（应为 0），"
+            f"进程仍在={'是' if pid else '否'}，崩溃={'是' if crashed else '否'}，"
+            f"误上屏={adopt}",
         )
 
     # ── AC-5a.5 一步填入计入采纳率 + few-shot 语料 ──
     # 只在走模型生成（fromModel=true）时有意义；快捷短语命中按设计不计入。
+    # 打回项 2：以前这种情况给 PASS、正文却写「按设计不计采纳率」——空断言冒充通过。
+    # 现在给 SKIP，只有真拿到统计 +1 与语料行才给 PASS。
     if source == "model":
         adopt_logs = getattr(d, "last_adopt_log", "")
         learning = d.read_file("ai_learning.txt")
@@ -663,14 +799,14 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
             f"adopt={[ln.split('IspeechIme: ')[-1].strip() for ln in adopt_logs.splitlines() if 'ai_adopt' in ln]}",
         )
     else:
-        d.results.append(Case(
+        d.skip(
             "5a.5",
-            True,
-            f"本次结果来源={source}，按设计不计采纳率；"
-            "模型路径请用 --mock-llm 或真实 AI 配置重跑（见下方模型模式输出）",
-        ))
+            f"本次结果来源={source}，按设计不计采纳率 / 不写语料，本条未取证；"
+            "模型路径请用 --mock-llm 或真实 AI 配置重跑",
+        )
 
-    return 0 if all(c.ok for c in d.results) else 1
+    # 只有「真失败」才让脚本返回非 0；SKIP 是前置不满足、未取证，不冒充通过也不判红。
+    return 1 if any(not c.ok and not c.skipped for c in d.results) else 0
 
 
 class MockLlm:
