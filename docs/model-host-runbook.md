@@ -308,7 +308,8 @@ jobs:
 |---|---|
 | 设备 | AVD `ispeech_test`，Android 14（`ro.build.version.release=14`），`sdk_gphone64_arm64` |
 | 安装包 | `dist/ispeech-internal-v1.6.apk`（98,416,118 B） |
-| 包 sha256 | `9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42`（与 `dist/SHA256SUMS` 逐字符一致） |
+| 包 sha256 | `9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42`（与 **`release/voca-186-v1.6` @ `2b393b2`** 的 `dist/SHA256SUMS` 逐字符一致；**`origin/main` 的 `dist/SHA256SUMS` 里没有这一行**，不要误引 main） |
+| 装机核对 | 设备内 `base.apk` 与 `adb pull` 后主机侧 sha256 均为 `9cddcec5…`；`versionName=1.6` / `versionCode=6` / uid 10195 ⇒ 取证对象即该包 |
 | 应用版本 | `versionName=1.6` / `versionCode=6` |
 | 默认源 | OSS `delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/…tar.bz2`，`check_model_host.py` 7/7 全绿（200 / 77920048 B / `BZh` / Range 206） |
 
@@ -318,25 +319,34 @@ jobs:
 | **R-2** 预置坏 `.part`（向 `files/funasr/model.tar.bz2.part` 写入 38 B 的 HTML 假包）后重触发 | ✅ 自愈成功，**未卸载重装** | 日志 `断点续传：从 0KB 继续，共 76093KB` → `下载失败（第 1/3 次）: DIGEST_MISMATCH: sha256=5e5ef48a…，预期 da92b3db…` → 删 `.part` 重下 → `model` 重新解压 80 MB |
 | **R-5** 断网（飞行模式）后触发 | ✅ 失败可读、不留脏 `.part` | 三次重试后 `FunASR 模型准备失败: Unable to resolve host "delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com"`；目录内无任何残留文件 |
 
-**R-2 下行字节（tcpdump 实测，非推算）**：`tcpdump -i any -n -s 0 -w cap.pcap host <OSS_IP>` 抓全程，
+**R-2 下行字节（`dumpsys netstats` 前后差，两次原始读数均留档）**：取 uid 10195 的 `rb`（累计接收字节）在
+触发前后的值，差即为本次实际下行：
 
 | 指标 | 实测值 |
 |---|---|
-| 下行 TCP 载荷 | **156,124,135 B ≈ 148.89 MB**（18,104 个包） |
-| 上行 TCP 载荷 | 1,087 B（仅请求头） |
+| before `rb` | 80,777,393 B |
+| after `rb` | 242,315,403 B |
+| **Δ 下行字节** | **161,538,010 B ≈ 154.05 MB** |
 | 对照：单包整包 | 77,920,048 B |
-| 实测 / 单包 | ≈ **2.004** |
+| Δ / 单包 | ≈ **2.073** |
 
-⇒ 坏 `.part` 自愈确实消耗了「续传残段 + 完整整包重下」约两遍流量，与 VOCA-478 登记的
-「坏 `.part` 自愈多下一整包」在量级上一致（实测 2.004×，非先前推算的 155.8 MB / 2.000×）。
-原始 pcap 158,877,154 B / 36,209 包未随仓库提交，可按上一行命令复跑复现。
+⇒ 坏 `.part` 自愈消耗约两遍整包流量（续传残段 + 整包重下），与 VOCA-478 登记的
+「坏 `.part` 自愈多下一整包」量级一致。**口径说明**：早前一轮曾用 tcpdump 抓包并报
+156,124,135 B，但该轮 pcap 未留原件、无法第三方复核，故本轮改用 netstats 前后差并保留两次
+原始读数（见证据包 `R2-netstats-before/after.txt`）；两法结果相差约 3.4%，属统计口径差异，
+**以本轮 netstats 读数为准**。
 
-**R-1 判据的一处偏差（实测发现，需后端确认）**：VOCA-476 的 R-1 原文要求「logcat 有 `AsrDownload`
-起始终止打点」，但 v1.6 成功下载**不打任何日志**——`FunAsrModelStore` 只在失败分支
-（`Log.w(TAG, "下载失败…")` / `FunASR 模型准备失败`）和续传分支（`断点续传：从…`）打点，
-`TAG` 为 `FunAsrModelStore`、格式为 `funasr category=…`（见 `AsrModelInstall.render`），
-**不存在 `AsrDownload` 标签**。12:14Z 重跑实测 `logcat --pid` 下 0 条应用日志。
-因此 R-1 只能以「文件系统产物 + 包 sha256 + 源探测全绿」作为通过证据。
+**R-1 判据状态：产物侧通过、判据侧不满足（待裁决，不自行改写判据）**
+
+VOCA-476 的 R-1 原文要求「logcat 有 `AsrDownload` 起始终止打点」。实测结论分两层：
+
+- **产物侧** ✅：全新状态下触发后 `files/funasr/model` = 80 MB / 8 文件，无 `.part`、无 `model.tar.bz2` 残留。
+- **判据侧** ❌：整个 apk 的 dex 里 **不存在** `AsrDownload` 这个标签（见上一节），且该包内的
+  `FunAsrModelStore` 未接 `AsrModelInstall`，成功路径不产生「起始/终止」两条日志。
+
+⇒ **不宣布 R-1 通过**。要么由后端补成功路径打点（并统一到 `AsrModelInstall.render` 的
+`funasr category=…` 格式），要么由人类把判据改成不依赖日志（如「产物完整性 + 摘要校验」）。
+**交付方不得单方面改写验收判据**——上一轮把「代码设计如此」写成本单结论是越界的，此处已作废。
 
 ### 2026-11-24 · main `bb1bf2b`（含 PR #31）· AVD 覆盖（R-4）
 
@@ -355,6 +365,32 @@ jobs:
 **R-4 的判据已知差异**：§10 记载该源在「断点恰在整包长度处」会回 `416` + `text/html`，走
 `RETRY_FROM_START` 自愈。本轮是全新下载（无历史 `.part`），未复现该分支；该分支由
 `VoskModelStoreTest` 单测覆盖，不在本轮真机证据内。
+
+**关键发现：`dist/ispeech-internal-v1.6.apk` 的 dex 里没有 `AsrModelInstall`（2026-11-24 实测）**
+
+对 apk 内全部 `classes*.dex` 做 UTF-8 精确匹配（非 `strings` 工具，避免中文被吞）：
+
+| 符号 | 命中次数 |
+|---|---|
+| `AsrModelInstall` | **0** |
+| `PREPARE_FAILED` | 0 |
+| `期望完成标记` | 0 |
+| `funasr category=` | 0 |
+| `断点续传` | 1 |
+| `下载失败` | 3 |
+| `FunAsrModelStore` | 18 |
+| `AsrDownloadPolicy` | 6 |
+
+而 `release/voca-186-v1.6` @ `2b393b2` 的源码里 `AsrModelInstall.kt` 存在、`render()` 会输出
+`funasr category=…` 前缀、`ensureModel` 失败行还带 ` 期望完成标记=` 后缀。**包与源码不是同一份实现。**
+
+⇒ 两个直接后果：
+1. **R-1 原判据无法满足的根因找到了**：不是说「成功路径恰好不打点」，而是这个包里的
+   `FunAsrModelStore` 根本没接 `AsrModelInstall`，日志走的是旧实现（`断点续传：从 …` 这行在包内有，
+   但 `funasr category=` 这套在包内没有）。之前把原因写成「代码设计如此」是不准确的。
+2. **R-1/R-2/R-5 的实测只对这个二进制包成立**，不能反推分支源码的行为；要验源码需按该 commit 重新出包。
+
+**未解决**：谁在什么时候用哪棵树构建了这个 apk、为何与同分支源码不一致，需要出包方（VOCA-186 线）确认。
 
 **未覆盖（如实声明）**：
 - **R-3 语音上屏**：需真机麦克风（AVD 无音频输入），本轮未跑，**不得据此判定语音链路可用**。
