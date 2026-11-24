@@ -7,6 +7,7 @@ import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -16,7 +17,7 @@ import com.ispeech.R
 import com.ispeech.engine.LookupCandidate
 
 /**
- * 候选条：[组合码] [候选（横向滑动）]
+ * 候选条：[组合码] [候选（横向滑动）] [麦克风授权按钮（仅未授权提示态）]
  *
  * - 左侧高亮显示当前组合码 / 状态文本；「联想」「语音」等来源状态不再渲染到候选条
  * - 首选候选带底色高亮，每项右上角带 1-9 数字角标
@@ -40,9 +41,21 @@ class CandidateView @JvmOverloads constructor(
     /** 长按第 index 个候选：记住这个词（自造词，对齐搜狗 `AddPhrase:Pinyin:`） */
     var onCandidateLongPressed: ((Int) -> Unit)? = null
 
+    /**
+     * 点击麦克风授权按钮（VOCA-166）。
+     *
+     * 只由指针点击触发：不接空格 / 回车 / 数字键（那些走上屏首选候选的语义，
+     * 会把授权动作变成「打字途中被踢出输入场景」）。
+     */
+    var onMicActionClicked: (() -> Unit)? = null
+
+    /** 键盘震动开关（与 SoftKeyboardView 同源，由服务侧推入）：授权按钮按下要有可感知反馈 */
+    var vibrate = true
+
     private lateinit var codeLabel: TextView
     private lateinit var scrollView: HorizontalScrollView
     private lateinit var itemContainer: LinearLayout
+    private lateinit var micAction: TextView
 
     /** 主题色 ispeech_primary */
     private val primaryColor: Int = resolvePrimaryColor()
@@ -52,10 +65,22 @@ class CandidateView @JvmOverloads constructor(
         codeLabel = findViewById(R.id.candidate_code)
         scrollView = findViewById(R.id.candidate_scroll)
         itemContainer = findViewById(R.id.candidate_items)
+        micAction = findViewById(R.id.candidate_mic_action)
 
         // 组合码用主题色高亮，底色是同色低透明度
         codeLabel.setTextColor(primaryColor)
         codeLabel.background = roundedFill(primaryColor, RADIUS_CODE_DP, ALPHA_CODE_BG)
+
+        // 授权按钮：近黑文字（底色 #F4F5F7 上 15:1，达 WCAG AA；首选橙只有 2.59:1，不可用），
+        // 底色用同色低透明度圆角，与其它控件一致；不依赖颜色表达动作语义（文字即动作）
+        micAction.setTextColor(ACTION_TEXT)
+        micAction.background = roundedFill(ACTION_TEXT, RADIUS_ITEM_DP, ALPHA_ACTION_BG)
+        micAction.isClickable = true
+        micAction.isFocusable = true
+        micAction.setOnClickListener {
+            if (vibrate) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            onMicActionClicked?.invoke()
+        }
     }
 
     /**
@@ -63,8 +88,17 @@ class CandidateView @JvmOverloads constructor(
      *
      * @param code 当前组合码（a-z）/ 状态文本，为空时隐藏左侧编码
      * @param list 候选列表（服务侧按「每屏候选数 × 倍数」取回，横向滑动浏览）
+     * @param actionLabel 麦克风授权按钮文案；非空即显示按钮，null 即隐藏。
+     *   **不由 [code] 是否为空推断**：常态第 1 行是用户正在打的组合码，不能被当成授权态。
+     * @param actionEnabled 按钮是否可点：跳转在途时给 false（连点会弹两个授权框、把前台连切两次）。
+     *   与 [actionLabel] 一样由服务侧作为**显式入参**渲染，本视图不自己记状态。
      */
-    fun update(code: String, list: List<LookupCandidate>) {
+    fun update(
+        code: String,
+        list: List<LookupCandidate>,
+        actionLabel: String? = null,
+        actionEnabled: Boolean = true,
+    ) {
         codeLabel.text = code
         codeLabel.visibility = if (code.isEmpty()) View.GONE else View.VISIBLE
 
@@ -80,6 +114,35 @@ class CandidateView @JvmOverloads constructor(
             // 新一批候选从最左侧开始展示
             scrollView.post { scrollView.scrollTo(0, 0) }
         }
+
+        renderMicAction(actionLabel, actionEnabled)
+    }
+
+    /**
+     * 授权按钮的显示与可用性，只从 [update] 进来：按钮状态若另开一条写入通道，
+     * 任何一次 [update] 都会把它恢复成可点，而出现「看着能点、点了没反应」的假可用。
+     */
+    private fun renderMicAction(actionLabel: String?, enabled: Boolean) {
+        if (actionLabel == null) {
+            micAction.visibility = View.GONE
+            // 按钮隐藏时组合码恢复按内容宽度，把横向空间让回候选区
+            setCodeLabelWeight(weighted = false)
+            return
+        }
+        micAction.text = actionLabel
+        micAction.visibility = View.VISIBLE
+        micAction.isEnabled = enabled
+        micAction.alpha = if (enabled) 1f else ALPHA_DISABLED
+        // 「请到系统设置…」这类长路径指引要能换行读完整，被裁成半句等于没给指引，
+        // 所以提示文本占满剩余宽度（不截断），按钮按内容宽度靠右，不会被挤出屏幕
+        setCodeLabelWeight(weighted = true)
+    }
+
+    private fun setCodeLabelWeight(weighted: Boolean) {
+        val params = codeLabel.layoutParams as LayoutParams
+        params.width = if (weighted) 0 else LayoutParams.WRAP_CONTENT
+        params.weight = if (weighted) 1f else 0f
+        codeLabel.layoutParams = params
     }
 
     /**
@@ -195,11 +258,20 @@ class CandidateView @JvmOverloads constructor(
         private const val ALPHA_CODE_BG = 38
         private const val ALPHA_ITEM_BG = 51
 
+        /** 授权按钮底色透明度：比候选项更浅，避免抢走首选候选的视觉权重 */
+        private const val ALPHA_ACTION_BG = 26
+
+        /** 跳转在途时按钮置灰的透明度 */
+        private const val ALPHA_DISABLED = 0.4f
+
         /** 硬件键盘 `-` `=` 一次滚动的距离（约一个候选的宽度） */
         private const val SCROLL_STEP_DP = 72
 
         /** 兜底主色（主题未提供 ispeech_primary 时使用） */
         private val FALLBACK_PRIMARY = Color.parseColor("#2F6FED")
         private val TEXT_PRIMARY = Color.parseColor("#222222")
+
+        /** 动作文字色：候选条底 #F4F5F7 上对比度 15:1（首选橙只有 2.59:1，不达 WCAG AA） */
+        private val ACTION_TEXT = Color.parseColor("#1A1A1A")
     }
 }

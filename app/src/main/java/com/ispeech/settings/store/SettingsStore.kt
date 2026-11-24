@@ -33,6 +33,7 @@ private val Context.ispeechSettingsDataStore: DataStore<Preferences> by preferen
  * - 主题模式（浅色 / 深色 / 跟随系统）；
  * - 键盘与输入：高度、每页候选数、震动、标点、全角、联想、词频学习；
  * - 语音识别（ASR）：引擎、服务组件、模型名、语言、部分结果、离线优先。
+ * - 麦克风授权：是否被永久拒绝（供输入法决定「去授权 / 去设置」）。
  */
 object SettingsStore {
 
@@ -65,6 +66,9 @@ object SettingsStore {
     private val KEY_ASR_PARTIAL = booleanPreferencesKey("asr_partial_results")
     private val KEY_ASR_PREFER_OFFLINE = booleanPreferencesKey("asr_prefer_offline")
     private val KEY_VOICE_SPACE_LONG_PRESS_MS = intPreferencesKey("voice_space_long_press_ms")
+
+    // —— 麦克风授权 ——
+    private val KEY_MIC_PERMANENTLY_DENIED = booleanPreferencesKey("mic_permanently_denied")
 
     // —— 建议回复（大模型）——
     private val KEY_AI_PROVIDER = stringPreferencesKey("ai_provider")
@@ -229,6 +233,22 @@ object SettingsStore {
 
     suspend fun setVoiceSpaceLongPressMs(context: Context, ms: Int) =
         context.editSettings { it[KEY_VOICE_SPACE_LONG_PRESS_MS] = ms }
+
+    // —— 麦克风授权（VOCA-166）——
+
+    /**
+     * 麦克风权限是否被**永久拒绝**（系统不再弹授权框）。
+     *
+     * 只记这一个状态：「拒绝一次」不落盘，它落回默认态、用户再点「去授权」本该重弹系统框，
+     * 记住它只是多余 bookkeeping，还会引入记忆态与系统真实态漂移（ADR-001 决策 2）。
+     * 该标志只决定候选条的按钮文案与跳转目标，**不作为权限门禁**：授予与否一律以
+     * `checkSelfPermission` 实时判定为准。
+     */
+    fun micPermanentlyDeniedFlow(context: Context): Flow<Boolean> =
+        context.safeData().map { it[KEY_MIC_PERMANENTLY_DENIED] ?: false }
+
+    suspend fun setMicPermanentlyDenied(context: Context, denied: Boolean) =
+        context.editSettings { it[KEY_MIC_PERMANENTLY_DENIED] = denied }
 
     // —— 建议回复（大模型）——
 
