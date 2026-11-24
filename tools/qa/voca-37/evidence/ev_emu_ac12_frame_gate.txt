@@ -56,3 +56,19 @@ HorizontalScrollView 从 LinearLayout 的 0dp+weight 改成 FrameLayout(match_pa
 - AC-10 像素（full_count/档位）与 AC-12 在场证据本轮**未取得**：进不到可信组合态。
 - 不能归因为「只剩真机项」：debug 构建在模拟器上就先丢了输入，release 同条件正常。
 - 工装侧已修：ac12_overflow 的帧闸门（空白面板不再能报 FADE_PRESENT）。
+
+## 7 上节更正（同一轮内自查）
+§5 把 logcat 那条 requestLayout 警告指到了新加的 candidate_scroll_frame —— **归因错了**：
+- 被警告的 FrameLayout 边界 0,182-1260,2484 = 2302px ≈ 647dp，候选条只有 46dp(150px)，尺寸差一个量级；
+- 那条警告上的 id 是运行时 aid，不是 candidate_scroll_frame 的资源 id。
+- 结论：该警告与 d59c375 的包裹层无直接对应，§5 的「疑似回归」因此**降级为待查信号，不是已确认回归**。
+
+## 8 本轮真实读数汇总（可复核）
+```
+AC-10 full_count / 档位判定      : 未取得（进不到可信组合态）
+AC-12 在场 verdict               : 未取得（同上）
+档2 tier_verdict（离线帧，已入库）: NOT_SIGNED(AC12_unmeasured+R21_open)
+  ↑ r21_wiring_compare.py SECTION1 field_diffs=0，与 PR #25 证据逐字一致
+release 1.5 vs debug AC-12 A/B    : release 回读 shijian 且键面在场；debug 回读停在 sh、面板白屏
+  ↑ n=1，且两者相隔数分钟，AVD 本身在配置变更后会丢 showSoftInput ⇒ 不能据此判回归
+```
