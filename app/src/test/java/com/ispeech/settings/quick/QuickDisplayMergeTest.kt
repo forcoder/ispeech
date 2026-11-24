@@ -4,6 +4,7 @@ import com.ispeech.data.PhraseUsageStore
 import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickMatchMode
+import com.ispeech.engine.QuickPhraseEngine
 import com.ispeech.engine.QuickSource
 import com.ispeech.engine.QuickTrigger
 import org.junit.Assert.assertEquals
@@ -128,5 +129,58 @@ class QuickDisplayMergeTest {
 
         assertEquals(2, merged.entries.size)
         assertTrue(merged.entries.any { it.trigger.isEmpty() })
+    }
+
+    /**
+     * ADR-0002 C1-6b 的展示侧半边（VOCA-207 质检打回项 1）：面板卡片渲染的 mode 必须与引擎
+     * 生效的 mode 同源。此前 `QuickPhraseCodec.parse` 直取磁盘声明值，卡片显示 `PREFIX` 而
+     * 引擎已按 `EXACT` 生效 —— 用户看到的和实际命中的不是一套口径，编辑器又从这个 display
+     * entry 继承 mode，保存进用户文件后误弹路径会重新出现。
+     */
+    @Test
+    fun `C1-6b 云端行的展示 mode 与 fromRemoteText 的生效 mode 逐条一致`() {
+        val rows = listOf(
+            "dtwsl\t泡池须知\t长正文\tPREFIX",
+            "dtwsl2\t另一条\t长正文\tcontains",
+            "dtwsl3\t缺省第四字段\t长正文",
+            "dtws\t短码\t短正文\tPREFIX",
+            "d1\t精确\t正文\texact",
+            "dtwsl4\t正则\t正文\tregex",
+        ).joinToString("\n")
+
+        val display = QuickPhraseCodec.parse(rows, applyRemoteModeGuard = true).associateBy({ it.trigger }, { it.mode })
+        val engine = requireNotNull(QuickPhraseEngine.fromRemoteText(rows)).entries.associateBy({ it.trigger }, { it.mode })
+
+        assertEquals("展示侧与引擎侧对同一份云端文本必须给出同一张 mode 表", engine, display)
+        assertEquals("5 位云端 PREFIX 行在面板上也要显示 EXACT", QuickMatchMode.EXACT, display["dtwsl"])
+        assertEquals(QuickMatchMode.EXACT, display["dtwsl2"])
+        assertEquals("缺省第 4 字段解析成 PREFIX，同样在守卫内", QuickMatchMode.EXACT, display["dtwsl3"])
+        assertEquals("4 位及以内不受守卫", QuickMatchMode.PREFIX, display["dtws"])
+        assertEquals(QuickMatchMode.EXACT, display["d1"])
+        assertEquals("REGEX 与 EXACT 同属不受长度守卫的模式", QuickMatchMode.REGEX, display["dtwsl4"])
+    }
+
+    /**
+     * 守卫吃的是第 1 字段的**原样**长度，不是归一化长度：`"dtws "` 归一化后只剩 4 位会逃过守卫，
+     * 而写侧 `SyncRepository` 不 trim，这种行可以落盘。口径与引擎侧逐字对齐。
+     */
+    @Test
+    fun `C1-6b 带尾随空格的畸形云端行同样收严为 EXACT`() {
+        val row = "dtws \t尾随空格\t长正文\tPREFIX"
+
+        val engineMode = requireNotNull(QuickPhraseEngine.fromRemoteText(row)).entries.single().mode
+        val displayMode = QuickPhraseCodec.parse(row, applyRemoteModeGuard = true).single().mode
+
+        assertEquals(QuickMatchMode.EXACT, engineMode)
+        assertEquals("展示侧不能因为 trigger 存盘前被 trim 就绕开守卫", engineMode, displayMode)
+    }
+
+    /** C1-6b 作用域限云端落盘文件：用户文件里的 mode 是用户在编辑器里选的（C1-4 / C1-9），不收严。 */
+    @Test
+    fun `C1-6b 守卫只作用于云端行，用户文件的声明 mode 原样展示`() {
+        val row = "dtwsl\t我的短语\t长正文\tPREFIX"
+
+        assertEquals(QuickMatchMode.PREFIX, QuickPhraseCodec.parse(row).single().mode)
+        assertEquals(QuickMatchMode.PREFIX, QuickPhraseCodec.parse(row, applyRemoteModeGuard = false).single().mode)
     }
 }
