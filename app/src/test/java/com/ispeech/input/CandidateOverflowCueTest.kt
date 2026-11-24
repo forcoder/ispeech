@@ -140,4 +140,21 @@ class CandidateOverflowCueTest {
             layout.contains("android:background=\"#F4F5F7\""),
         )
     }
+
+    @Test
+    fun `线索高度不得用 match_parent 否则会把键盘顶出屏幕`() {
+        // 2026-11-24 emulator-5554 实测的真实回归：父 FrameLayout 是 wrap_content，
+        // 里面一个 layout_height=match_parent 的 View 在 AT_MOST 下会拿到整块可用高度
+        // （View.getDefaultSize → specSize），反过来把父撑满 → IME 窗口 [0,158][1260,2720]、
+        // 键面白像素 14855→19、敲键回读停在空串。这里把「不许再写 match_parent」钉成断言。
+        val cue = layout.substringAfter("candidate_overflow_cue").substringBefore("/>")
+        assertFalse(
+            "线索高度不能是 match_parent：wrap_content 父容器下会撑满整个可用高度并把键盘顶出去",
+            cue.contains("android:layout_height=\"match_parent\""),
+        )
+        assertTrue(
+            "线索高度改为布局后按滚动区实测高度补齐",
+            viewSource.contains("syncOverflowCueHeight()"),
+        )
+    }
 }

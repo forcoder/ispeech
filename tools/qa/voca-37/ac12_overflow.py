@@ -52,6 +52,22 @@ MAX_BAND_DP = 160
 # 条带占面板高度的上限。候选条永远是面板顶部的一条，不可能占掉四分之一屏还多。
 MAX_BAND_PANEL_FRAC = 0.25
 
+# 一行里有候选时纯底色只占 40–56%：chip + 候选字身 + 角标把其余部分吃掉。
+# 阈值给 0.60 会把这种健康行判成「不是候选条」，实测在 emulator-5554 上得到
+# 13.8 dp / 20 dp 的假条带；给 0.40 才能拿到完整的 46 dp（2026-11-24 实测 46.2 dp）。
+# 不能改成「底色族 + 容差」来提升覆盖率：键面白 (240,240,243) 与 #F4F5F7 只差 5，
+# 任何能装下 chip 铺底（差 31）的容差都会把整块键面算进候选条，量到 719..837 dp。
+# 减到 0.40 也不会让「整块 #F4F5F7 面板」混进来 —— 那种帧的高度守不住 24..160 dp 的闸门。
+BAR_ROW_FRAC = 0.40
+
+# 墨迹判据：与底色单通道差超过这个值才算「有内容」。抗锯齿边缘在 3–8，
+# chip 铺底 31、字身 100+，取 10 能把三者分开。
+INK_CHANNEL_TOL = 10
+# 渐变判据：线索左端（x_end - fade）必须仍有可见内容，右端（x_end - 1）必须被底色盖死。
+# 2026-11-24 emulator-5554 实测：修好的包 210→3，未修的基线包 5→5（平）或 213→213（全墨迹）。
+FADE_MIN_INK = 30
+FADE_MAX_CLEAR = 12
+
 OUT = "build/ac12"
 
 
@@ -83,19 +99,31 @@ def shot(path: str) -> str:
     return path
 
 
+def _is_bar_bg(c) -> bool:
+    """候选条底色：只认纯 `#F4F5F7`。
+
+    不用「容差族」覆盖 chip 铺底 (222,224,248)：键面白 (240,240,243) 与底色只差 5，
+    任何大到能装下 chip 铺底（差 31）的容差都会把整块键面算进候选条 —— 实测条带
+    从 46 dp 涨到 719..837 dp。覆盖不足改由 [BAR_ROW_FRAC] 处理。
+    """
+    return c == BAR_BG
+
+
 def find_bar(px, w: int, h: int):
-    """候选条带：整行 ≥60% 为 BAR_BG 的最长连续行段。"""
+    """候选条带：整行 ≥BAR_ROW_FRAC 为候选条底色的最长连续行段。"""
     prev, bands = None, []
     step = 4
     xs = list(range(0, w, step))
     for y in range(h):
-        frac = sum(1 for x in xs if px[x, y] == BAR_BG) / len(xs)
-        if frac > 0.60 and prev is None:
+        frac = sum(1 for x in xs if _is_bar_bg(px[x, y])) / len(xs)
+        if frac > BAR_ROW_FRAC and prev is None:
             prev = y
-        elif frac <= 0.60 and prev is not None:
+        elif frac <= BAR_ROW_FRAC and prev is not None:
             if y - prev > 10:
                 bands.append((prev, y))
             prev = None
+    if prev is not None and h - prev > 10:
+        bands.append((prev, h))
     return max(bands, key=lambda b: b[1] - b[0]) if bands else None
 
 
@@ -163,16 +191,31 @@ def measure(path: str) -> dict:
             1
             for y in range(y0 + 2, y1 - 2)
             for x in range(a, b)
-            if any(abs(px[x, y][i] - BAR_BG[i]) > 10 for i in range(3))
+            if any(abs(px[x, y][i] - BAR_BG[i]) > INK_CHANNEL_TOL for i in range(3))
         )
 
+    def col_diff(x: int) -> int:
+        """该列上与候选条底色的最大通道差（列内取最大，不受单像素抗锯齿影响）。"""
+        return max(
+            (max(abs(px[x, y][i] - BAR_BG[i]) for i in range(3)) for y in range(y0 + 2, y1 - 2)),
+            default=0,
+        )
+
+    # 线索是 12 dp 渐变：左端仍露内容、右端被底色盖死，列差从大到小收成 0。
+    # 旧判据要求「线索区一个非底色像素都没有」，正好与渐变相反 —— 真有渐变时
+    # 恒判 FADE_ABSENT（2026-11-24 在 emulator-5554 上实测：修好的包列差
+    # 210→0，旧判据仍报 FADE_ABSENT）。改成量「有没有这个斜坡」：
+    # 线索区最左四分之一仍有可见内容，且最右四分之一里存在被底色盖死的列。
+    q = max(1, fade // 4)
+    first = max(col_diff(x) for x in range(x_end - fade, x_end - fade + q))
+    tail_min = min(col_diff(x) for x in range(x_end - q, x_end))
     in_fade = ink(x_end - fade, x_end)
     left = ink(x_end - 3 * fade, x_end - fade)
     verdict = (
         "FADE_PRESENT"
-        if in_fade == 0 and left > 0
+        if first >= FADE_MIN_INK and tail_min <= FADE_MAX_CLEAR
         else "NO_CONTENT_ANYWHERE"
-        if in_fade == 0 and left == 0
+        if max(col_diff(x) for x in range(x_end - fade, x_end)) <= INK_CHANNEL_TOL and left == 0
         else "FADE_ABSENT"
     )
     return dict(
@@ -184,6 +227,8 @@ def measure(path: str) -> dict:
         x_end=x_end,
         band_y=(y0, y1),
         band_dp=round((y1 - y0) / d, 1),
+        fade_head_diff=first,
+        fade_tail_min_diff=tail_min,
         ink_in_fade=in_fade,
         ink_left=left,
         verdict=verdict,

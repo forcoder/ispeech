@@ -57,12 +57,17 @@
 
         <!-- AC-12 溢出线索：右沿渐变遮罩，只在「还有候选没进视口」时可见。
              宽度与渐变色在 CandidateView 里按令牌设置（12 dp）。
+             height 不能写 match_parent：父 FrameLayout 是 wrap_content，match_parent 的孩子
+             在 AT_MOST 下会拿到「整块可用高度」并反过来把父撑满，键盘被顶出屏幕
+             （2026-11-24 emulator-5554 实测 IME 窗口被撑到 [0,158][1260,2720]，
+             键面白像素 14855→19）。height 由 CandidateView 按滚动区实测高度补齐，
+             这里给 0dp 表示不参与父的高度测量。
              importantForAccessibility=no：不新增常驻可聚焦元素，读屏走滚动容器自带的
              ACTION_SCROLL_FORWARD（见 CandidateView.readOverflowState）。 -->
         <View
             android:id="@+id/candidate_overflow_cue"
             android:layout_width="12dp"
-            android:layout_height="match_parent"
+            android:layout_height="0dp"
             android:layout_gravity="end"
             android:clickable="false"
             android:focusable="false"

@@ -107,6 +107,62 @@ class FrameGate(unittest.TestCase):
         self.assertEqual(r["band_y"][0], 0)
         self.assertAlmostEqual(r["band_dp"], 46.0, delta=1.0)
 
+
+    def _glyph_rows(self, px, w, h, blend_fade=False):
+        """画一条「有候选」的候选带：稀疏字身笔画铺满整行，右沿可选叠加 12dp 渐变。
+
+        笔画只占约 1/3 宽度，纯底色仍有 ~2/3 —— 与 2026-11-24 实测帧一致（有候选的行
+        纯底色 40–56%）。实心块会把纯底色压到 6%，那不是真实帧的形状。
+        """
+        for y in range(BAR_PX, h):
+            for x in range(w):
+                px[x, y] = WHITE
+        x_end = w - int(round(6 * DEN))
+        fade = int(round(12 * DEN))
+        for x0 in range(16, x_end, 46):
+            for y in range(20, BAR_PX - 20):
+                for x in range(x0, min(x0 + 22, x_end)):
+                    px[x, y] = (91, 108, 255)
+        # 最后一个候选被视口右界切掉：内容一直铺到 x_end（真实帧就是这样，
+        # 否则「溢出」根本不存在，渐变也无从谈起）
+        for y in range(20, BAR_PX - 20):
+            for x in range(max(16, x_end - fade - 16), x_end):
+                px[x, y] = (91, 108, 255)
+        if blend_fade:
+            for i in range(fade):
+                a = i / float(fade - 1)
+                x = x_end - fade + i
+                for y in range(20, BAR_PX - 20):
+                    src = px[x, y]
+                    px[x, y] = tuple(int(round(src[c] * (1 - a) + BG[c] * a)) for c in range(3))
+
+    def test_gradient_fade_counts_as_present(self):
+        """12 dp 渐变必须判 FADE_PRESENT —— 旧判据要求「线索区一个非底色像素都没有」，
+        与渐变本身相反，真有渐变时恒报 FADE_ABSENT（2026-11-24 emulator-5554 实测）。"""
+        p = render(os.path.join(self.tmp, "faded.png"),
+                   lambda px, w, h: self._glyph_rows(px, w, h, blend_fade=True))
+        r = A.measure(p)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual("FADE_PRESENT", r["verdict"], r)
+        self.assertGreaterEqual(r["fade_head_diff"], A.FADE_MIN_INK)
+        self.assertLessEqual(r["fade_tail_min_diff"], A.FADE_MAX_CLEAR)
+
+    def test_flat_right_edge_is_absent(self):
+        """右沿没有渐变就是 FADE_ABSENT —— 内容被切掉却无线索，正是 AC-12 要修的病。"""
+        p = render(os.path.join(self.tmp, "flat.png"),
+                   lambda px, w, h: self._glyph_rows(px, w, h, blend_fade=False))
+        r = A.measure(p)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual("FADE_ABSENT", r["verdict"], r)
+
+    def test_band_detected_when_candidates_fill_the_row(self):
+        """一行里纯底色只占约 2/3 时仍必须量出 46dp —— 旧阈值 0.60 会切成假条带。"""
+        p = render(os.path.join(self.tmp, "crowded.png"),
+                   lambda px, w, h: self._glyph_rows(px, w, h, blend_fade=False))
+        r = A.measure(p)
+        self.assertTrue(r["ok"], r)
+        self.assertAlmostEqual(r["band_dp"], 46.0, delta=2.0)
+
     def test_band_height_bounds_are_dp_based(self):
         """闸门按 dp 判，不按像素判 —— 换密度不该改变同一张 46dp 条带的判定。"""
         self.assertLess(A.MIN_BAND_DP, 46)

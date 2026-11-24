@@ -1,0 +1,151 @@
+# VOCA-37 · 受控复测（n≥3、同一宿主、交替装包）· emulator-5554 · 2026-11-24 13:0xZ
+
+## 0 结论先行
+
+`d59c375` 交付的 AC-12 实现**在模拟器上把键盘顶出屏幕**，这是**实现缺陷，不是 AVD 噪声**。
+根因是 `candidate_view.xml` 里 `candidate_overflow_cue` 用了 `layout_height="match_parent"`，
+而它的父 `FrameLayout` 是 `wrap_content`：`AT_MOST` 下这个孩子会拿到「整块可用高度」
+（`View.getDefaultSize` → `specSize`），反过来把父撑满 → IME 窗口 `[0,158][1260,2720]`、
+键面白像素 14855→19、候选带被量成 738.5dp。改成 `0dp` + 布局后按滚动区实测高度补齐，
+同一条件下恢复到 46.2dp / 白像素 14855 / 回读 `shijian`，AC-12 判据转 `FADE_PRESENT`。
+
+上一轮 10:29Z 把这条读数记成「AVD 本身会丢 showSoftInput ⇒ 只当待查信号」，归因错了：
+AVD 确实也会丢 IME，但那是**另一种形状**（见 §3），与被测包无关。
+
+## 1 本机与几何
+
+```
+emulator-5554  device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a
+wm size    Override size: 1260x2720      （physical 1080x2340）
+wm density Override density: 520         （physical 440）  → 3.25 px/dp
+```
+
+**构建环境**（本轮新增，之前几轮未落盘）：本机 `~/.gradle` 与 `~/.android` 对沙箱只读，
+构建需把三个目录重定向到可写位置：
+
+```
+GRADLE_USER_HOME=/tmp/gh-voca37  ANDROID_SDK_HOME=/tmp/andhome  ANDROID_USER_HOME=/tmp/andhome/.android
+JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/tmp   TMPDIR=/tmp
+./gradlew :app:assembleDebug --offline --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+local.properties: sdk.dir=/opt/homebrew/share/android-commandlinetools
+```
+
+## 2 三个被测包（sha256）
+
+| 包 | sha256 | 说明 |
+|---|---|---|
+| `release15.apk` | `84028f5c91e9e8dddbe6c8a640aaeaa3a2c637bafa3f4b73039e6a98c548c366` | `dist/ispeech-release-1.5-20261119-1557.apk`，release 基线 |
+| `ac12-debug.apk` | `ba590d01a64164279ddd7db19a1a653af333fb61803558a4aa2245147ef590d7` | HEAD `a50f053` 的 debug 包，**含缺陷版 AC-12**；与 10:29Z 证据里那个包逐位相同（可复现构建） |
+| `base-debug.apk` | `156ac57969e5f33d85ae0ea27c5b77fb39e402df45e8684f503b1b4a6ed018e8` | `git archive a99cb7d`（AC-12 之前）的 debug 包，**同 buildType 对照** |
+| `fix-debug.apk` | `9f25c31f0306175dc80eba1fad8ff64003bfbd2e7549d1e5a665c373cc78bc53` | 本轮修复后 debug 包 |
+
+**为什么要 `base-debug`**：上一轮的 A/B 是 release vs debug，两个变量（buildType + AC-12）同时变，
+归因不成立。本轮补上同为 debug、只差 AC-12 的对照。
+
+## 3 受控复测：同一宿主（Chrome 地址栏）、交替装包、每轮记录 IME 身份
+
+每轮流程：`uninstall` → `install -r` → `ime set` → 重启 Chrome → 点地址栏 →
+**就绪闸门**（`mCurMethodId` 是被测包 + IME 窗口可见 + 窗口高 400..0.70×面板）→
+`input text shijian` → 回读 `url_bar` 文本 + 截图 + 计键盘区白像素。
+
+就绪闸门是必须的：不加它，AVD 自身丢 IME 的轮次会被算成被测包的错。
+
+```
+轮次        包 sha(前16)        就绪  IME frame            回读       键盘白像素  候选带
+----------- ------------------ ---- -------------------- ---------- ---------- -----------
+q1_BASE     156ac57969e5f33d   yes  [0,1472][1260,2720]  shijian       14855      45.5dp
+q2_BASE     156ac57969e5f33d   yes  [0,1472][1260,2720]  shijian       14855      45.5dp
+q3_BASE     156ac57969e5f33d   yes  [0,1472][1260,2720]  shijian       14855      45.5dp
+q1_FIX      9f25c31f0306175d   yes  [0,1472][1260,2720]  shijian       14855      45.5dp
+q2_FIX      9f25c31f0306175d    NO  （AVD 丢 IME，见 §5）         —           —          —
+q3_FIX      9f25c31f0306175d   yes  [0,1472][1260,2720]  shijian       14855      45.5dp
+q1_AC12     ba590d01a6416427   yes  [0,158][1260,2720]   shijian          19     738.5dp
+q3_AC12     ba590d01a6416427   yes  [0,158][1260,2720]   shijian          11     738.5dp
+c1_BASE     156ac57969e5f33d   yes  [0,1472][1260,2720]  shijian       14855      45.5dp
+c1_AC12     ba590d01a6416427   yes  [0,158][1260,2720]   shijian          19     738.5dp
+```
+
+缺陷包 **3/3 稳定复现**（q1/q3/c1），对照包 **5/5 全部正常**（q1/q2/q3/c1）。同一宿主、
+同一几何、同一分钟级窗口内交替装包 —— 这条差异只能归到被测包。
+
+## 4 AC-12 判据（修好后转 FADE_PRESENT）
+
+判据改为量「右沿 12dp 有没有渐变斜坡」：线索区最左 1/4 的列差 ≥30，且最右 1/4 里
+存在列差 ≤12 的列（被底色盖死）。
+
+```
+帧        条带 dp   线索头部列差   尾部最小列差   verdict
+--------- -------- ------------ ------------ ----------------
+c1_BASE     46.2        213           211      FADE_ABSENT     ← 内容被切掉但没有线索
+q2_BASE     46.2        213           211      FADE_ABSENT
+q3_BASE     46.2        213           211      FADE_ABSENT
+q1_FIX      46.2        210             3      FADE_PRESENT    ← 210→3 的斜坡，线索在场
+q3_FIX      46.2        210             3      FADE_PRESENT
+q1_AC12     —           —             —       bar_height_implausible 738.5dp（键盘被顶出）
+q3_AC12     —           —             —       bar_height_implausible 738.5dp
+```
+
+右沿逐列列差（x_end−39 .. x_end−1）：
+
+```
+q1_BASE   5 5 5 ... 5                                        ← 平，无线索
+q1_FIX  210 205 199 194 ... 90 85 79 31 0 0 0 24 46 41 ... 3  ← 渐变
+```
+
+## 5 AVD 自身的两种「丢 IME」，与被测包无关
+
+不加就绪闸门时，任何包都会周期性落进这两种形状之一：
+
+```
+(a) frame=[0,0][0,0] visible=false      —— IME 窗口根本没出来（mInputShown 可能仍为 true）
+(b) 当前方法被换回 LatinIME             —— q2_AC12 实测 mCurMethodId=...latin.LatinIME
+```
+
+本轮实测样本：`q1_BASE` boot1 落 (a)、`q3_BASE` boot1 落 (b)、`q2_FIX`/`q5_FIX`/`q6..q8` 批次
+全部落 (a)。**两种形状都出现在对照包上**，所以它们不构成对被测包的指控；反过来，
+被测包的症状是**第三种**：窗口可见、方法正确、但高度 = 整块面板 —— 这个只在缺陷包上出现。
+
+## 6 本轮代码修复
+
+```
+app/src/main/res/layout/candidate_view.xml
+  candidate_overflow_cue: layout_height match_parent → 0dp
+app/src/main/java/com/ispeech/input/CandidateView.kt
+  新增 syncOverflowCueHeight()：布局后把 scrollView.height 拷给线索
+  refreshOverflowCue() 每次先调它
+app/src/test/java/com/ispeech/input/CandidateOverflowCueTest.kt
+  新增 1 条回归断言：线索高度不得 match_parent + 必须存在 syncOverflowCueHeight()
+```
+
+## 7 工装侧同步修掉的两个量法缺陷
+
+1. **`find_bar` 阈值 0.60 → 0.40**：有候选的行纯底色只占 40–56%（chip + 字身 + 角标吃掉其余），
+   0.60 把健康帧切成 8.3–20dp 假条带。降到 0.40 才量到 46.2dp。
+   **不能**改用「底色容差族」提覆盖率 —— 键面白 `(240,240,243)` 与 `#F4F5F7` 只差 5，
+   任何装得下 chip 铺底（差 31）的容差都会把整块键面算进来，实测条带涨到 719–837dp。
+2. **渐变判据**：旧判据要求「线索区内 0 个非底色像素」才能判 `FADE_PRESENT`，
+   这与「渐变」本身相反 —— 真有渐变时恒判 `FADE_ABSENT`。改为量斜坡（§4）。
+   旧判据下修好的包也是 `FADE_ABSENT`，会再次把实现缺陷误判成「没做」。
+
+## 8 门禁
+
+```
+test_ac12_frame.py    → Ran 7 tests  OK            （新增 3 条：渐变判 present、平沿判 absent、拥挤行仍量 46dp）
+test_band_tier.py     → Ran 11 tests OK
+check_static.py       → SUMMARY: passed=6 failed=0 warned=0
+r21_wiring_compare.py → SECTION1 NO_DRIFT / SECTION2 verdict_moves / RESULT PASS
+:app:testDebugUnitTest → HEAD 137 用例 1 失败（AgentDispatcherTest）
+                          基线 a99cb7d 126 用例 1 失败（同一条）⇒ 非本次引入，新增 11 条全绿
+```
+
+注：测试 JVM 需 `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/tmp`，否则本机沙箱拒写
+`/var/folders/.../junit*` 会让 24 条无关用例报 `Operation not permitted`（不是代码失败）。
+
+## 9 仍未闭合
+
+- **AC-10 像素（full_count / 档位）**：本轮仍未取得。Chrome 地址栏宿主在中文态下能回读
+  `shijian`，但候选条里这一屏只有组合码与少数候选，不足以判「档2 完整 3 条」。
+  需要能稳定敲出 ≥4 条候选的宿主（真机，或 AVD 上能进 Settings 搜索框的一轮）。
+- **`AC12_MEASURED` 仍为 False**：模拟器上 `FADE_PRESENT` 已取得，但 `band.py` 的达标出数源
+  按设计只在真机帧上置真；本轮不自行翻这个布尔。
+- **R21 签字**：`band.py:227 R21_SIGNED=False`，未变；在 VOCA-419 item 19。

@@ -156,11 +156,26 @@ class CandidateView @JvmOverloads constructor(
      */
     private fun refreshOverflowCue() {
         if (!::overflowCue.isInitialized || !::scrollView.isInitialized) return
+        syncOverflowCueHeight()
         val state = readOverflowState()
         val wantVisible = CandidateOverflowCue.shouldShow(state.scrollable, state.canScrollForward)
         // 只在真的变化时写 visibility：每次刷新都 set 会让 View 走一遍 requestLayout
         val target = if (wantVisible) View.VISIBLE else View.GONE
         if (overflowCue.visibility != target) overflowCue.visibility = target
+    }
+
+    /**
+     * 让遮罩高度跟随滚动区的实测高度。
+     *
+     * 布局里给的是 0dp 而不是 match_parent：父 FrameLayout 是 wrap_content，
+     * match_parent 的孩子在 AT_MOST 下会拿到「整块可用高度」并反过来把父撑满，
+     * 键盘被顶出屏幕（2026-11-24 emulator-5554 实测 IME 窗口 [0,158][1260,2720]、
+     * 键面白像素 14855→19）。高度只能等滚动区测量完成后再拷过来。
+     */
+    private fun syncOverflowCueHeight() {
+        val h = scrollView.height
+        if (h <= 0 || overflowCue.layoutParams.height == h) return
+        overflowCue.layoutParams = overflowCue.layoutParams.also { it.height = h }
     }
 
     /** 当前溢出事实（供 [refreshOverflowCue] 与单测共用同一份判定输入） */
