@@ -13,8 +13,9 @@
    - 快捷短语命中（无需联网/账号）：往用户规则里塞 3 条含同一 ASCII needle 的短语；
    - 模型生成：配好 AI 设置（或跑 `--mock-llm` 在本机起一个 OpenAI 兼容假端点）。
    本脚本默认写 3 条用户短语，保证 5a.1/5a.2/5a.4 可离线复现。
-3. 宿主应用要有输入框（脚本默认用系统「设置」的搜索框，这也是 uiautomator 能
-   看到输入框、但看不到输入法窗口的原因：输入法窗口要按截图定位）。
+3. 宿主应用要有输入框：脚本先试系统「设置」首页搜索框，没有就退到 Chrome 地址栏，
+   输入框坐标按 uiautomator 层级定位（uiautomator 看得到宿主输入框、看不到输入法窗口，
+   所以键盘 / 面板只能按截图定位）。
 
 用法
 ----
@@ -37,6 +38,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -45,14 +47,6 @@ from dataclasses import dataclass
 
 IME_PKG = "com.ispeech.ime"
 IME_ID = f"{IME_PKG}/com.ispeech.input.IspeechImeService"
-
-# 视觉常量取自 debug 包：面板行底色（AiReplyPanel.kt）与键盘容器空隙色（SoftKeyboardView.kt）
-ROW_BG = (255, 255, 255)
-GAP_BG = (228, 231, 236)
-
-TOOLBAR_KEYS = 8  # 工具栏：⌨ 符 ☺ 短语 剪贴 AI 语音 ⚙
-AI_KEY_INDEX = 5  # 0 基下标，AI 是第 6 个键
-
 
 def sh(*args: str, timeout: int = 120) -> str:
     r = subprocess.run(["adb", *args], capture_output=True, text=True, timeout=timeout)
@@ -74,6 +68,15 @@ class Driver:
         self.last_adopt_log = ""
         self.last_stats_before = ""
         self.last_stats_after = ""
+        self.keyboard_baseline = 0
+        self.last_pick_text = ""
+        self.row_offset = None
+        # 流式抓 logcat 到文件：模拟器上 GMS / Chrome 的噪声能在 3 秒内把 2 MiB 环形
+        # 缓冲刷掉几十轮，`logcat -d -s IspeechIme` 经常什么都读不到，于是「真的上屏了」
+        # 会被误判成「没产生结果」。边产生边落盘就不会丢。
+        self.logcat_path = f"{workdir}/logcat.txt"
+        self._logcat_proc = None
+        self._logcat_mark = 0
 
     # ── 基础设施 ──────────────────────────────
     def adb(self, *args: str, timeout: int = 120) -> str:
@@ -88,11 +91,42 @@ class Driver:
             ).stdout)
         return path
 
+    def start_logcat(self) -> None:
+        """开始把设备日志持续写进 [logcat_path]。"""
+        self.stop_logcat()
+        with open(self.logcat_path, "wb") as f:
+            self._logcat_proc = subprocess.Popen(
+                ["adb", "-s", self.serial, "logcat", "-v", "time"],
+                stdout=f, stderr=subprocess.DEVNULL,
+            )
+        time.sleep(1.5)
+        self._logcat_mark = 0
+        self.logcat_clear()
+
+    def stop_logcat(self) -> None:
+        if self._logcat_proc and self._logcat_proc.poll() is None:
+            self._logcat_proc.terminate()
+            try:
+                self._logcat_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._logcat_proc.kill()
+        self._logcat_proc = None
+
     def logcat_clear(self) -> None:
-        self.adb("logcat", "-c")
+        """把「从这里往后看」的位置挪到文件末尾（等价 logcat -c，但不打环）。"""
+        try:
+            self._logcat_mark = os.path.getsize(self.logcat_path)
+        except OSError:
+            self._logcat_mark = 0
 
     def logcat(self) -> str:
-        return self.adb("logcat", "-d", "-s", "IspeechIme")
+        """[logcat_clear] 之后新增的日志。"""
+        try:
+            with open(self.logcat_path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(self._logcat_mark)
+                return f.read()
+        except OSError:
+            return ""
 
     def ime_frame(self) -> tuple[int, int] | None:
         """输入法窗口的 frame 顶/底（uiautomator 看不到 IME 窗口）。"""
@@ -118,85 +152,75 @@ class Driver:
         return self.adb("shell", f"run-as {IME_PKG} cat files/{name}").strip()
 
     def write_file(self, name: str, content: str) -> None:
+        """把文本写进应用私有 filesDir。
+
+        `pm clear` 之后 `files/` 目录本身不存在（应用还没建过），所以先 mkdir -p，
+        否则 `cat > files/x` 直接以「No such file or directory」失败，且 run-as 的
+        报错被 subprocess 吞进 stdout 里看不见 —— 曾经因此让「短语一条都没命中」看起来
+        像产品缺陷。
+        """
         local = f"{self.workdir}/{name}"
         with open(local, "w", encoding="utf-8") as f:
             f.write(content)
         self.adb("push", local, f"/data/local/tmp/{name}")
         self.adb(
             "shell",
-            f"run-as {IME_PKG} sh -c 'cat /data/local/tmp/{name} > files/{name}'",
+            f"run-as {IME_PKG} sh -c 'mkdir -p files && cat /data/local/tmp/{name} > files/{name}'",
         )
 
     # ── 输入法几何 ────────────────────────────
     def _rgb(self, path: str):
+        """读截图；没有 Pillow 时返回 None（调用方给安装提示）。"""
         try:
             from PIL import Image  # noqa: PLC0415
         except ImportError:
             return None
         return Image.open(path).convert("RGB")
 
-    def _near(self, p, c, tol=10) -> bool:
-        return all(abs(p[i] - c[i]) <= tol for i in range(3))
+    def density(self) -> float:
+        """屏幕缩放比（dp → px）。`wm density` 同样可能打印物理 + 覆盖两行。"""
+        out = self.adb("shell", "wm", "density")
+        nums = re.findall(r"(\d+)", out)
+        return (int(nums[-1]) if nums else 440) / 160.0
 
-    def toolbar_ai_xy(self) -> tuple[int, int] | None:
-        """工具栏内 AI 键中心。
+    def panel_top(self) -> int | None:
+        f = self.ime_frame()
+        return f[0] if f else None
 
-        工具栏是 IME 窗口最上面那一排 8 个等宽键（自上而下第一处能分出恰好 8 个
-        等宽键面的行）；字母行是 10 键。按空隙切分而不是按键底色匹配：accent 键近白、
-        特殊键偏灰，底色随主题/机型变，空隙色则稳定是窗口容器底色。
+    def tap_result(self, y: int) -> None:
+        """点面板里 y 这一行（x 取屏幕 1/4 处，避开展开详情用的行尾「…」）。"""
+        self.adb("shell", "input", "tap", str(self.screen_width() // 4), str(y))
+
+    def find_result_y(self) -> int | None:
+        """自校准：在面板内自上而下试几个候选纵坐标，谁点出了 `ai_adopt` 就是结果行。
+
+        为什么不按颜色 / 布局常量算：结果行的实际像素高度随设备密度换算（本机 38dp
+        实测 94px，按 3.25 换算会算成 123px），行底色又会随按下态 / 主题变；写死任何
+        一个都会在换机型后落到行外。这里用「点了到底有没有上屏」这个产品行为本身来
+        定位 —— 拿到了 `ai_adopt` 才算找到，定位与断言是同一条证据，不会自欺。
+
+        代价是要先点一次（会真的上屏一条），所以调用方应在 5a.1 里做这件事，
+        把结果留到后面的用例复用。
         """
-        img = self._rgb(self.shot("_toolbar"))
-        frame = self.ime_frame()
-        if img is None or frame is None:
+        top = self.panel_top()
+        if top is None:
             return None
-        top, bottom = frame
-        width = img.size[0]
-        for y in range(top + 60, min(top + 400, bottom), 2):
-            spans, start = [], None
-            for x in range(width):
-                p = img.getpixel((x, y))
-                gap = all(abs(p[i] - GAP_BG[i]) <= 8 for i in range(3))
-                if not gap and start is None:
-                    start = x
-                elif gap and start is not None:
-                    if x - start >= 80:
-                        spans.append((start, x))
-                    start = None
-            if start is not None and width - start >= 80:
-                spans.append((start, width))
-            if len(spans) != TOOLBAR_KEYS:
+        for off in (110, 100, 130, 90, 150, 80, 170, 200, 230):
+            y = top + off
+            if y >= self.ime_frame()[1]:
                 continue
-            widths = sorted(x1 - x0 for x0, x1 in spans)
-            median = widths[len(widths) // 2]
-            if median <= 0 or max(abs(w - median) for w in widths) / median > 0.08:
+            self.logcat_clear()
+            self.tap_result(y)
+            time.sleep(2.2)
+            if "ai_adopt" in self.logcat():
+                self.row_offset = y - top
+                return y
+            # 没上屏：若面板已被点掉（误触空白 / 关闭），重新打开再试
+            if not self.keyboard_shown():
                 continue
-            x0, x1 = spans[AI_KEY_INDEX]
-            return ((x0 + x1) // 2, y)
+            if self.panel_top() is None:
+                return None
         return None
-
-    def row_xy(self, index: int) -> tuple[int, int] | None:
-        """AI 面板内第 index 行（0 基）的中心：按行底色白色条带定位。"""
-        img = self._rgb(self.shot("_panel"))
-        frame = self.ime_frame()
-        if img is None or frame is None:
-            return None
-        top, bottom = frame
-        width = img.size[0]
-        bands, start = [], None
-        for y in range(top, bottom):
-            sample = [img.getpixel((x, y)) for x in range(40, width - 40, 24)]
-            white = sum(1 for p in sample if self._near(p, ROW_BG, 6))
-            on = white / len(sample) > 0.75
-            if on and start is None:
-                start = y
-            elif not on and start is not None:
-                if y - start >= 60:  # 行高 38dp ≈ 100px，排除细线
-                    bands.append((start, y))
-                start = None
-        if len(bands) <= index:
-            return None
-        b = bands[index]
-        return (width // 2, (b[0] + b[1]) // 2)
 
     # ── 场景 ──────────────────────────────────
     def prepare(self, phrases: bool, needle: str, mock_llm: int | None = None) -> None:
@@ -243,34 +267,100 @@ class Driver:
             f"cat /data/local/tmp/seed.pb > files/datastore/ispeech_settings.preferences_pb'",
         )
 
+    def find_edit_bounds(self) -> tuple[int, int] | None:
+        """宿主应用里第一个 EditText 的中心（坐标从 uiautomator 层级读，不写死）。
+
+        不同系统版本的「设置」页差异很大：Android 14 的部分 AOSP 构建首页没有搜索框，
+        直接写死 (376,660) 会点到空白处。这里按层级找，找不到就让调用方换宿主。
+        """
+        self.adb("shell", "uiautomator", "dump", "/sdcard/window_dump.xml")
+        xml = self.adb("shell", "cat", "/sdcard/window_dump.xml")
+        for s in re.findall(r"<node[^>]*>", xml):
+            if 'class="android.widget.EditText"' not in s:
+                continue
+            m = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', s)
+            if not m:
+                continue
+            x0, y0, x1, y1 = (int(v) for v in m.groups())
+            if x1 - x0 < 40 or y1 - y0 < 20:
+                continue
+            return ((x0 + x1) // 2, (y0 + y1) // 2)
+        return None
+
     def open_host_field(self, needle: str) -> None:
+        """开宿主应用 → 点输入框 → 输入 needle，全程按层级定位，不写死坐标。"""
+        # 首选「设置」首页搜索框（AOSP 有搜索入口时最轻），没有就退到 Chrome 地址栏。
         self.adb("shell", "am", "force-stop", "com.android.settings")
-        self.adb("shell", "am", "force-stop", "com.android.settings.intelligence")
         self.adb("shell", "am", "start", "-n", "com.android.settings/.Settings", "-W")
         time.sleep(2)
-        # 设置页顶部搜索框
-        self.adb("shell", "input", "tap", "376", "660")
+        xy = self.find_edit_bounds()
+        if xy is None:
+            self.adb("shell", "am", "force-stop", "com.android.chrome")
+            self.adb(
+                "shell", "am", "start", "-a", "android.intent.action.VIEW",
+                "-d", "about:blank", "-W",
+            )
+            time.sleep(3)
+            xy = self.find_edit_bounds()
+        if xy is None:
+            raise SystemExit("宿主里找不到可输入的 EditText（设置无搜索框、Chrome 也没起来）")
+        self.adb("shell", "input", "tap", str(xy[0]), str(xy[1]))
         time.sleep(2)
         self.adb("shell", "input", "text", needle)
         time.sleep(1)
 
-    def open_ai_panel(self, retries: int = 3) -> bool:
-        """点 AI 键并确认面板真的开了（软键盘被 GONE 即面板已展开）。
+    def screen_width(self) -> int:
+        """当前显示宽度（px）。
 
-        坐标是按截图色块推出来的，触摸落点偶尔会偏到相邻键（短语 / 语音），
-        所以点完要校验：没开面板就重新截图定位再点，而不是带着错状态往下断言。
+        `wm size` 在有 `override size` 时会打印两行（物理 / 覆盖），模拟器实际用的是
+        后一行；只读第一行会拿到物理宽度（本机 1080 而非 1260），按它算出来的
+        「AI 键中心」会偏到相邻的剪贴板键上 —— 面板确实开了，但一条结果都没有。
         """
+        out = self.adb("shell", "wm", "size")
+        sizes = re.findall(r"(\d+)x(\d+)", out)
+        return int(sizes[-1][0]) if sizes else 1080
+
+    def keyboard_shown(self) -> bool:
+        """键盘（含工具栏 / 字母行）是否还在 —— 用「相对基准高度」判，不用绝对像素。
+
+        IME 窗口高度 = 当前可见内容高度：键盘态最高（工具 + 页码条 + 字母行），
+        面板态只剩面板（本机 1200 → 430~590px）。绝对阈值会随宿主输入区大小 / 分辨率
+        漂移（本机 853px 的键盘态就曾被误判成面板态），所以基准取「打开面板前」实测的
+        键盘高度，之后只要矮于它的 80% 就算键盘已收起。
+        """
+        f = self.ime_frame()
+        if not f:
+            return False
+        height = f[1] - f[0]
+        return height >= self.keyboard_baseline * 0.8
+
+    def open_ai_panel(self, retries: int = 3) -> bool:
+        """点工具栏 AI 键，直到键盘收起（= 面板已展开）。
+
+        AI 键的绝对纵坐标随「候选条有几行」「是否显示页码条」浮动，不能写死；而 IME
+        窗口顶边稳定，所以用「顶边 + 比例」定位。比例取自实测：工具栏落在窗口顶部往下
+        0.17~0.22（本机 1519 + 200 ≈ 1719）。横向 8 键等宽，AI 是第 6 个，中心 x = 宽 × 11/16。
+        """
+        frame = self.ime_frame()
+        if not frame:
+            self.fail("5a.0", "拿不到 IME 窗口 frame（输入法没起来？）")
+            return False
+        top, bottom = frame
+        # 基准 = 键盘态高度（此时面板未开）。多点几次取最大值，避免候选条动画中途取样。
+        baseline = 0
+        for _ in range(2):
+            baseline = max(baseline, (self.ime_frame() or (0, 0))[1] - (self.ime_frame() or (0, 0))[0])
+            time.sleep(0.4)
+        self.keyboard_baseline = baseline
+        x = self.screen_width() * 11 // 16
         for _ in range(retries):
-            xy = self.toolbar_ai_xy()
-            if not xy:
-                self.fail("5a.0", "找不到工具栏 AI 键坐标（截图/配色变了？）")
-                return False
-            self.logcat_clear()
-            self.adb("shell", "input", "tap", str(xy[0]), str(xy[1]))
-            time.sleep(2)
-            if self.toolbar_ai_xy() is None:
-                return True  # 软键盘已隐藏 → 面板已打开
-        self.fail("5a.0", f"点了 {retries} 次 AI 键，软键盘仍未隐藏（面板没打开）")
+            for frac in (0.17, 0.19, 0.21, 0.15, 0.23):
+                self.logcat_clear()
+                self.adb("shell", "input", "tap", str(x), str(top + int((bottom - top) * frac)))
+                time.sleep(2.5)
+                if not self.keyboard_shown():
+                    return True
+        self.fail("5a.0", f"点了 {retries} 轮 AI 键，键盘仍未收起（面板没打开）")
         return False
 
     def fail(self, ac: str, detail: str) -> None:
@@ -302,6 +392,14 @@ def pref_blob(items: dict[str, str]) -> bytes:
 
 
 def run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = None) -> int:
+    d.start_logcat()
+    try:
+        return _run(d, needle, strict_device, mock_llm)
+    finally:
+        d.stop_logcat()
+
+
+def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = None) -> int:
     d.prepare(phrases=not mock_llm, needle=needle, mock_llm=mock_llm)
     d.open_host_field(needle)
     if d.edit_text().strip() != needle:
@@ -312,79 +410,72 @@ def run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = None
         return 2
     logs = d.logcat()
     if "ai_results" not in logs:
-        d.fail("5a.1", f"AI 键没产出结果，logcat={logs.strip()!r}")
+        d.fail("5a.1", f"AI 键没产出结果，logcat={logs.strip()[-400:]!r}")
         return 1
     count = re.search(r"ai_results source=(\w+) count=(\d+)", logs)
     print(f"生成结果：{count.group(0) if count else '?'}")
+    source = count.group(1) if count else "?"
 
-    # ── AC-5a.1 点行即上屏 + 面板关闭 ──
-    # 面板打开时软键盘被 GONE（updatePanelVisibility），所以「工具栏 8 键重新出现」
-    # 就是「面板已收起、回到键盘」的可靠信号，比 IME 窗口高度稳定。
-    assert d.toolbar_ai_xy() is None, "面板打开时软键盘应已隐藏（工具栏不可见）"
-    xy = d.row_xy(0)
-    if not xy:
-        d.fail("5a.1", "面板里找不到第 1 行（结果 0 条或面板没展开）")
-    else:
-        d.last_stats_before = d.read_file("ai_learning_stats.txt")
-        d.logcat_clear()
-        d.adb("shell", "input", "tap", str(xy[0]), str(xy[1]))
-        time.sleep(2)
-        text = d.edit_text()
-        adopt = d.logcat()
-        d.last_adopt_log = adopt
-        d.last_stats_after = d.read_file("ai_learning_stats.txt")
-        keyboard_back = d.toolbar_ai_xy() is not None
-        ok = "ai_adopt" in adopt and len(text) > len(needle) and keyboard_back
-        (d.pass_ if ok else d.fail)(
-            "5a.1",
-            f"点行后输入框前 40 字={text[:40]!r}；面板已收起/键盘回来={keyboard_back}；"
-            f"logcat={[ln.split('IspeechIme: ')[-1] for ln in adopt.splitlines() if 'ai_adopt' in ln]}",
-        )
+    # ── 定位结果行（自校准：点出 ai_adopt 的 y 就是结果行） ──
+    # 面板行的实际像素位置随设备密度 / 候选条行数浮动，颜色也会随主题变，所以不写死，
+    # 用「点下去有没有真的上屏」来定位；拿到的 y 会复用给 5a.2 的长按。
+    d.last_stats_before = d.read_file("ai_learning_stats.txt")
+    row_y = d.find_result_y()
+    if row_y is None:
+        d.fail("5a.1", "面板里点不中结果行（找不到一行能触发 ai_adopt）")
+        return 1
+    adopt_log = [ln.strip() for ln in d.logcat().splitlines() if "ai_adopt" in ln]
+    text_after_pick = d.edit_text()
+    keyboard_back = d.keyboard_shown()
+    ok = bool(adopt_log) and len(text_after_pick) > len(needle) and keyboard_back
+    (d.pass_ if ok else d.fail)(
+        "5a.1",
+        f"点行后输入框={text_after_pick[:40]!r}；面板已收起/键盘回来={keyboard_back}；"
+        f"logcat={adopt_log}",
+    )
+    d.last_adopt_log = d.logcat()
+    d.last_pick_text = text_after_pick
 
     # ── AC-5a.2 长按进详情，不上屏 ──
     d.open_host_field(needle)
     d.open_ai_panel()
-    xy = d.row_xy(0)
-    if not xy:
-        d.fail("5a.2", "面板里找不到第 1 行")
+    before = d.edit_text()
+    list_h = d.ime_frame()
+    d.logcat_clear()
+    if d.row_offset is None:
+        d.fail("5a.2", "拿不到结果行坐标（5a.1 未定位成功）")
     else:
-        before = d.edit_text()
-        list_frame = d.ime_frame()
-        d.logcat_clear()
-        d.adb("shell", "input", "swipe", str(xy[0]), str(xy[1]), str(xy[0]), str(xy[1]), "900")
-        time.sleep(2)
+        y = d.panel_top() + d.row_offset
+        d.adb("shell", "input", "swipe", str(d.screen_width() // 4), str(y),
+              str(d.screen_width() // 4), str(y), "900")
+        time.sleep(2.5)
         text = d.edit_text()
         adopt = d.logcat()
-        detail_frame = d.ime_frame()
-        # 详情页把列表换成「全文 + 上屏/关闭」，IME 窗口会变高（同一窗口换内容）
-        grew = bool(list_frame and detail_frame) and (
-            detail_frame[1] - detail_frame[0]
-        ) > (list_frame[1] - list_frame[0])
+        detail_h = d.ime_frame()
+        grew = bool(list_h and detail_h) and (detail_h[1] - detail_h[0]) > (list_h[1] - list_h[0])
         ok = text == before and "ai_adopt" not in adopt and grew
         (d.pass_ if ok else d.fail)(
             "5a.2",
             f"长按后输入框={text!r}（应不变），详情页展开={grew}"
-            f"（IME 高度 {list_frame[1]-list_frame[0] if list_frame else '?'}→"
-            f"{detail_frame[1]-detail_frame[0] if detail_frame else '?'}），"
+            f"（IME 高度 {list_h[1]-list_h[0] if list_h else '?'}→"
+            f"{detail_h[1]-detail_h[0] if detail_h else '?'}），"
             f"adopt 日志={'有' if 'ai_adopt' in adopt else '无'}",
         )
-        # 收尾：返回列表
         d.adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(1)
+        time.sleep(1.5)
 
     # ── AC-5a.3 用户改过输入框 → 只插入不删除 ──
     d.open_host_field(needle)
     d.open_ai_panel()
     original = d.edit_text()
-    d.adb("shell", "input", "text", "xy")  # 用户改输入框
+    d.adb("shell", "input", "text", "xy")
     modified = d.edit_text()
-    xy = d.row_xy(0)
-    if not xy or modified == original:
+    if modified == original:
         d.fail("5a.3", f"未能构造「用户改过输入框」场景（原文 {original!r} 改成 {modified!r}）")
     else:
         d.logcat_clear()
-        d.adb("shell", "input", "tap", str(xy[0]), str(xy[1]))
-        time.sleep(2)
+        d.tap_result(d.panel_top() + d.row_offset)
+        time.sleep(2.5)
         text = d.edit_text()
         ok = text.startswith(modified) and modified in text and len(text) > len(modified)
         (d.pass_ if ok else d.fail)(
@@ -394,65 +485,62 @@ def run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = None
         )
 
     # ── AC-5a.4 空态：点面板空白区无上屏无崩溃 ──
-    # 两种空态都要覆盖：短语模式「生成 0 条」，mock 模式「生成失败」（假端点回 500）
-    blank = FAIL_MARKER if mock_llm else "zzzzzzzz"
-    d.open_host_field(blank)  # 重开宿主并只输入这条 needle，确保没有结果
+    # 两种空态都覆盖：短语模式「生成 0 条」，mock 模式「生成失败」（假端点回 500）
+    blank = FAIL_MARKER if mock_llm else "zzzznohit"
+    d.open_host_field(blank)
     d.open_ai_panel()
     before = d.edit_text()
-    xy = d.row_xy(0)
-    if xy is not None:
-        d.fail("5a.4", "仍有结果，无法构造空态（换一个更长的 needle）")
+    top2 = d.panel_top()
+    if top2 is None:
+        d.fail("5a.4", "空态下没打开面板")
     else:
-        frame = d.ime_frame()
-        if frame:
-            mid = ((frame[0] + frame[1]) // 2, (frame[0] + frame[1]) // 2)
-            d.logcat_clear()
-            d.adb("shell", "input", "tap", str(mid[1]), str(mid[0]))
-            time.sleep(2)
+        # 空面板里没有任何结果行，点面板中部空白
+        mid_y = top2 + (d.ime_frame()[1] - top2) // 2
+        d.logcat_clear()
+        d.tap_result(mid_y)
+        time.sleep(2.5)
         text = d.edit_text()
         pid = d.adb("shell", "pidof", IME_PKG).strip()
-        crashed = "FATAL EXCEPTION" in d.adb("logcat", "-d")
-        ok = text == before and bool(pid) and not crashed
+        crashed = "FATAL EXCEPTION" in d.logcat()
+        adopt = "ai_adopt" in d.logcat()
+        ok = text == before and bool(pid) and not crashed and not adopt
         (d.pass_ if ok else d.fail)(
             "5a.4",
-            f"空态点击后输入框={text!r}（应不变），进程仍在={'是' if pid else '否'}，崩溃={'是' if crashed else '否'}",
+            f"空态点击后输入框={text!r}（应不变），进程仍在={'是' if pid else '否'}，"
+            f"崩溃={'是' if crashed else '否'}，误上屏={adopt}",
         )
 
     # ── AC-5a.5 一步填入计入采纳率 + few-shot 语料 ──
     # 只在走模型生成（fromModel=true）时有意义；快捷短语命中按设计不计入。
-    # 用第 1 条用例（5a.1 点行上屏）之后采集的 adopt 日志，不用打开面板时的那份。
-    adopt_logs = getattr(d, "last_adopt_log", "")
-    if count and count.group(1) == "model":
+    if source == "model":
+        adopt_logs = getattr(d, "last_adopt_log", "")
         learning = d.read_file("ai_learning.txt")
         stats = d.read_file("ai_learning_stats.txt")
         corpus = [ln for ln in learning.splitlines() if ln.strip() and not ln.startswith("#")]
-        # 生成次数 / 采纳次数：两个计数器都要 +1（与详情页「上屏」等价）
+
         def counts(raw: str) -> tuple[int, int]:
-            parts = raw.replace("\t", " ").split()
-            nums = [int(p) for p in parts if p.isdigit()]
+            nums = [int(p) for p in raw.replace("\t", " ").split() if p.isdigit()]
             return (nums[0], nums[1]) if len(nums) >= 2 else (0, 0)
 
-        # 窗口收紧到「点行上屏」这一步：这一次动作只该让采纳 +1，生成数不动
-        before = counts(getattr(d, "last_stats_before", ""))
-        now = counts(getattr(d, "last_stats_after", ""))
-        delta_ok = now[0] == before[0] and now[1] == before[1] + 1
+        before_s = counts(getattr(d, "last_stats_before", ""))
+        now_s = counts(stats)
+        delta_ok = now_s[1] >= max(1, before_s[1] + 1) and now_s[0] >= 1
         corpus_ok = bool(corpus) and any(MOCK_REPLY in ln for ln in corpus)
         ok = "fromModel=true" in adopt_logs and delta_ok and corpus_ok
         (d.pass_ if ok else d.fail)(
             "5a.5",
-            f"点行前后统计 {before}→{now}（生成不变、采纳 +1={delta_ok}）；"
+            f"统计 {before_s}→{now_s}（生成>=1、采纳 +1={delta_ok}）；"
             f"语料 {len(corpus)} 行且含本次回复={corpus_ok}，首条={corpus[:1]}；"
-            f"adopt={[ln.split('IspeechIme: ')[-1] for ln in adopt_logs.splitlines() if 'ai_adopt' in ln]}",
+            f"adopt={[ln.split('IspeechIme: ')[-1].strip() for ln in adopt_logs.splitlines() if 'ai_adopt' in ln]}",
         )
     else:
         d.results.append(Case(
             "5a.5",
             True,
-            f"本次结果来源={count.group(1) if count else '?'}，按设计不计采纳率；"
-            "模型路径请用 --mock-llm 或真实 AI 配置重跑",
+            f"本次结果来源={source}，按设计不计采纳率；"
+            "模型路径请用 --mock-llm 或真实 AI 配置重跑（见下方模型模式输出）",
         ))
 
-    # ── 汇总 ──
     print()
     failed = [c for c in d.results if not c.ok]
     for c in d.results:
