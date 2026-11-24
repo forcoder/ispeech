@@ -67,7 +67,7 @@
     <string name="quick_edit_rule">编辑快捷短语</string>
     <string name="quick_trigger">快捷字母</string>
     <string name="quick_trigger_hint">例：ycsf → 输入法里敲 ycsf，候选第一位就是这条短语</string>
-    <string name="quick_trigger_error">快捷字母需为 2–4 位小写字母（与五笔编码上限 4 位一致）</string>
+    <string name="quick_trigger_error">快捷字母需为 2–12 位小写字母（a–z）</string>
     <string name="quick_label">名称</string>
     <string name="quick_content">内容</string>
     <string name="quick_match_mode">匹配方式</string>
@@ -98,6 +98,26 @@
     <string name="quick_remote_restore">恢复默认</string>
     <string name="quick_remote_override_set">已设置快捷字母「%1$s」，点击右上角「保存并同步」写入本地</string>
     <string name="quick_remote_override_restored">已恢复远端默认快捷字母，点击右上角「保存并同步」写入本地</string>
+    <!-- ADR-0002 C1-7 / C1-9 / C2-5 / C3-3：禁用原因、可达性提示、冲突动作与文案 -->
+    <string name="quick_trigger_invalid">快捷字母不可用：%1$s</string>
+    <string name="quick_trigger_reason_empty">还没输入简写</string>
+    <string name="quick_trigger_reason_short">至少 2 位</string>
+    <string name="quick_trigger_reason_long">最多 12 位，超出任何输入态都敲不出来</string>
+    <string name="quick_trigger_reason_letters">只能用小写英文字母 a–z</string>
+    <string name="quick_trigger_reachable_hint">超过 4 位：五笔态敲不全，可在短语面板筛选后点选，或切到拼音态敲完整简写</string>
+    <string name="quick_trigger_prefix_long_content_warn">该简写超过 4 位且使用前缀/包含匹配：候选第一位可能是这条长正文，按空格会整段上屏</string>
+    <string name="quick_source_remote_overridden">远端 · 已覆盖</string>
+    <string name="quick_conflict_badge">冲突</string>
+    <string name="quick_conflict_detail_title">%1$s：本地与云端正文不一致</string>
+    <string name="quick_conflict_local_label">本地正文</string>
+    <string name="quick_conflict_remote_label">云端正文</string>
+    <string name="quick_conflict_adopt_remote">采用云端正文</string>
+    <string name="quick_conflict_push_local">以本地为准并更新云端</string>
+    <string name="quick_conflict_adopted">已用云端正文替换本地（%1$s），冲突已清除</string>
+    <string name="quick_conflict_overwritten">已用本地正文更新云端（%1$s）</string>
+    <string name="quick_conflict_overwrite_failed">云端未更新（%1$s）：远端不支持修改或网络失败，冲突保留</string>
+    <string name="quick_synced_conflict">%1$d 条与云端同码冲突，本轮未上传（新增 %2$d 条）：请在卡片上选择保留哪一侧</string>
+    <string name="sync_upload_conflict">%1$d 条与云端同码冲突，本轮未上传（新增 %2$d 条）</string>
     <string name="quick_panel_search_hint">输入关键词搜索短语（拼音首字母也行）</string>
     <string name="quick_panel_search_active">🔍 %1$s</string>
     <string name="btn_add_cloud_shortcut">添加云端简写</string>

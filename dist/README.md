@@ -10,7 +10,7 @@
 | `ispeech-release-v1.5.apk` | **release（本次交付）**，versionCode 5 / versionName 1.5，本工程自签测试证书（CN=iSpeech Prototype） |
 | `ispeech-debug.apk` | debug（抓日志：`adb logcat -s IspeechIme`），与 release 同一份源码 |
 | `ispeech-release-v1.3.apk` / `ispeech-release-v1.0.apk` | 历史版本，保留用于回归对比 |
-| `SHA256SUMS` | 完整性校验 |
+| `SHA256SUMS` | 完整性校验，覆盖本版 + `debug` + `_archive/` 全部历史包（生成物，见「校验」节） |
 
 ## v1.5 新增（相对 v1.4）
 
@@ -63,11 +63,28 @@ JDK 17 + Android SDK 34 + emulator-5554 / Android 14）执行，命令见仓库�
 ./ispeech-remote.sh sync
 ssh -p 10010 cookie@43.136.44.72 'cd ~/workspace/iSpeech && export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools && export PATH=$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:/usr/bin:/bin && ./gradlew assembleRelease'
 scp -P 10010 cookie@43.136.44.72:~/workspace/iSpeech/app/build/outputs/apk/release/app-release.apk dist/ispeech-release-v1.5.apk
-cd dist && shasum -a 256 ispeech-release-v1.5.apk >> SHA256SUMS
+python3 tools/verify/check_dist_manifest.py --regen   # 整份按当前字节重写；禁止 `>> SHA256SUMS` 追加
 ```
 
 ## 校验
 
+**问「我手上这包是不是仓库那包」，只用这一条命令：**
+
 ```bash
-shasum -a 256 -c SHA256SUMS
+cd dist && shasum -a 256 -c SHA256SUMS
 ```
+
+`SHA256SUMS` 是**生成物**，口径与门禁见 `docs/adr/VOCA-400-dist-checksum-manifest.md`（ADR-0003）：
+
+- 唯一写入路径是 `python3 tools/verify/check_dist_manifest.py --regen`，不要手改、不要 `>>` 追加
+  （追加会让同一路径两行并存，`shasum -c` 只认后一行）；
+- 它同时校验「记的数 == 实际字节」与「`dist/` 下每个**该入册**的 APK 都有记录」——后者是 main 上曾经
+  静默漏掉 `_archive/` 三个历史包的那半个漏洞；
+- 「该入册」= git 里已跟踪 + 会被 `git add -A` 扫进来的，因此上面那条 `scp` 到 `dist/` 的新包
+  立刻要求一行记录；但 **`.gitignore` 排除的 `dist/ispeech-debug-*.apk` 不在其中**：
+  `tools/deploy/deploy.sh` 不带 `--release` 打出的默认包不入库、也不入册，
+  清单答不了「手机上那个 debug 包是谁」——自查用出包日志 `dist/deploy-<ts>.log` 里的 `sha256=` 行，
+  加设备侧 `adb shell dumpsys package com.ispeech.ime`；
+- 已接入 `tools/deploy/deploy.sh` 出包门禁（③ 硬门禁 + ⑤ 归档后 `--regen`），**不受 `--skip-verify` 管辖**；
+- 清单只能证明**仓库字节**。装机时如果在仓库外重签过，那一包不在清单覆盖范围内，
+  签名 / 版本号策略见 VOCA-159。
