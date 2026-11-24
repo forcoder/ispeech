@@ -38,6 +38,10 @@ android {
         versionCode = 5
         versionName = "1.5"
 
+        // 仪器化测试跑在真机/模拟器上：VOCA-627 的搜索框「不抢焦点 / 不吞触摸」
+        // 只有拿到真 View 才能断言（JVM 单测没有 Android 框架）。
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
         // 后端基础地址：与 CsBabyClient.DEFAULT_BASE_URL 保持一致
         buildConfigField("String", "API_BASE_URL", "\"http://api.agentai0.com/\"")
 
@@ -137,6 +141,8 @@ dependencies {
     implementation(libs.vosk.android)
 
     // 单元测试
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test.ext:junit:1.1.5")
     testImplementation(kotlin("test"))

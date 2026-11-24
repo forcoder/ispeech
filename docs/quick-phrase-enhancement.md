@@ -737,6 +737,48 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 离线断言覆盖到「输入 `dtwsl` 的候选首位是泡池须知、插入文本与源文件 sha256 一致」；
 真实候选条截图 / 真机记录需要在装有输入法的设备上补（离线环境没有 Android SDK）。
 
+### 12.7 搜索框的「文本 + 光标」双状态（VOCA-627 / VOCA-65 条目 1 前置 D-2）
+
+`07214d6`（Vosk 离线语音引擎那次提交）把搜索框从 `EditText` + 自绘 `caret` 退化成 `TextView`，
+光标只剩「文本末尾拼一个 `|` 字符」的假渲染面，条目 1 的「光标处插入 / 删除」因此无处落地。
+本单只恢复渲染面：
+
+| 关注点 | 实现 |
+|---|---|
+| 不抢 Android 焦点（唯一硬约束） | `searchText`：`isCursorVisible=false` / `isFocusable=false` / `isFocusableInTouchMode=false` / `showSoftInputOnFocus=false`；`searchRow` 两个 focusable 同样关掉。**不调 `requestFocus()`**，只需「面板进入输入态」= `isSelected` 描边 + 光标闪烁 |
+| 光标由谁画 | 独立 `caret` 视图（2dp×18dp，`caretBlinkMs=500`），位置由新增的 `CaretField` 按「光标前子串的实测宽度」算 x；不再往文本里塞 `|` |
+| 位置怎么算 | 新增 `input/SearchCaret.kt`（纯函数，零 Android 依赖）：`clamp / insert / backspace / moveBy`，越界一律夹紧到 `0..length` |
+| 读取点 | `QuickPhrasePanel.cursor()` 返回当前索引（空词恒 0）；`setKeyword(keyword, cursor)` 供条目 1 的服务侧接线 |
+| 闪烁生命周期 | 面板 `onVisibilityChanged` / `onDetachedFromWindow` 自己停表，不依赖服务在关闭时回调 |
+| 触摸不吞事件 | `isClickable=false` **且** `isLongClickable=false`，并摘掉 `movementMethod`，统一收在 `pinDisplayOnly()` 里，且必须调用在 `inputType` / `isSingleLine` **之后** |
+
+**为什么标志位必须放在 `inputType` 之后**（VOCA-627 质检打回项）：`isSingleLine` 与 `inputType`
+都会走 `setKeyListener → fixFocusableAndClickableSettings()`；`EditText` 的 `mKeyListener`
+恒非空（`ArrowKeyMovementMethod`），该函数会把 `focusable / clickable / longClickable`
+**强制改回 true**。写在 `inputType` 之前的 `isClickable = false` 等于白写：控件仍可点可长按，
+`View.onTouchEvent` 把 `LONG_CLICKABLE` 也算作可点、吞掉 `ACTION_DOWN` 并 `return true`，
+父行 `searchRow` 的「点搜索框回到输入态」在文本区（`weight=1f`，占整行大部分）**整段失效**，
+这是相对 `main`（普通 `TextView` 不吞事件）的退步；OEM 上还会长按弹系统选区手柄。
+本文件对应的顺序与标志集合由 `tools/verify/check_static.py` 静态门禁锁住。
+
+**没有恢复的部分**：`904a98d` 的 `render()` 里恒 `setSelection(length)` 把光标钉在末尾——那正是条目 1 要修的缺陷，
+本单恢复渲染面时不带它。`◀ ▶` 键位、服务侧 `(keyword, cursor)` 状态机、四条写入路径仍属条目 1 本体。
+
+验证分两层：
+
+- JVM：`SearchCaretTest`（11 例，覆盖 AC-1.1~1.4 / 1.9 与空词边界）；
+- 设备侧：`app/src/androidTest/java/com/ispeech/input/QuickPhrasePanelSearchBoxTest.kt`（11 例）——
+  真实 View 的 `isFocusable / isCursorVisible / isClickable / isLongClickable / movementMethod`、
+  `dispatchTouchEvent(ACTION_DOWN)` 在多个纵向落点上的返回值（证明文本区不吞事件）、
+  `cursor()` 与 caret 实际 x 偏移、✕ 清空回到空态。
+  跑法：`./gradlew :app:assembleDebugAndroidTest` 后
+  `adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`，
+  再 `adb shell am instrument -w -e class com.ispeech.input.QuickPhrasePanelSearchBoxTest com.ispeech.ime.test/androidx.test.runner.AndroidJUnitRunner`。
+
+为什么不做截图取证：本机模拟器与并行任务共用，Chrome / 联系人会抢前台，多步 UI 流程
+（打开面板 → 点搜索框 → 打字 → 长按）实测两次结果不同，无法作为可复核证据。
+断言同一进程内的 View 属性才是这个单可靠的设备侧证据。
+
 ## 13. 导入「通用短语.csv」（2026-11-09 追加）
 
 来源：产品给的搜狗 / csBaby 导出文件 `通用短语.csv`（235 行、GBK、61 KB）。目标是「导进常用语，
