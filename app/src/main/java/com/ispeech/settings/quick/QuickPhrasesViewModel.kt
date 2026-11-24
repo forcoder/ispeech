@@ -21,6 +21,7 @@ import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickMatchMode
 import com.ispeech.engine.QuickOverride
+import com.ispeech.engine.QuickPhraseEngine
 import com.ispeech.engine.QuickSource
 import com.ispeech.engine.QuickTriggerIssue
 import com.ispeech.engine.QuickTrigger
@@ -101,9 +102,9 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
     fun load() {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
-                val user = parseFile(AppContainer.quickPhrasesUserFile(app))
+                val user = parseFile(AppContainer.quickPhrasesUserFile(app), applyRemoteModeGuard = false)
                     .map { it.copy(source = QuickSource.USER) }
-                val remote = parseFile(AppContainer.quickPhrasesRemoteFile(app))
+                val remote = parseFile(AppContainer.quickPhrasesRemoteFile(app), applyRemoteModeGuard = true)
                     .map { it.copy(source = QuickSource.REMOTE) }
                 // 使用记录只在这里读一次：之后每次输入关键词都只做纯计算
                 val store = AppContainer.phraseUsage(app)
@@ -138,9 +139,14 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    /** 读取规则文件；不存在或解析失败返回空列表（单个来源损坏不影响另一个来源）。 */
-    private fun parseFile(file: File): List<QuickEntry> = runCatching {
-        if (file.exists()) QuickPhraseCodec.parse(file.readText()) else emptyList()
+    /**
+     * 读取规则文件；不存在或解析失败返回空列表（单个来源损坏不影响另一个来源）。
+     *
+     * [applyRemoteModeGuard] 只有云端落盘文件传 `true`：那条链路的 mode 是客户端映射出来的，
+     * 没有独立语义，要按 ADR-0002 C1-6b 收严；用户文件的 mode 是用户在编辑器里选的（C1-4 / C1-9），不收严。
+     */
+    private fun parseFile(file: File, applyRemoteModeGuard: Boolean): List<QuickEntry> = runCatching {
+        if (file.exists()) QuickPhraseCodec.parse(file.readText(), applyRemoteModeGuard) else emptyList()
     }.getOrElse { emptyList() }
 
     /**
@@ -568,8 +574,16 @@ internal object QuickPhraseCodec {
 
     private const val SEPARATOR = '\t'
 
-    /** 解析规则文本；重复触发词保留最后一条。 */
-    fun parse(text: String): List<QuickEntry> {
+    /**
+     * 解析规则文本；重复触发词保留最后一条。
+     *
+     * [applyRemoteModeGuard] = 解析的是云端落盘文件（`filesDir/quick_phrases_remote.txt`）：对第 1 字段
+     * **原样长度** `> 4` 且声明 `PREFIX` / `CONTAINS` 的行按 `EXACT` 生效（ADR-0002 C1-6b）。
+     * 判定直接复用引擎侧的 `QuickPhraseEngine.guardedRemoteMode`，不另写一份、也不改走
+     * `QuickTrigger.mayMisfire`（那是 trim + 小写折叠后的归一化口径，会让带尾随空格的畸形行逃过守卫）。
+     * 只重解释匹配方式：`trigger` / `label` / 正文 / `weight` / `kind` 原样，磁盘文件不回写。
+     */
+    fun parse(text: String, applyRemoteModeGuard: Boolean = false): List<QuickEntry> {
         val byTrigger = LinkedHashMap<String, QuickEntry>()
         text.lineSequence().forEach { rawLine ->
             val line = rawLine.trim()
@@ -580,7 +594,14 @@ internal object QuickPhraseCodec {
             val content = unescapeLineText(fields[2].trim())
             if (trigger.isEmpty() || content.isEmpty()) return@forEach
             val label = fields[1].trim().ifEmpty { content }
-            val mode = if (fields.size > 3) QuickMatchMode.parse(fields[3]) else QuickMatchMode.PREFIX
+            val declaredMode =
+                if (fields.size > 3) QuickMatchMode.parse(fields[3]) else QuickMatchMode.PREFIX
+            // 守卫要吃第 1 字段的原样值（fields[0]，未 trim），与 QuickPhraseEngine.parse 的读盘侧口径逐字一致
+            val mode = if (applyRemoteModeGuard) {
+                QuickPhraseEngine.guardedRemoteMode(fields[0], declaredMode)
+            } else {
+                declaredMode
+            }
             val weight = if (fields.size > 4) fields[4].trim().toIntOrNull() ?: 100 else 100
             val kind = if (fields.size > 5) {
                 if (fields[5].trim().lowercase().startsWith("a")) LookupKind.QUICKAPPLY else LookupKind.PHRASE
