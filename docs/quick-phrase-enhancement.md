@@ -609,7 +609,8 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 - 用户文件里**归一化 trigger 相同**的条目，即视为该远端规则的覆盖条目（`QuickOverride.matches`
   只看 trigger，不再看 `label + content`，ADR-0002 C2-2）；正文以本地为准，同一个 trigger
   在设置页只出一张卡片，卡片来源标「远端 · 已覆盖」（C2-3）。普通用户规则仍显示来源「用户」。
-- 远端条目先按原文件展示；覆盖后卡片上的**快捷字母与匹配方式**取覆盖条目的值，
+- 远端条目先按原文件展示（**匹配方式除外**：云端行在展示侧也走下面那条读盘守卫，卡片显示的
+  就是引擎实际生效的 mode）；覆盖后卡片上的**快捷字母与匹配方式**取覆盖条目的值，
   **正文取本地条目**（本地为准），权重仍为远端 weight + 加成。
 - 远端文件的匹配方式在**读盘侧**再校验一次长度（VOCA-423）：`QuickPhraseEngine.fromRemoteText`
   把 `trigger` 超过 4 位（五笔态组合缓冲上限）且声明 `CONTAINS` / `PREFIX` / 缺省的存量行按 `EXACT` 生效。
@@ -618,6 +619,16 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
   `dtwsl` 的 245 字正文并顶到候选首位。读盘侧兜底与拉取侧同口径、幂等，磁盘文件与云端正文都不动；
   内置 assets 与 `quick_phrases_user.txt` 不走这条（`>4 位 + prefix` 在那两份里是有意的，
   见 ADR-0002 C1-5 / C1-10）。
+- **展示侧与引擎侧同一套 mode（VOCA-207 质检打回项 1，补 ADR-0002 C1-6b 的已知偏差）**：设置页卡片
+  读的是 `QuickPhraseCodec.parse`，它过去直取磁盘声明值，于是「卡片写 `PREFIX`、引擎按 `EXACT` 生效」
+  两套口径并存；卡片上的「编辑」按钮又从这条展示条目继承 mode（`QuickEditor.from`），保存进用户文件后
+  `fromText` 不带守卫，>4 位 `PREFIX` 的误弹会沿「用户没选过 mode」的路径回来。现在云端那份文件的
+  解析分支直接复用引擎侧的 `QuickPhraseEngine.guardedRemoteMode`（同一个函数，不另写一份判定，
+  也不改走归一化口径的 `QuickTrigger.mayMisfire` —— 带尾随空格的畸形行会逃过归一化守卫），
+  判的是第 1 字段的**原样**长度；`trigger` / 正文 / `weight` / `kind` 仍原样，磁盘文件不回写。
+  作用域仍然只有云端落盘文件：用户文件那条链路的开关传 `false`，用户在编辑器里选的 mode 受
+  C1-4 / C1-9 保护。接线由 `check_phrase_csv_import.py` 的 C1-6b 展示半边断言 + `QuickDisplayMergeTest`
+  的行为断言两头锁，行为侧还锁了「与 `fromRemoteText` 同输入结果一致」这条等价关系。
 
 排序为什么能胜出：
 
