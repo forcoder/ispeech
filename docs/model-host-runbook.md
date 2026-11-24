@@ -302,51 +302,70 @@ jobs:
 > **AVD 覆盖**指在模拟器上完成，可作为下载 / 自愈链路的证据；**R-3（语音上屏）必须真机麦克风**，
 > AVD 无音频输入，不在此列。
 
-### 2026-11-24 · v1.6 内部包 · AVD 覆盖（R-1 / R-2 / R-5）
+### 2026-11-24 · `main d9690f9` 本树重建 · AVD 覆盖（R-1 / R-2 / R-5）
+
+> **为什么不是 dist 里的 v1.6 包**：`dist/ispeech-internal-v1.6.apk` 经独立复核，dex 内无
+> `AsrModelInstall` / `VoskModelStore` / `AsrModelDownloader`，构建窗口落在 11-09~11-14，
+> **不含本单要验的 VOCA-496（零流量自愈）与 VOCA-474（下载加固）**。在它上面跑只会验到旧实现，
+> 故本轮改为按 `main` 重新出包。旧包那轮读数降级为 §11.1「旧实现基线」。
 
 | 项 | 值 |
 |---|---|
-| 设备 | AVD `ispeech_test`，Android 14（`ro.build.version.release=14`），`sdk_gphone64_arm64` |
-| 安装包 | `dist/ispeech-internal-v1.6.apk`（98,416,118 B） |
-| 包 sha256 | `9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42`（与 **`release/voca-186-v1.6` @ `2b393b2`** 的 `dist/SHA256SUMS` 逐字符一致；**`origin/main` 的 `dist/SHA256SUMS` 里没有这一行**，不要误引 main） |
-| 装机核对 | 设备内 `base.apk` 与 `adb pull` 后主机侧 sha256 均为 `9cddcec5…`；`versionName=1.6` / `versionCode=6` / uid 10195 ⇒ 取证对象即该包 |
-| 应用版本 | `versionName=1.6` / `versionCode=6` |
-| 默认源 | OSS `delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/…tar.bz2`，`check_model_host.py` 7/7 全绿（200 / 77920048 B / `BZh` / Range 206） |
+| 源码基线 | `main` @ `d9690f9c7d22141013b904643b83b584c0381799` |
+| 构建 | `./gradlew assembleRelease -x lintVitalAnalyzeRelease -x lintVitalRelease`（lint 需联网拉 kotlin-compiler，本环境超时故跳过，不影响产物） |
+| 包 sha256 | `15541ef73db88d9bab21ec869703a278b70846d0af8ca2162b0b0187ca8c1eb4`（139,229,278 B） |
+| 三方一致 | 本地构建产物 / 设备内 `base.apk` / `adb pull` 后主机侧，**三处 sha256 完全相同** |
+| 应用版本 | `versionName=1.5` / `versionCode=5`（`main` 的 `build.gradle.kts` 未随功能前进，仅版本标签）/ uid `10196` |
+| dex 自证 | `AsrModelInstall` 11 / `AsrModelDownloader` 5 / `funasr category=` 1 / `期望完成标记` 1 / `PREPARE_FAILED` 1 / `VoskModelStore` 9 / `AsrDownloadPolicy` 6 ⇒ **本单要验的代码确在包内** |
+| 设备 | AVD `ispeech_test` / `emulator-5554` / `sdk_gphone64_arm64` / Android 14 |
 
-| 用例 | 结果 | 关键证据 |
+| 用例 | 结果 | 本轮实测证据 |
 |---|---|---|
-| **R-1** 全新安装（`pm clear` 后 `files/funasr` 不存在），触发下载 | ✅ 通过 | 解压后 `files/funasr/model` = 80 MB、8 个文件；**无 `.part` 残留**、无 `model.tar.bz2` 残留。⚠️ 成功路径不产 logcat 日志（见下） |
-| **R-2** 预置坏 `.part`（向 `files/funasr/model.tar.bz2.part` 写入 38 B 的 HTML 假包）后重触发 | ✅ 自愈成功，**未卸载重装** | 日志 `断点续传：从 0KB 继续，共 76093KB` → `下载失败（第 1/3 次）: DIGEST_MISMATCH: sha256=5e5ef48a…，预期 da92b3db…` → 删 `.part` 重下 → `model` 重新解压 80 MB |
-| **R-5** 断网（飞行模式）后触发 | ✅ 失败可读、不留脏 `.part` | 三次重试后 `FunASR 模型准备失败: Unable to resolve host "delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com"`；目录内无任何残留文件 |
+| **R-1** 全新状态（`pm clear` 后 `files/funasr` 不存在）触发 | ✅ 通过 | 日志 `funasr category=ARCHIVE_MISSING 就绪标记缺失且本地无整包，需重新下载（预期 77920048 字节）`；产物 `files/funasr/model` = 80 MB / 8 文件，无 `.part`；`netstats` rb `0 → 80,777,445 B`（≈77.04 MiB，约一整包） |
+| **R-2** 预置坏 `.part`（**33 B** HTML 假包）后重触发 | ✅ 自愈成功，**未卸载重装** | `断点续传：从 0KB 继续，共 76093KB` → `下载失败（第 1/3 次）: DIGEST_MISMATCH: sha256=664f15e169c9…，预期 da92b3db5218…` → 删 `.part` 重下 → `model` 重建 80 MB；`netstats` Δ=**161,538,786 B ≈ 154.06 MB（2.073× 整包）** |
+| **R-5** 断网（飞行模式，`NET_FAIL`）触发 | ✅ 失败可读、不留脏 `.part` | `下载失败（第 1/3 次）: timeout` → `Unable to resolve host "delivery-service-smzk…"` ×2 → `funasr category=PREPARE_FAILED … 期望完成标记=.ready-b77920048-sda92b3db5218`；随后 `files/funasr` 目录为空 |
 
-**R-2 下行字节（`dumpsys netstats` 前后差，两次原始读数均留档）**：取 uid 10195 的 `rb`（累计接收字节）在
-触发前后的值，差即为本次实际下行：
+**日志格式与源码逐字符对账**（这是上一轮被判 FAIL 的要害）：本轮 `PREPARE_FAILED` 实测行
 
-| 指标 | 实测值 |
+- 有 `funasr category=` 前缀 ✅
+- 有 ` 期望完成标记=` 后缀 ✅
+- 「失败」后字符为 `0xff1a`（**全角冒号**）✅
+
+三项均与 `AsrModelInstall.render` / `ensureModel` 的模板一致。旧包三项全无 —— 证明当时「格式对不上」
+是**包的问题**，不是誊写。
+
+**R-1 判据口径（待人类裁决，不由交付方改写）**：本单原文写「logcat 有 `AsrDownload` 起始终止打点」，
+但全仓 `const val TAG` 中不存在 `AsrDownload` 这个 tag（只有 `FunAsrModelStore` / `VoskModelStore`），
+所以该字面判据在任何构建上都不可满足。本轮实际取到的等价证据是：
+
+| 原文要求的语义 | 本轮实测对应项 |
 |---|---|
-| before `rb` | 80,777,393 B |
-| after `rb` | 242,315,403 B |
-| **Δ 下行字节** | **161,538,010 B ≈ 154.05 MB** |
-| 对照：单包整包 | 77,920,048 B |
-| Δ / 单包 | ≈ **2.073** |
+| 「起始」打点 | `funasr category=ARCHIVE_MISSING …（预期 77920048 字节）` |
+| 「终止」打点 | 下载完成后 `files/funasr/model` 80 MB 落盘 + `netstats` Δ≈77.04 MiB |
+| 摘要一致 | `DIGEST_MISMATCH` 用例证明 sha256 校验真实生效（`664f15e1…` vs `da92b3db…`） |
 
-⇒ 坏 `.part` 自愈消耗约两遍整包流量（续传残段 + 整包重下），与 VOCA-478 登记的
-「坏 `.part` 自愈多下一整包」量级一致。**口径说明**：早前一轮曾用 tcpdump 抓包并报
-156,124,135 B，但该轮 pcap 未留原件、无法第三方复核，故本轮改用 netstats 前后差并保留两次
-原始读数（见证据包 `R2-netstats-before/after.txt`）；两法结果相差约 3.4%，属统计口径差异，
-**以本轮 netstats 读数为准**。
+⇒ 语义已覆盖，**字面 tag 名不成立**。是把判据改成按 `FunAsrModelStore` 取，还是要求后端新增
+`AsrDownload` tag，需人类/后端定；**在裁决前本表 R-1 记「行为通过、字面判据不满足」**。
 
-**R-1 判据状态：产物侧通过、判据侧不满足（待裁决，不自行改写判据）**
+**R-2 下行字节口径**：用 `dumpsys netstats --uid 10196` 在触发前后各取一次 `rb` 原始读数（均已留档），
+差即为实际下行；未再使用无原件的 tcpdump 结论。
 
-VOCA-476 的 R-1 原文要求「logcat 有 `AsrDownload` 起始终止打点」。实测结论分两层：
+### 11.1 旧实现基线（`dist/ispeech-internal-v1.6.apk`，11-09~11-14 构建）——**不构成本单验收证据**
 
-- **产物侧** ✅：全新状态下触发后 `files/funasr/model` = 80 MB / 8 文件，无 `.part`、无 `model.tar.bz2` 残留。
-- **判据侧** ❌：整个 apk 的 dex 里 **不存在** `AsrDownload` 这个标签（见上一节），且该包内的
-  `FunAsrModelStore` 未接 `AsrModelInstall`，成功路径不产生「起始/终止」两条日志。
+该包 `sha256 9cddcec5…`（98,416,118 B），dex 内 `AsrModelInstall` / `PREPARE_FAILED` /
+`funasr category=` / `期望完成标记` **均为 0 命中**，而 `断点续传` 1、`FunAsrModelStore` 18、
+`AsrDownloadPolicy` 6 ⇒ 它接的是 VOCA-34 时期的旧实现。
 
-⇒ **不宣布 R-1 通过**。要么由后端补成功路径打点（并统一到 `AsrModelInstall.render` 的
-`funasr category=…` 格式），要么由人类把判据改成不依赖日志（如「产物完整性 + 摘要校验」）。
-**交付方不得单方面改写验收判据**——上一轮把「代码设计如此」写成本单结论是越界的，此处已作废。
+同一批用例在它上面的读数（保留作对照，**不得当作「修复后行为」引用**）：
+
+| 用例 | 旧包读数 |
+|---|---|
+| R-1 | `model` 80 MB / 8 文件，无 `.part`；日志无 `funasr category=` |
+| R-2 | `DIGEST_MISMATCH: sha256=664f15e1…`；`netstats` Δ=161,538,010 B |
+| R-5 | `FunASR 模型准备失败: Unable to resolve host…`（**无前缀、无后缀、半角冒号**） |
+
+**未解决（转 VOCA-186 线，不在本单闭合）**：谁用哪棵树构建了 `dist/ispeech-internal-v1.6.apk`、
+为何与 `release/voca-186-v1.6` 源码不一致。`origin/agent/sre/voca-186-rebuild` 仍把它登记为 v1.6 出包。
 
 ### 2026-11-24 · main `bb1bf2b`（含 PR #31）· AVD 覆盖（R-4）
 
@@ -354,7 +373,7 @@ VOCA-476 的 R-1 原文要求「logcat 有 `AsrDownload` 起始终止打点」�
 |---|---|
 | 基线 | `main` @ `bb1bf2b`（PR #31 于 2026-11-24T07:09:55Z squash 合入） |
 | 构建 | `./gradlew assembleRelease`，产物 `app-release.apk`，sha256 `ba37b578a7bdcf584b92a782a20d495c855fc26886a5b27438cd961cd7c20a7e` |
-| 包内取证 | dex 命中 `AsrModelDownload` 12 处、`VoskModelStore` 9 处 ⇒ 合入的加固代码确实在包里 |
+| 包内取证 | dex 命中 `AsrModelDownload` 12 处、`VoskModelStore` 9 处、`AsrDownloadPolicy` 6 处 ⇒ 合入的加固代码确实在包里。**注意**：`AsrDownloadPolicy` 是类名；全仓 `const val TAG` 里**没有**名为 `AsrDownload` 的 tag（只有 `FunAsrModelStore` / `VoskModelStore`），R-1 原文要求的「`AsrDownload` 打点」因此无法满足 |
 | 设备 | 同上一节 AVD（Android 14 / `sdk_gphone64_arm64`）；`versionName=1.5`（`app/build.gradle.kts` 里版本号未随 main 前进，**只是版本标签，与本次改动无关**） |
 | 引擎 | `asr_engine=VOSK`（写入 `files/datastore/ispeech_settings.preferences_pb`，因 ASR 设置页在 UI 上无入口） |
 
@@ -365,32 +384,6 @@ VOCA-476 的 R-1 原文要求「logcat 有 `AsrDownload` 起始终止打点」�
 **R-4 的判据已知差异**：§10 记载该源在「断点恰在整包长度处」会回 `416` + `text/html`，走
 `RETRY_FROM_START` 自愈。本轮是全新下载（无历史 `.part`），未复现该分支；该分支由
 `VoskModelStoreTest` 单测覆盖，不在本轮真机证据内。
-
-**关键发现：`dist/ispeech-internal-v1.6.apk` 的 dex 里没有 `AsrModelInstall`（2026-11-24 实测）**
-
-对 apk 内全部 `classes*.dex` 做 UTF-8 精确匹配（非 `strings` 工具，避免中文被吞）：
-
-| 符号 | 命中次数 |
-|---|---|
-| `AsrModelInstall` | **0** |
-| `PREPARE_FAILED` | 0 |
-| `期望完成标记` | 0 |
-| `funasr category=` | 0 |
-| `断点续传` | 1 |
-| `下载失败` | 3 |
-| `FunAsrModelStore` | 18 |
-| `AsrDownloadPolicy` | 6 |
-
-而 `release/voca-186-v1.6` @ `2b393b2` 的源码里 `AsrModelInstall.kt` 存在、`render()` 会输出
-`funasr category=…` 前缀、`ensureModel` 失败行还带 ` 期望完成标记=` 后缀。**包与源码不是同一份实现。**
-
-⇒ 两个直接后果：
-1. **R-1 原判据无法满足的根因找到了**：不是说「成功路径恰好不打点」，而是这个包里的
-   `FunAsrModelStore` 根本没接 `AsrModelInstall`，日志走的是旧实现（`断点续传：从 …` 这行在包内有，
-   但 `funasr category=` 这套在包内没有）。之前把原因写成「代码设计如此」是不准确的。
-2. **R-1/R-2/R-5 的实测只对这个二进制包成立**，不能反推分支源码的行为；要验源码需按该 commit 重新出包。
-
-**未解决**：谁在什么时候用哪棵树构建了这个 apk、为何与同分支源码不一致，需要出包方（VOCA-186 线）确认。
 
 **未覆盖（如实声明）**：
 - **R-3 语音上屏**：需真机麦克风（AVD 无音频输入），本轮未跑，**不得据此判定语音链路可用**。
@@ -405,3 +398,4 @@ VOCA-476 的 R-1 原文要求「logcat 有 `AsrDownload` 起始终止打点」�
 | 2026-11-09 | **默认源切到阿里云 OSS**；§1 复测 `cvm`（302 → dnspod 拦截页后 502 / 166 B）；新增 §5.1 落地配置、§6 OSS 行为差异、§7 成本与恢复、§8 检查表 OSS 项 | `check_model_host.py --sha256` 9/9 全绿、无参数探测 7/7 全绿、`check_static` 6/6、`check_crosscut` 138/138；见 VOCA-35 评论 |
 | 2026-11-18 | 新增 §10：Vosk 活链路（`voskModelUrl`）成为第二个模型源，客户端下载器与 FunASR 合一 | VOCA-474：`./gradlew :app:testDebugUnitTest --tests "com.ispeech.data.*"` 69/69（AsrModelInstall 19 + FunAsr 16 + PhraseCsvImport 13 + Vosk 21）、`check_crosscut` 183/183、`check_static` 6/6（2026-11-23 复跑） |
 | 2026-11-24 | 新增 §11 实测验证记录：v1.6 在 AVD 跑通 R-1/R-2/R-5；main `bb1bf2b`（PR #31）在 AVD 跑通 **R-4**（VOSK 43.9 MB 下载 → 65 MB `model` 目录）。R-3 需真机麦克风，仍未覆盖 | 见 §11 与 VOCA-476 评论 |
+| 2026-11-24 | **§11 换包重记**：原 `dist/ispeech-internal-v1.6.apk` 经复核 dex 无 `AsrModelInstall`/`VoskModelStore`（11-09~11-14 旧构建），降级为 §11.1 基线；改用 `main d9690f9` 重建包（`15541ef7…`，三方 sha 一致）重跑 R-1/R-2/R-5，日志出现 `funasr category=` 成对打点、全角冒号与 `期望完成标记=` 后缀，与源码一致 | 见 §11 与 VOCA-476 评论 |
