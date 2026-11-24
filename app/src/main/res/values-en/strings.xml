@@ -121,6 +121,13 @@
     <string name="quick_panel_search_hint">Type to search phrases (initials ok)</string>
     <string name="quick_panel_search_active">🔍 %1$s</string>
 
+    <!-- Search row `◀ ▶ ✕` accessibility labels (spec VOCA-68 §3.4 / §3.10) -->
+    <string name="quick_panel_cursor_left">Move cursor left</string>
+    <string name="quick_panel_cursor_right">Move cursor right</string>
+    <string name="quick_panel_cursor_at_start">Already at start</string>
+    <string name="quick_panel_cursor_at_end">Already at end</string>
+    <string name="quick_panel_search_clear">Clear search</string>
+
     <!-- Match modes -->
     <string name="quick_mode_exact">Exact</string>
     <string name="quick_mode_prefix">Prefix</string>

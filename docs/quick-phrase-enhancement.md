@@ -762,11 +762,13 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 本文件对应的顺序与标志集合由 `tools/verify/check_static.py` 静态门禁锁住。
 
 **没有恢复的部分**：`904a98d` 的 `render()` 里恒 `setSelection(length)` 把光标钉在末尾——那正是条目 1 要修的缺陷，
-本单恢复渲染面时不带它。`◀ ▶` 键位、服务侧 `(keyword, cursor)` 状态机、四条写入路径仍属条目 1 本体。
+本单恢复渲染面时不带它。`◀ ▶` 键位、服务侧 `(keyword, cursor)` 状态机、四条写入路径已由
+**VOCA-631**（条目 1 本体）补齐，见 §12.8。
 
 验证分两层：
 
-- JVM：`SearchCaretTest`（11 例，覆盖 AC-1.1~1.4 / 1.9 与空词边界）；
+- JVM：`SearchCaretTest`（VOCA-627 时 11 例，覆盖 AC-1.1~1.4 / 1.9 与空词边界；
+  VOCA-631 补码点口径后为 **18 例**，见 §12.8）；
 - 设备侧：`app/src/androidTest/java/com/ispeech/input/QuickPhrasePanelSearchBoxTest.kt`（11 例）——
   真实 View 的 `isFocusable / isCursorVisible / isClickable / isLongClickable / movementMethod`、
   `dispatchTouchEvent(ACTION_DOWN)` 在多个纵向落点上的返回值（证明文本区不吞事件）、
@@ -778,6 +780,52 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 为什么不做截图取证：本机模拟器与并行任务共用，Chrome / 联系人会抢前台，多步 UI 流程
 （打开面板 → 点搜索框 → 打字 → 长按）实测两次结果不同，无法作为可复核证据。
 断言同一进程内的 View 属性才是这个单可靠的设备侧证据。
+
+### 12.8 条目 1 本体：`(keyword, cursor)` 双状态 + `◀ ▶` + 四条写入路径（VOCA-631）
+
+§12.7 只恢复了渲染面。本节是**条目 1 本体**：把光标位置变成服务侧可写、可移动的真实状态，
+并让所有输入汇入一个入口。
+
+**代码落点**
+
+| 关注点 | 落点 |
+|---|---|
+| 状态机（纯值对象，JVM 可测） | 新增 `input/PanelKeywordState.kt`：`keyword` + `cursor`，`insert / backspace / deleteAfter / moveBy / replace` 一律返回新实例 |
+| 索引单位 | **码点**（R1-1）。`SearchCaret` 的 `clamp` 上界取 `codePointCount`，`insert / backspace` 用 `offsetByCodePoints`，代理对不拆半 |
+| 服务侧唯一写入口 | `IspeechImeService.applyPanelState`；四条写入路径 + `◀ ▶` 全部只调它（R1-15） |
+| 四条写入路径 | 软键 `handleSoftKey`·``KeyAction.CHAR``、硬件键盘 `onKeyDown`·`A–Z`、候选上屏 `pickCandidate`（面板内整段插入光标处，**不 commit 到宿主**）、`✕` `onClearKeyword` |
+| 光标复位 4 处 | `openPanel` / `closePanel` / `resetState` 三处绕过 setter 的整串置空点，`panelKeyword` 与光标一起清（R1-31 / AC-1.10） |
+| `◀ ▶` 控件 | 搜索行内、40×40 dp；单击移 1 码点，长按 380 ms 后每 90 ms 连移；到头 `isEnabled=false` + 变灰 + `INVISIBLE` 槽位不跳（规格 §3.4） |
+| `✕` 可点尺寸 | `minimumWidth/Height = 40dp`（原 30×28，AC-1.8 不满足） |
+| 几何理由 | `◀ ▶` **不并入字母行**：12 键会让字母键格宽落到 31.81 dp，违反 AC-4.6 的 ≥38 dp |
+| 硬件键盘编辑 | `DPAD_LEFT/RIGHT` / `MOVE_HOME` / `MOVE_END` / `FORWARD_DEL` 在面板分支内先行消费并 `return true`（R1-38~R1-43）；用 `MOVE_HOME` **不是** `KEYCODE_HOME` |
+| 组合中优先级 | 软键与硬件退格都先判断 `buffer / t9Digits` 非空 → 先删编码，缓冲空后才编辑搜索词（AC-1.7 / R1-22 / R1-42） |
+
+**D2-7 判据（VOCA-627 遗留，此前只活在评论里，本单落到文件）**
+
+> **D2-7**：打开面板 → 输入若干字符 → 关闭面板 → 重新打开 → 期望
+> **①搜索框描边不残留**（无输入态时 `searchRow` 不是 `isSelected` 描边态）、
+> **②caret 停闪**（关闭后不再翻转可见性，`onVisibilityChanged` 已停表）、
+> **③重开即显**（`requestSearchFocus()` 后 caret 立刻 `VISIBLE`，不等到下一个 500 ms 周期）。
+
+真机 / 模拟器判据（条目 1 本轮一起验，本机无真机时给可复制步骤，不伪称已验）：
+
+- **D2-3** 点搜索行不弹系统键盘、不切输入法、面板不关；
+- **D2-4** 字母不漏进宿主输入框；
+- `adb shell dumpsys input_method | grep -E "mInputShown|mIsVkSoftwareKeyboard"` 点搜索行前后不翻转；
+- 中文态连打 20 字符无丢键、无跳页；
+- 长按搜索框不出选区手柄；
+- 上面 **D2-7** 的三条。
+
+**验证分三层（本单实跑见 issue 评论）**
+
+- JVM：`PanelKeywordStateTest`（17 例，AC-1.1~1.6 / 1.9、R1-8 / 1-10 / 1-31 / 1-43、四条路径同算式、emoji 不拆半）
+  + `SearchCaretTest`（18 例，含 2 例新增：退格删整 emoji、插入落 emoji 之后，均断言无孤立代理）；
+- 设备侧：`QuickPhrasePanelSearchBoxTest`（11 例，D2-1~D2-6 的 View 级断言）；
+- 门禁：`tools/verify/check_static.py` / `check_crosscut.py` / `check_input_logic.py` 等（见 §12.9）。
+
+**已知限制**：本机 `adb devices` 只有 `emulator-5554`，`FMR0224913042917` 未在线，
+所以上列真机项本轮**未验**，归属测试工程师条目 1 真机轮。
 
 ## 13. 导入「通用短语.csv」（2026-11-09 追加）
 

@@ -276,4 +276,107 @@ class QuickPhrasePanelSearchBoxTest {
         assertEquals("也不存在选区终点", -1, text.selectionEnd)
         assertNotNull("caret 是独立 View，必须能找到", caretView())
     }
+
+    // ── 条目 1（VOCA-631）：`◀ ▶` 控件、40dp 可点、禁用态、点击回调 ──
+
+    /**
+     * 搜索行里的 `◀` / `▶`：按 contentDescription 区分（启用态下的描述是它们的名字）。
+     *
+     * **必须在主线程调用**（`runOnMainSync` 不可嵌套，`Instrumentation` 会直接抛）。
+     */
+    private fun findCursorButton(desc: String): View? {
+        var found: View? = null
+        fun walk(v: View) {
+            if (v.contentDescription?.toString() == desc) found = v
+            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+        }
+        walk(panel)
+        return found
+    }
+
+    @Test
+    fun cursor_buttons_and_clear_meet_40dp_touch_target() {
+        val min = (40 * panel.resources.displayMetrics.density).toInt()
+        // ✕ 在空词时 GONE，先给个词让它可见并参与布局
+        setKeywordOnMain("abcd")
+        relayout()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            for (desc in listOf("光标左移", "光标右移", "清空搜索词")) {
+                val v = findCursorButton(desc) ?: findCursorButton("已到开头")
+                    ?: findCursorButton("已到结尾") ?: error("搜索行里找不到「$desc」控件")
+                assertTrue(
+                    "「$desc」可点宽度 ${v.width}px 应 ≥ ${min}px（40dp，AC-1.8 / 规格 §3.4）",
+                    v.width >= min
+                )
+                assertTrue(
+                    "「$desc」可点高度 ${v.height}px 应 ≥ ${min}px（40dp）",
+                    v.height >= min
+                )
+            }
+        }
+    }
+
+    @Test
+    fun cursor_buttons_disable_at_edges() {
+        // 光标在 0：◀ 禁用、▶ 可用；描述变成「已到开头」
+        setKeywordOnMain("abcd", 0)
+        relayout()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            val leftAtStart = findCursorButton("已到开头")
+            assertNotNull("光标在 0 时 ◀ 应进禁用态并改读「已到开头」（R1-17）", leftAtStart)
+            assertFalse("光标在 0 时 ◀ 必须不可点", leftAtStart!!.isEnabled)
+            assertNotNull("光标在 0 时 ▶ 仍应可用（描述为「光标右移」）", findCursorButton("光标右移"))
+        }
+
+        // 光标在末尾：反过来
+        setKeywordOnMain("abcd", 4)
+        relayout()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            val rightAtEnd = findCursorButton("已到结尾")
+            assertNotNull("光标在末尾时 ▶ 应进禁用态并改读「已到结尾」", rightAtEnd)
+            assertFalse("光标在末尾时 ▶ 必须不可点", rightAtEnd!!.isEnabled)
+            assertNotNull("光标在末尾时 ◀ 仍应可用", findCursorButton("光标左移"))
+        }
+    }
+
+    @Test
+    fun cursor_button_click_reports_to_service() {
+        // 面板只上报「要移」，位置仍由服务侧持有（R1-15）。这里断言回调真的被触发一次。
+        var leftCalls = 0
+        var rightCalls = 0
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            panel.onMoveCursorLeft = { leftCalls++ }
+            panel.onMoveCursorRight = { rightCalls++ }
+        }
+        setKeywordOnMain("abcd", 2)
+        relayout()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            findCursorButton("光标左移")?.performClick()
+            findCursorButton("光标右移")?.performClick()
+        }
+        assertEquals("◀ 点一次应上报一次左移", 1, leftCalls)
+        assertEquals("▶ 点一次应上报一次右移", 1, rightCalls)
+        // 面板自己不改 cursor（服务是事实源）：位置仍是写入时的 2
+        assertEquals("面板不得自行改光标，位置仍应由服务决定", 2, panel.cursor())
+    }
+
+    @Test
+    fun caret_stays_inside_codepoint_boundary_for_emoji() {
+        // 光标停在 emoji 之后（码点 2）：caret x 必须落在 emoji 之后、文本末尾之前，
+        // 不能因为按码元 take() 截出半个代理对而左跳（R1-1）。
+        setKeywordOnMain("a😀d", 3)
+        relayout()
+        val caret = caretView()
+        val atEnd = IntArray(1)
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { atEnd[0] = caret.left }
+
+        setKeywordOnMain("a😀d", 2)
+        relayout()
+        val afterEmoji = IntArray(1)
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { afterEmoji[0] = caret.left }
+
+        assertTrue("emoji 之后的 caret x=${afterEmoji[0]} 必须严格小于末尾 x=${atEnd[0]}",
+            afterEmoji[0] < atEnd[0])
+        assertTrue("emoji 是 1 个码点，caret 不能落回 0 位置", afterEmoji[0] > 0)
+    }
 }

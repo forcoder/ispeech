@@ -15,6 +15,7 @@ import android.text.style.ForegroundColorSpan
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
@@ -47,6 +48,10 @@ import com.ispeech.engine.QuickSource
  * **不调用 `requestFocus()`**：这是 IME 自己的窗口，抢系统焦点会被当成新的输入目标。
  * 搜索框同时维护 `(filterKeyword, cursorIndex)` 双状态，光标位置由 [SearchCaret] 夹紧、
  * 由 [CaretField] 渲染成一条真实位置的竖线（不再把 `|` 写进文本、也不再恒贴末尾）。
+ * 索引单位是**码点**（VOCA-68 §3.2 R1-1）：emoji 等代理对算 1 个，任何持有方都不得用
+ * UTF-16 码元当下标，否则退格会拆半留孤立代理。
+ * 搜索行内提供 `◀ ▶` 移动光标（单击 1 码点、长按连移，到头进禁用态，规格 §3.4），
+ * 它们**不进字母行**：12 键会让字母键格宽降到 31.81 dp，违反 AC-4.6 的 ≥38 dp。
  * 关键词匹配走 PhraseSearch：完全 / 前缀 / 包含 / 拼音首字母四档 + 使用次数与收藏加权，
  * 即「智能联想」；无关键词时保持规则文件原始顺序。
  *
@@ -70,6 +75,12 @@ class QuickPhrasePanel @JvmOverloads constructor(
 
     /** 点击搜索框右侧 ✕：清空当前关键词，服务侧同步清空 panelKeyword。 */
     var onClearKeyword: (() -> Unit)? = null
+
+    /** 点击 / 长按搜索行的 `◀`：请求服务侧把光标左移 1 码点（规格 §3.4 R1-16/R1-17）。 */
+    var onMoveCursorLeft: (() -> Unit)? = null
+
+    /** 点击 / 长按搜索行的 `▶`：请求服务侧把光标右移 1 码点（规格 §3.4 R1-16/R1-17）。 */
+    var onMoveCursorRight: (() -> Unit)? = null
 
     // ── 数据（submit 可能来自非主线程）──
     @Volatile
@@ -120,11 +131,24 @@ class QuickPhrasePanel @JvmOverloads constructor(
     private val maxRows = 200
     private val radiusKeyDp = 8
 
+    /** 搜索行内 `◀ ▶ ✕` 的可点边长（dp）：规格 §3.4 / AC-1.8 要求 ≥40×40。 */
+    private val touchTargetDp = 40
+
+    /** `◀ ▶` 长按连移：按下 380 ms 后开始，之后每 90 ms 一步（规格 §3.4，数值由 UX 定）。 */
+    private val cursorRepeatDelayMs = 380L
+    private val cursorRepeatIntervalMs = 90L
+
     // ── 视图（build() 中创建）──
     private lateinit var infoLabel: TextView
     /** 搜索框文本：EditText 才能让系统在同一行内提供测量 / 省略能力，但它**不可聚焦、不画系统光标**。 */
     private lateinit var searchText: EditText
     private lateinit var searchClear: ImageView
+
+    /** `◀` 光标左移键（搜索行内，40×40 dp；见规格 §3.4）。 */
+    private lateinit var searchCursorLeft: ImageView
+
+    /** `▶` 光标右移键（搜索行内，40×40 dp）。 */
+    private lateinit var searchCursorRight: ImageView
 
     /**
      * 自绘光标：位置由 [cursorIndex] 决定，跟文本末尾不是一回事。
@@ -221,20 +245,20 @@ class QuickPhrasePanel @JvmOverloads constructor(
         runOnMain { render() }
     }
 
-    /** 筛选关键词（来自软键盘字母键）：实时过滤；默认把光标落在文本末尾（与 main 现值一致）。 */
+    /** 筛选关键词（来自软键盘字母键）：实时过滤；默认把光标落在文本末尾（码点口径）。 */
     fun setKeyword(keyword: String) {
-        setKeyword(keyword, keyword.length)
+        setKeyword(keyword, SearchCaret.length(keyword))
     }
 
     /**
-     * 关键词 + 光标位置的写入点（条目 1 的服务侧会走这里）。
+     * 关键词 + 光标位置的写入点（`◀ ▶` / 四条写入路径都经服务侧汇到这里）。
      *
-     * 光标越界由 [SearchCaret.clamp] 夹紧，所以「移到中间」不需要服务自己算边界，
-     * 复用的也是 JVM 测试里那一份算式（[SearchCaretTest]）。
+     * 光标越界由 [SearchCaret.clamp] 夹紧，所以「移到中间」不需要调用方自己算边界，
+     * 复用的也是 JVM 测试里那一份算式（[SearchCaretTest]）。`cursor` 是**码点索引**。
      */
     fun setKeyword(keyword: String, cursor: Int) {
         filterKeyword = keyword
-        cursorIndex = SearchCaret.clamp(keyword.length, cursor)
+        cursorIndex = SearchCaret.clamp(keyword, cursor)
         runOnMain { render() }
     }
 
@@ -272,9 +296,9 @@ class QuickPhrasePanel @JvmOverloads constructor(
      * 当前光标位置（D2-5 的读取点）。
      *
      * 面板不抢焦点，系统那套 `selectionStart` 不参与，所以位置必须能从这里读出来，
-     * 否则「空搜索框光标在索引 0」在测试里无从判定。
+     * 否则「空搜索框光标在索引 0」在测试里无从判定。单位是**码点**。
      */
-    fun cursor(): Int = SearchCaret.clamp(filterKeyword.length, cursorIndex)
+    fun cursor(): Int = SearchCaret.clamp(filterKeyword, cursorIndex)
 
     /** 当前过滤结果第一条的 content（用于「空格上屏第一条」）。 */
     fun firstMatch(): String? = filtered().firstOrNull()?.content
@@ -346,12 +370,14 @@ class QuickPhrasePanel @JvmOverloads constructor(
         // 光标是独立的 [caret] 视图，位置由 [cursorIndex] 决定，**不再用「|」字符贴在末尾**——
         // 把光标画成文本的一部分正是条目 1 要修的缺陷（AC-1.9）。
         val typing = keyword.isNotEmpty()
-        cursorIndex = SearchCaret.clamp(keyword.length, cursorIndex)
+        cursorIndex = SearchCaret.clamp(keyword, cursorIndex)
         if (searchText.text.toString() != keyword) {
             searchText.setText(keyword)
         }
         searchText.setTextColor(if (typing) textPrimary else textSecondary)
-        searchClear.visibility = if (typing) View.VISIBLE else View.GONE
+        // 规格 §3.4：空词时 ✕ 用 INVISIBLE **保留槽位**（`GONE` 会让右侧控件横向跳动）。
+        // 保留槽位也让 AC-1.8 的「✕ 可点 ≥40×40」在任何词长下都可量。
+        searchClear.visibility = if (typing) View.VISIBLE else View.INVISIBLE
         infoLabel.text = when {
             keyword.isNotEmpty() -> "联想 ${results.size} 条 · $keyword"
             category.usage == UsageFilter.STARRED -> "★ 收藏 ${results.size} 条"
@@ -361,6 +387,7 @@ class QuickPhrasePanel @JvmOverloads constructor(
         renderPills()
         renderLanguageBadge()
         renderCaret()
+        renderCursorButtons()
         renderList(results)
     }
 
@@ -372,7 +399,37 @@ class QuickPhrasePanel @JvmOverloads constructor(
      */
     private fun renderCaret() {
         if (!::searchField.isInitialized || !::caret.isInitialized) return
-        searchField.caretIndex = SearchCaret.clamp(filterKeyword.length, cursorIndex)
+        searchField.caretIndex = SearchCaret.clamp(filterKeyword, cursorIndex)
+    }
+
+    /**
+     * `◀ ▶` 禁用态（规格 §3.4 / R1-17）：光标在 0 时 `◀` 不可点、变灰，读「已到开头」；
+     * 光标在末尾时 `▶` 同理，读「已到结尾」。**槽位保留**（`INVISIBLE` 而非 `GONE`），
+     * 否则禁用时右侧控件会横向跳动。
+     */
+    private fun renderCursorButtons() {
+        if (!::searchCursorLeft.isInitialized) return
+        val n = SearchCaret.length(filterKeyword)
+        val at = SearchCaret.clamp(filterKeyword, cursorIndex)
+        applyCursorButtonState(
+            searchCursorLeft,
+            enabled = at > 0,
+            name = context.getString(R.string.quick_panel_cursor_left),
+            edge = context.getString(R.string.quick_panel_cursor_at_start),
+        )
+        applyCursorButtonState(
+            searchCursorRight,
+            enabled = at < n,
+            name = context.getString(R.string.quick_panel_cursor_right),
+            edge = context.getString(R.string.quick_panel_cursor_at_end),
+        )
+    }
+
+    private fun applyCursorButtonState(view: ImageView, enabled: Boolean, name: String, edge: String) {
+        view.isEnabled = enabled
+        view.isClickable = enabled
+        view.alpha = if (enabled) 1f else 0.35f
+        view.contentDescription = if (enabled) name else edge
     }
 
     /** 开始闪烁；重复调用不会叠多个 runnable（先移除再排队）。 */
@@ -773,17 +830,29 @@ class QuickPhrasePanel @JvmOverloads constructor(
         searchClear = ImageView(context).apply {
             setImageResource(R.drawable.ic_close)
             scaleType = ImageView.ScaleType.CENTER
-            minimumWidth = dp(30)
-            minimumHeight = dp(28)
+            // AC-1.8：✕ 可点区域必须 ≥40×40 dp（原 30×28 不满足）；图标仍 24dp 居中
+            minimumWidth = dp(touchTargetDp)
+            minimumHeight = dp(touchTargetDp)
             isClickable = true
             isFocusable = false
-            visibility = View.GONE
-            contentDescription = context.getString(R.string.btn_close)
+            // 空词时 INVISIBLE 而非 GONE：保留槽位，右侧不跳动（规格 §3.4）
+            visibility = View.INVISIBLE
+            // 规格 §3.10 要求朗读「清空搜索词」，不是泛泛的「关闭」
+            contentDescription = context.getString(R.string.quick_panel_search_clear)
             setOnClickListener {
                 onClearKeyword?.invoke()
                 requestSearchFocus()
             }
         }
+        // `◀ ▶` 放搜索行内、**不并入字母行**：12 键会让字母键格宽掉到 31.81 dp（规格 §3.4）
+        searchCursorLeft = buildCursorButton(
+            R.drawable.ic_cursor_left,
+            context.getString(R.string.quick_panel_cursor_left)
+        ) { onMoveCursorLeft?.invoke() }
+        searchCursorRight = buildCursorButton(
+            R.drawable.ic_cursor_right,
+            context.getString(R.string.quick_panel_cursor_right)
+        ) { onMoveCursorRight?.invoke() }
         searchRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -810,6 +879,14 @@ class QuickPhrasePanel @JvmOverloads constructor(
                 }
             )
             addView(
+                searchCursorLeft,
+                LinearLayout.LayoutParams(dp(touchTargetDp), dp(touchTargetDp))
+            )
+            addView(
+                searchCursorRight,
+                LinearLayout.LayoutParams(dp(touchTargetDp), dp(touchTargetDp))
+            )
+            addView(
                 langBadge,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -818,14 +895,72 @@ class QuickPhrasePanel @JvmOverloads constructor(
             )
             addView(
                 searchClear,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
+                LinearLayout.LayoutParams(dp(touchTargetDp), dp(touchTargetDp))
             )
         }
         renderLanguageBadge()
+        renderCursorButtons()
         return searchRow
+    }
+
+    /**
+     * `◀` / `▶` 键：单击移 1 码点，长按 380 ms 后每 90 ms 连移（规格 §3.4）。
+     *
+     * 为什么不用 `setOnLongClickListener`：它只会回调一次，做不出「按住持续移动」；
+     * 这里在 `ACTION_DOWN` 起一次延时，到点后自己重排，`ACTION_UP`/`CANCEL` 撤掉计时。
+     * 抬手时才补最后一步（点按语义仍走 `ACTION_UP`，与键盘其它键一致）。
+     *
+     * 触屏路径 `return true` 吃掉事件，避免框架再走一遍 `performClick()` 造成双步；
+     * 而 `setOnClickListener` 保留给 TalkBack / 键盘可达（辅助服务调 `performClick`）。
+     * 禁用态（到头）直接不消费，也不触发键盘连发 / 上屏 / 关面板（R1-17）。
+     */
+    private fun buildCursorButton(iconRes: Int, desc: String, onStep: () -> Unit): ImageView {
+        val view = ImageView(context).apply {
+            setImageResource(iconRes)
+            scaleType = ImageView.ScaleType.CENTER
+            isFocusable = false
+            isClickable = true
+            contentDescription = desc
+            minimumWidth = dp(touchTargetDp)
+            minimumHeight = dp(touchTargetDp)
+        }
+        // 连移 runnable 必须**随视图建一次**：每次事件都 new 一个的话，
+        // ACTION_UP 里的 removeCallbacks 拿到的是新对象，撤不掉 ACTION_DOWN 排进去的那个，
+        // 松手后光标还会继续走（真机上表现为「按一下跑半行」）。
+        var repeating = false
+        val repeat = object : Runnable {
+            override fun run() {
+                repeating = true
+                onStep()
+                view.postDelayed(this, cursorRepeatIntervalMs)
+            }
+        }
+        view.setOnClickListener { onStep() }
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (!v.isEnabled) return@setOnTouchListener false
+                    repeating = false
+                    v.postDelayed(repeat, cursorRepeatDelayMs)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    v.removeCallbacks(repeat)
+                    // 还没进入连移 = 这就是一次点按，补最后一步；
+                    // 已经在连移则抬手不再额外走一格（连移期间每 90 ms 已各走一步）。
+                    if (!repeating) onStep()
+                    repeating = false
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    v.removeCallbacks(repeat)
+                    repeating = false
+                    true
+                }
+                else -> false
+            }
+        }
+        return view
     }
 
     /** 搜索框背景：面板处于输入态（[searchRow] `isSelected`）时描一圈主题色边框，其余时候是普通胶囊底色。 */
@@ -950,7 +1085,7 @@ private class CaretField(
     private val caret: View
 ) : ViewGroup(context) {
 
-    /** 光标索引（字符位置，0 = 文本最前）。越界由调用方夹紧，这里只负责摆放。 */
+    /** 光标索引（**码点**位置，0 = 文本最前）。越界由调用方夹紧，这里只负责摆放。 */
     var caretIndex: Int = 0
         set(value) {
             if (field == value) return
@@ -1011,8 +1146,12 @@ private class CaretField(
         val textLeft = 0
         val textTop = (height - textView.measuredHeight) / 2
         textView.layout(textLeft, textTop, textLeft + textView.measuredWidth, textTop + textView.measuredHeight)
-        // 光标 x：光标前子串的实测宽度（`TextView.paint` 与控件用同一 Typeface / textSize）
-        val prefix = textView.text.toString().take(caretIndex.coerceIn(0, textView.text.length))
+        // 光标 x：光标前子串的实测宽度（`TextView.paint` 与控件用同一 Typeface / textSize）。
+        // `caretIndex` 是**码点**索引，`take()` 吃的是码元下标，必须先用 offsetByCodePoints 换算，
+        // 否则光标停在 emoji 后时前缀会被截成半个代理对（测宽偏小、位置左跳）。
+        val text = textView.text.toString()
+        val safeIndex = caretIndex.coerceIn(0, SearchCaret.length(text))
+        val prefix = text.substring(0, text.offsetByCodePoints(0, safeIndex))
         val prefixWidth = textView.paint.measureText(prefix).toInt()
         val maxCaretLeft = (textView.measuredWidth - caretWidthPx).coerceAtLeast(0)
         val caretLeft = (textLeft + prefixWidth + caretGapPx).coerceIn(0, maxCaretLeft)

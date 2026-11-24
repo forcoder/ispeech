@@ -487,6 +487,76 @@ def check_quick_search_box_flags() -> None:
     report("PASS", "搜索框交互标志齐全（含 isLongClickable = false），且 pinDisplayOnly() 在 inputType 之后生效")
 
 
+def check_quick_search_cursor_controls() -> None:
+    """条目 1（VOCA-631）：`◀ ▶` 的尺寸 / 连移常量、码点口径、单一写入口必须同时成立。
+
+    卡住四件事，全是「改错一行就静默退化」的：
+      1. `◀ ▶ ✕` 可点边长 ≥ 40 dp（规格 §3.4 / AC-1.8，现状曾是 30×28）；
+      2. 长按连移用 380 ms 延迟 + 90 ms 间隔（规格 §3.4 的定值，散落魔法值会漂）；
+      3. `SearchCaret` **不得**再用 `text.length`（码元数）当边界——R1-1 要求码点；
+      4. 四条写入路径与 `◀ ▶` 只经 `applyPanelState` 一个入口改状态（R1-15），
+         服务里不得再出现 `setPanelKeyword(panelKeyword + …)` 这种末尾追加。
+    """
+    panel = JAVA / "com" / "ispeech" / "input" / "QuickPhrasePanel.kt"
+    caret = JAVA / "com" / "ispeech" / "input" / "SearchCaret.kt"
+    service = JAVA / "com" / "ispeech" / "input" / "IspeechImeService.kt"
+    for f in (panel, caret, service):
+        if not f.is_file():
+            report("FAIL", f"缺少 {rel(f)}：无法核对条目 1 的光标契约")
+            return
+
+    panel_text = panel.read_text(encoding="utf-8", errors="replace")
+    # ① 可点边长：常量必须是 40（◀ ▶ ✕ 三处都按它给尺寸）
+    m = re.search(r"private val touchTargetDp = (\d+)", panel_text)
+    if not m:
+        report("FAIL", f"{rel(panel)} 里找不到 `touchTargetDp`（40 dp 可点边长的单一来源）")
+        return
+    if int(m.group(1)) < 40:
+        report("FAIL", f"搜索行可点边长 touchTargetDp={m.group(1)} < 40 dp（规格 §3.4 / AC-1.8）")
+        return
+    # ② 连移常量
+    delay = re.search(r"cursorRepeatDelayMs = (\d+)L", panel_text)
+    interval = re.search(r"cursorRepeatIntervalMs = (\d+)L", panel_text)
+    if not delay or not interval:
+        report("FAIL", f"{rel(panel)} 缺少 `◀ ▶` 长按连移常量（规格 §3.4）")
+        return
+    if (int(delay.group(1)), int(interval.group(1))) != (380, 90):
+        report("FAIL", "`◀ ▶` 连移参数应为 380 ms 后每 90 ms，实际 "
+                       f"{delay.group(1)}/{interval.group(1)}（规格 §3.4 定值）")
+        return
+    # ③ 码点口径：SearchCaret 不得拿 UTF-16 长度当边界
+    caret_text = caret.read_text(encoding="utf-8", errors="replace")
+    if "codePointCount" not in caret_text or "offsetByCodePoints" not in caret_text:
+        report("FAIL", f"{rel(caret)} 未按码点实现（R1-1）：缺 codePointCount / offsetByCodePoints")
+        return
+    # `text.length` 只允许出现在 `fun length(...)` 那一行（它本来就是把码元数换成码点数）；
+    # 出现在 clamps / substring / coerceIn 的边界上就说明退回码元口径，emoji 会被拆半。
+    offenders = [
+        (i, line.strip())
+        for i, line in enumerate(caret_text.splitlines(), 1)
+        if "text.length" in line and "fun length(" not in line
+    ]
+    if offenders:
+        detail = "；".join(f"第 {i} 行 {s}" for i, s in offenders[:3])
+        report("FAIL", f"{rel(caret)} 用 UTF-16 码元数当边界（R1-1，emoji 会拆半留孤立代理）：{detail}")
+        return
+    # ④ 单一写入口
+    service_text = service.read_text(encoding="utf-8", errors="replace")
+    if "private fun applyPanelState(" not in service_text:
+        report("FAIL", f"{rel(service)} 缺少 `applyPanelState`（面板 (keyword,cursor) 唯一写入口，R1-15）")
+        return
+    if re.search(r"setPanelKeyword\(\s*panelKeyword(?:\.keyword)?\s*\+", service_text):
+        report("FAIL", f"{rel(service)} 里仍有 `setPanelKeyword(panelKeyword + …)` 的末尾追加："
+                       "绕过光标（R1-15 / R1-44）")
+        return
+    # 面板内拼串的另一种写法：直接对 keyword 做 substring / `+` 再交给 setPanelKeyword
+    if re.search(r"setPanelKeyword\(\s*[^)]*\.(?:substring|drop|dropLast|take)\(", service_text):
+        report("FAIL", f"{rel(service)} 仍在视图侧拼串（`.substring/.drop/.take` 后直接 setPanelKeyword）："
+                       "插入 / 删除必须走 PanelKeywordState（R1-15）")
+        return
+    report("PASS", "条目 1 光标契约齐全（◀▶✕ ≥40dp、连移 380/90ms、码点口径、applyPanelState 单入口）")
+
+
 def check_asr_model_config() -> None:
     """默认模型源与网络安全配置必须自洽。
 
@@ -559,6 +629,7 @@ def main() -> int:
     check_isolated_braces()
     check_asr_model_config()
     check_quick_search_box_flags()
+    check_quick_search_cursor_controls()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 
