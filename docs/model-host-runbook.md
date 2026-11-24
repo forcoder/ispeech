@@ -292,13 +292,21 @@ jobs:
 
 | 用例 | 结果 | 关键证据 |
 |---|---|---|
-| **R-1** 全新安装（`pm clear` 后 `files/funasr` 不存在），触发下载 | ✅ 通过 | 解压后 `files/funasr/model` = 80 MB、8 个文件；**无 `.part` 残留**、无 `model.tar.bz2` 残留 |
+| **R-1** 全新安装（`pm clear` 后 `files/funasr` 不存在），触发下载 | ✅ 通过 | 解压后 `files/funasr/model` = 80 MB、8 个文件；**无 `.part` 残留**、无 `model.tar.bz2` 残留。⚠️ **成功路径不产 logcat 日志**（见下） |
 | **R-2** 预置坏 `.part`（向 `files/funasr/model.tar.bz2.part` 写入 38 B 的 HTML 假包）后重触发 | ✅ 自愈成功，**未卸载重装** | 日志 `断点续传：从 0KB 继续，共 76093KB` → `下载失败（第 1/3 次）: DIGEST_MISMATCH: sha256=5e5ef48a…，预期 da92b3db…` → 删 `.part` 重下 → `model` 重新解压 80 MB |
 | **R-5** 断网（飞行模式）后触发 | ✅ 失败可读、不留脏 `.part` | 三次重试后 `FunASR 模型准备失败: Unable to resolve host "delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com"`；目录内无任何残留文件 |
 
 **R-2 下行字节（按 Content-Length 与 `.part` 长度推算，非实测计量）**：续传段 77,920,010 B
 （77,920,048 − 38）＋ 摘要失配后整包重下 77,920,048 B ≈ **155.8 MB**。与 VOCA-478 登记的
 「坏 `.part` 自愈多下一整包」一致，属已知行为、本单不修。
+
+**R-1 判据的一处偏差（本单实测发现，需后端确认）**：本 issue R-1 原文要求「logcat 有 `AsrDownload` 起始终止打点」，
+但 v1.6 代码里成功下载**不打任何日志**——`FunAsrModelStore` 只在失败分支（`Log.w(TAG, "下载失败…")` /
+`FunASR 模型准备失败`）和续传分支（`断点续传：从…`）打点，`TAG` 为 `FunAsrModelStore`，
+格式为 `funasr category=… `（见 `AsrModelInstall.render`），**不存在 `AsrDownload` 标签**。
+另外，本轮重跑 R-1 时（12:14Z，网络正常、目录全新）产物正常生成但 **`logcat --pid` 下 0 条应用日志**，
+与上述「成功路径不打点」一致。因此 R-1 只能以「文件系统产物 + 包 sha256 + 源探测全绿」作为通过证据，
+无法按原文提供「起始/终止」两条日志；要么后端补成功路径打点，要么把 R-1 判据改为不依赖日志。
 
 **未覆盖（如实声明）**：
 - **R-3 语音上屏**：需真机麦克风（AVD 无音频输入），本轮未跑，不得据此判定语音链路可用。
