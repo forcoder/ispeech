@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognitionService
 import android.speech.RecognizerIntent
@@ -191,12 +192,33 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
             AsrTrace.EV_BIND,
             "engine" to asr.engine.name,
             "requested" to if (asr.engine == AsrEngine.CUSTOM) asr.serviceComponent.ifBlank { "system_default" } else "system_default",
+            // 实际生效者：CUSTOM 是配置里那个组件，其余走系统 secure 设置。
+            // 旧字段 `first` 打的是「查询列表第一项」，桩接管时会把人带错方向（VOCA-231 质检打回 2）。
+            "effective" to effectiveService(asr),
             "services" to services.size,
             "usable" to services.count { usableService(it) },
             "stubs" to services.count { !usableService(it) },
-            "first" to services.firstOrNull()?.let { "${it.serviceInfo.packageName}/${it.serviceInfo.name}" },
+            "first_queried" to services.firstOrNull()?.let { "${it.serviceInfo.packageName}/${it.serviceInfo.name}" },
             "ms" to elapsedMs(),
         )
+    }
+
+    /**
+     * 这次会话实际会绑到哪个识别服务。
+     *
+     * `queryServices()` 只回答「设备上装了哪些」，顺序由 PackageManager 决定，**不是**绑定结果：
+     * 系统默认服务的真实选择在 `Settings.Secure.voice_recognition_service` 里（设了桩就指向桩），
+     * 不读它就没法从日志判断「绑的是谁」。读不到（未设置 / 无权限）记 `system_default`，不猜具体组件。
+     */
+    private fun effectiveService(asr: AsrSettings): String {
+        val secure = if (asr.engine == AsrEngine.CUSTOM && asr.serviceComponent.isNotBlank()) {
+            null
+        } else {
+            runCatching {
+                Settings.Secure.getString(context.contentResolver, SECURE_VOICE_RECOGNITION_SERVICE)
+            }.getOrNull()
+        }
+        return resolveEffectiveService(asr.engine, asr.serviceComponent, secure)
     }
 
     /** 建（重建）识别器并开始收音；[start] 与「识别器忙」重试共用同一条路径。 */
@@ -604,6 +626,45 @@ class VoiceInputController(private val context: Context) : RecognitionListener {
  * 判据见 [isUsableRecognitionService]。
  */
 internal const val STUB_RECOGNITION_PERMISSION = "android.permission.BIND_VOICE_INTERACTION"
+
+/**
+ * 系统默认识别服务的选择项：`Settings.Secure` 里的键名（探针日志读它取「实际生效者」）。
+ *
+ * 用字面量而不是 `Settings.Secure.VOICE_RECOGNITION_SERVICE`：后者是 `@hide` 字段，
+ * 编译期 API 里取不到；键名本身自 API 21 起未变。
+ */
+internal const val SECURE_VOICE_RECOGNITION_SERVICE = "voice_recognition_service"
+
+/**
+ * 这次会话**实际会绑到**哪个识别服务 —— [VoiceInputController.logBind] 里 `effective=` 的判据，
+ * 抽成纯函数便于单测（打错字段会把人带去改错地方，见 VOCA-231 质检打回 2）。
+ *
+ * - `CUSTOM` 且配了组件：就是那个组件（`createRecognizer` 走 ComponentName 重载）；
+ * - 其余：系统默认识别服务 = `Settings.Secure.voice_recognition_service` 的当前值
+ *   （设了桩就指向桩），未设置时 Android 自己挑，日志只能说 `system_default`。
+ *
+ * 注意组件串按 `ComponentName.unflattenFromString` 的规则展开（`pkg/.Cls` → `pkg/pkg.Cls`），
+ * 但这里自己解析而不用 `ComponentName` 本身：纯函数才能在 JVM 单测里钉住（框架类在单测里未 mock）。
+ * 解不开时原样回填，让日志至少留下用户配了什么。
+ */
+internal fun resolveEffectiveService(engine: AsrEngine, serviceComponent: String, secureValue: String?): String {
+    if (engine == AsrEngine.CUSTOM && serviceComponent.isNotBlank()) {
+        return flattenServiceComponent(serviceComponent)
+    }
+    return if (secureValue.isNullOrBlank()) "system_default" else secureValue
+}
+
+/**
+ * 把 `pkg/cls` 展开成 `pkg/绝对类名`，与 `ComponentName.unflattenFromString` 的口径一致：
+ * 缺包名或类名、或没有 `/` 时原样返回（框架返回 null，日志里留原文更有用）。
+ */
+internal fun flattenServiceComponent(unflattened: String): String {
+    val slash = unflattened.indexOf('/')
+    if (slash <= 0 || slash == unflattened.length - 1) return unflattened
+    val pkg = unflattened.substring(0, slash)
+    val cls = unflattened.substring(slash + 1)
+    return "$pkg/${if (cls.startsWith(".")) pkg + cls else cls}"
+}
 
 /**
  * 「声明了 [permission] 的识别服务能不能用」——[VoiceInputController.hasUsableService] 的判据，

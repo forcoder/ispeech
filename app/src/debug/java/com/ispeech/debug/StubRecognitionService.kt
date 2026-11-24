@@ -20,9 +20,16 @@ import android.util.Log
  * adb install -r app/build/outputs/apk/debug/app-debug.apk
  * adb shell settings put secure voice_recognition_service \
  *     com.ispeech.ime/com.ispeech.debug.StubRecognitionService
- * # 点语音键 → 期望 10 秒内 ev=timeout stage=start + ev=ui_reset reason=session_timeout
+ * # 点语音键 → 期望 10 秒内 ev=timeout stage=start + ev=ui_reset
+ * # 注意 reason：超时文案经 resetOnTimeout → onError 上抛，复位走的是 engine_error；
+ * #   session_timeout 是 IspeechImeService 那条 66 秒 UI 兜底，走不到这里（10 秒先触发）
  * adb shell settings delete secure voice_recognition_service   # 复现完务必还原
  * ```
+ *
+ * `reason=` 与路径的对应（判错会把人带去改错地方）：
+ * - `engine_error`：**本条** —— `VoiceInputController.resetOnTimeout()` 把文案经 `onError` 上抛，
+ *   `IspeechImeService` 的 `onError` 打 `endVoiceSession("engine_error")`；
+ * - `session_timeout`：`IspeechImeService.armVoiceSessionGuard` 的 66 秒 UI 顶，`cancelVoice("session_timeout")`。
  *
  * 进 release 的风险为零：本文件在 `src/debug/`，release 变体不编译它，清单里也没有它的声明。
  */

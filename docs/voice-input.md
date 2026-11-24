@@ -112,7 +112,7 @@ adb logcat -d -s AsrTrace:* | grep -E 'ev=(timeout|error|blocked)'   # 只看异
 | --- | --- | --- |
 | `begin` | `IspeechImeService.startVoiceTrace` | 一次**真正开始**的语音会话：`via`（`voice_key` / `press_down`）、引擎、进入时的 UI 与收音状态 |
 | `blocked` | `IspeechImeService.toggleVoiceInput` / `toggleVoskVoice` / `onVoicePressDown`、两个引擎的 `start`、`VoiceInputController` 前置校验 | 被拦下：无服务 / 无可用识别服务 / 无麦克风权限 / 模型未就绪 / 已在收音（沿用上一个没结束的 id，所以「再按也没反应」会打在卡住那条会话上） |
-| `bind` | `VoiceInputController.logBind` | 设备上识别服务数量与真正受 `BIND_RECOGNITION_SERVICE` 保护的数量（桩服务能绑不回结果，靠这条区分） |
+| `bind` | `VoiceInputController.logBind` | **实际会绑到谁**（`effective=`：CUSTOM 取配置组件，否则读 `Settings.Secure.voice_recognition_service`）+ 设备上识别服务数量与桩的数量（`usable=` / `stubs=`）。`first_queried=` 只是 PackageManager 查询顺序第一项，**不是**绑定结果 |
 | `press` | `IspeechImeService.onVoicePressUp` | 按住说话的**抬起**（按下由 `begin via=press_down` 表示）；只有按下没有抬起 = 手势没回来、收尾没触发 |
 | `start` | `VoiceInputController.startListening`、`VoskSpeechEngine.start` / `FunAsrSpeechEngine.start`、`startVoskModelDownload` | 已下发开始收音；带 `lang` / `partial` / `offline` / `model` / `calling` / `watchdog` |
 | `first_result` | 三个引擎的中间结果首条 + `IspeechImeService.showVoiceCandidate` | **本次会话有没有回调过文本**（只打首条，不刷屏） |
@@ -343,6 +343,18 @@ I AsrTrace: session=v1 ev=ui_reset t=10872222 reason=engine_error ok=false ms=10
 三条都到位：`stage=start`（判读表里「有 `start` 无 `first_result`」那一行）、`limit_ms=10000`（时限来自
 `AsrTiming`，不是散落常量）、`ui_reset` 在 **10.016 秒**离开「识别中」。连按两次得到 `session=v2` 同样是
 `timeout stage=start → ui_reset`，即「卡住后越点越没反应」不再成立。
+
+**`ui_reset reason=` 的口径**（判错会把人带去改错地方；本节初稿写成 `session_timeout`，已订正）：
+上面那次复位走的是 **`engine_error`** —— 超时文案经 `VoiceInputController.resetOnTimeout() → onError` 上抛，
+`IspeechImeService` 的 `onError` 打 `endVoiceSession("engine_error", ok = false)`。
+`session_timeout` 只属于 `IspeechImeService.armVoiceSessionGuard` 那条 66 秒 UI 兜底（`IspeechImeService.kt:333` 的
+`cancelVoice("session_timeout")`）；本装置 10 秒就复位，永远走不到它。两条路径的区别就是「谁先到点」。
+
+**`ev=bind` 的 `effective=`**（同一轮订正）：探针现在打**实际生效**的识别服务 —— `CUSTOM` 取配置里的组件，
+其余读 `Settings.Secure.voice_recognition_service`（设了桩就指向桩）。旧字段 `first` 打的是
+`queryServices()` 返回列表的第一项，顺序由 PackageManager 决定、**不是**绑定结果：设桩复跑时它照样打
+`…AiAiSpeechRecognitionService`，看日志的人会以为桩没生效。原字段保留为 `first_queried`，
+两者不同时正好把「查询顺序 ≠ 实际绑定」这个坑暴露出来。
 
 **仍未覆盖**：①基线真机 `FMR0224913042917` / `23F0224224000950` 上的同一分支（设备未回线，`adb devices -l` 无该机）；
 ②`stage=session`（60 秒硬上限）与 `stage=finish` 的运行时样本本机也没造到 —— 前者需要识别服务持续 60 秒
