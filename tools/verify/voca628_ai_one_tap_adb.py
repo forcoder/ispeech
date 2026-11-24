@@ -71,6 +71,8 @@ class Driver:
         self.keyboard_baseline = 0
         self.last_pick_text = ""
         self.row_offset = None
+        self.ai_key_xy = None
+        self.needle = ""
         # 流式抓 logcat 到文件：模拟器上 GMS / Chrome 的噪声能在 3 秒内把 2 MiB 环形
         # 缓冲刷掉几十轮，`logcat -d -s IspeechIme` 经常什么都读不到，于是「真的上屏了」
         # 会被误判成「没产生结果」。边产生边落盘就不会丢。
@@ -287,25 +289,44 @@ class Driver:
             return ((x0 + x1) // 2, (y0 + y1) // 2)
         return None
 
+    # 宿主候选，按「启动快、必有输入框」排序。不同 AOSP 版本差异很大：Android 14 的
+    # 设置首页没有搜索框，Chrome 会弹「未连接到互联网」/ ANR，所以不能只赌一家。
+    HOSTS = (
+        ("com.android.settings", "com.android.settings/.Settings"),
+        ("com.android.chrome",
+         "-a android.intent.action.VIEW -d about:blank"),
+        ("com.google.android.apps.messaging",
+         "com.google.android.apps.messaging/.ui.ConversationListActivity"),
+        ("com.google.android.contacts",
+         "com.google.android.contacts/com.android.contacts.activities.PeopleActivity"),
+    )
+
     def open_host_field(self, needle: str) -> None:
         """开宿主应用 → 点输入框 → 输入 needle，全程按层级定位，不写死坐标。"""
-        # 首选「设置」首页搜索框（AOSP 有搜索入口时最轻），没有就退到 Chrome 地址栏。
-        self.adb("shell", "am", "force-stop", "com.android.settings")
-        self.adb("shell", "am", "start", "-n", "com.android.settings/.Settings", "-W")
-        time.sleep(2)
-        xy = self.find_edit_bounds()
-        if xy is None:
-            self.adb("shell", "am", "force-stop", "com.android.chrome")
-            self.adb(
-                "shell", "am", "start", "-a", "android.intent.action.VIEW",
-                "-d", "about:blank", "-W",
-            )
-            time.sleep(3)
+        self.needle = needle
+        xy = None
+        for pkg, launch in self.HOSTS:
+            self.adb("shell", "am", "force-stop", pkg)
+            parts = ["shell", "am", "start"] + launch.split() + ["-W"]
+            self.adb(*parts)
+            time.sleep(2.5)
             xy = self.find_edit_bounds()
+            if xy is not None:
+                break
         if xy is None:
-            raise SystemExit("宿主里找不到可输入的 EditText（设置无搜索框、Chrome 也没起来）")
+            raise SystemExit(
+                "宿主里找不到可输入的 EditText（试过 " +
+                ", ".join(p for p, _ in self.HOSTS) + "）；"
+                "请手动打开一个带输入框的应用后重跑，或用 --host 指定"
+            )
         self.adb("shell", "input", "tap", str(xy[0]), str(xy[1]))
         time.sleep(2)
+        # 先清空再输入：宿主（Chrome 地址栏）里已有文本时 `input text` 是「追加」，
+        # 实测会得到 `about:blankzzqa`，于是调用方那句 `edit_text() == needle` 永远不成立。
+        self.adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
+        self.adb("shell", "input", "keyevent", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+        self.adb("shell", "input", "keyevent", "KEYCODE_DEL")
+        time.sleep(0.4)
         self.adb("shell", "input", "text", needle)
         time.sleep(1)
 
@@ -334,12 +355,17 @@ class Driver:
         height = f[1] - f[0]
         return height >= self.keyboard_baseline * 0.8
 
-    def open_ai_panel(self, retries: int = 3) -> bool:
-        """点工具栏 AI 键，直到键盘收起（= 面板已展开）。
+    def open_ai_panel(self, retries: int = 2) -> bool:
+        """点工具栏 AI 键，直到 `ai_results` 日志出现（= 面板真的出了结果）。
 
-        AI 键的绝对纵坐标随「候选条有几行」「是否显示页码条」浮动，不能写死；而 IME
-        窗口顶边稳定，所以用「顶边 + 比例」定位。比例取自实测：工具栏落在窗口顶部往下
-        0.17~0.22（本机 1519 + 200 ≈ 1719）。横向 8 键等宽，AI 是第 6 个，中心 x = 宽 × 11/16。
+        为什么不信「键盘收起」：空面板（未登录 / 生成失败）也会收起键盘，用高度判据会
+        把「面板开了但 0 条」和「面板开了有结果」混为一谈，于是 5a.1 在空面板上失败时
+        看起来像「点行不上屏」。这里直接用 `ai_results` 这个产品自身的结构化日志做判据，
+        和 setOnClickListener 的实际效果强绑定。
+
+        AI 键的绝对坐标随「候选条行数 / 页码条 / 设备密度」浮动，所以横纵都不写死：
+        候选扫描点是「工具栏行 × 等分列」，谁点出 `ai_results` 谁就是 AI 键，命中后
+        记进 `self.ai_key_xy` 供本轮后续复用。
         """
         frame = self.ime_frame()
         if not frame:
@@ -352,16 +378,72 @@ class Driver:
             baseline = max(baseline, (self.ime_frame() or (0, 0))[1] - (self.ime_frame() or (0, 0))[0])
             time.sleep(0.4)
         self.keyboard_baseline = baseline
-        x = self.screen_width() * 11 // 16
-        for _ in range(retries):
-            for frac in (0.17, 0.19, 0.21, 0.15, 0.23):
-                self.logcat_clear()
-                self.adb("shell", "input", "tap", str(x), str(top + int((bottom - top) * frac)))
-                time.sleep(2.5)
-                if not self.keyboard_shown():
-                    return True
-        self.fail("5a.0", f"点了 {retries} 轮 AI 键，键盘仍未收起（面板没打开）")
+
+        if self.ai_key_xy and self._try_tap_ai(*self.ai_key_xy):
+            return True
+
+        w = self.screen_width()
+        # 工具栏在候选行之下、字母行之上；高度比例 0.17~0.30 覆盖 1~2 行候选条。
+        # 候选顺序：先试最可能的「8 键等宽 × 第 6 个」（实测命中率最高的组合），
+        # 再在少数几个纵坐标上扫，最后才换 7/9 键布局。总点击次数封顶 20，避免在
+        # 找不到键的设备上空转十几分钟（每点一次要等 2s 落日志）。
+        primary_x = w * 11 // 16
+        candidates = [(primary_x, top + int((bottom - top) * f))
+                      for f in (0.22, 0.20, 0.24, 0.18, 0.26)]
+        for i in (5, 4, 6, 3, 7):
+            candidates.append((w * i // 8, candidates[0][1]))
+        for i in (5, 4):
+            candidates.append((w * i // 7, candidates[1][1]))
+        for x, y in candidates:
+            if self._try_tap_ai(x, y):
+                self.ai_key_xy = (x, y)
+                return True
+        self.fail("5a.0", f"点了 {retries} 轮仍没找到能产出 ai_results 的 AI 键（面板没展开）")
         return False
+
+    def _try_tap_ai(self, x: int, y: int) -> bool:
+        """点一次 (x,y)，看有没有 `ai_results`；没命中就把宿主输入框复位后返回 False。"""
+        self.logcat_clear()
+        self.adb("shell", "input", "tap", str(x), str(y))
+        time.sleep(2.0)
+        if "ai_results" in self.logcat():
+            return True
+        # 点歪了会往宿主里打字 / 收键盘，复位一次再继续扫
+        if self.edit_text().strip() != self.needle:
+            self.open_host_field(self.needle)
+        elif not self.keyboard_shown():
+            self.open_host_field(self.needle)
+        return False
+
+    def panel_fingerprint(self, tag: str) -> dict:
+        """面板区几何 / 颜色指纹，用来区分「列表态」与「详情态」。
+
+        详情页底部固定有「上屏」（`#5B6CFF` 主色）+「关闭」两个按钮，列表态一次都不出现
+        主色；这是比 IME 高度稳的判据——面板是 `WRAP_CONTENT`，3 条列表（3*38+4dp）与
+        详情（10*38dp）的高度差会被设备密度吃掉（实测模拟器 831→831，为 0）。
+        """
+        path = self.shot(tag)
+        frame = self.ime_frame()
+        if not frame:
+            return {"primary_px": 0, "white_rows": 0, "h": 0, "path": path}
+        try:
+            from PIL import Image  # noqa: PLC0415
+        except ImportError:
+            return {"primary_px": 0, "white_rows": 0, "h": frame[1] - frame[0], "path": path}
+        im = Image.open(path).convert("RGB")
+        px = im.load()
+        w, h = im.size
+        top, bot = frame[0], min(frame[1], h)
+        primary = 0
+        white_rows = 0
+        for y in range(top, bot):
+            cnt = sum(1 for x in range(0, w, 4) if px[x, y] == (255, 255, 255))
+            if cnt > w // 8:
+                white_rows += 1
+            for x in range(0, w, 2):
+                if px[x, y] == (91, 108, 255):
+                    primary += 1
+        return {"primary_px": primary, "white_rows": white_rows, "h": bot - top, "path": path}
 
     def fail(self, ac: str, detail: str) -> None:
         self.results.append(Case(ac, False, detail))
@@ -394,16 +476,35 @@ def pref_blob(items: dict[str, str]) -> bytes:
 def run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = None) -> int:
     d.start_logcat()
     try:
-        return _run(d, needle, strict_device, mock_llm)
+        rc = _run(d, needle, strict_device, mock_llm)
     finally:
         d.stop_logcat()
+    report(d, rc)
+    return rc
+
+
+def report(d: Driver, rc: int) -> None:
+    """统一在退出前把已有的逐条结果打出来。
+
+    早退路径（宿主输入框不对 / AI 键没找到）以前直接 `return 2`，结果一条都不打印，
+    在外面看就是「脚本静默退出、什么都没干」——这也让上一轮的失败看起来像脚本没跑。
+    """
+    if not d.results:
+        print("未产出任何用例结果（脚本在 5a.0 前置阶段就停了，看上面那行原因）")
+        return
+    print()
+    for c in d.results:
+        print(f"{'PASS' if c.ok else 'FAIL'} {c.ac}  {c.detail}")
+    failed = [c for c in d.results if not c.ok]
+    print(f"\n合计 {len(d.results)} 条，失败 {len(failed)} 条")
 
 
 def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = None) -> int:
     d.prepare(phrases=not mock_llm, needle=needle, mock_llm=mock_llm)
     d.open_host_field(needle)
-    if d.edit_text().strip() != needle:
-        print(f"宿主输入框不是 {needle!r}，放弃（当前 {d.edit_text()!r}）")
+    got = d.edit_text().strip()
+    if got != needle:
+        print(f"宿主输入框不是 {needle!r}，放弃（当前 {got!r}）")
         return 2
 
     if not d.open_ai_panel():
@@ -436,33 +537,61 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
     d.last_adopt_log = d.logcat()
     d.last_pick_text = text_after_pick
 
-    # ── AC-5a.2 长按进详情，不上屏 ──
+    # ── AC-5a.2 进详情页，不上屏 ──
+    # AC 原文「长按第 1 行（或点行尾「…」）」是等价入口：`AiReplyPanel.buildRow` 里
+    # 长按与 `textButton(ELLIPSIS)` 都绑 `showDetail(index)`。模拟器的 `input swipe`
+    # 同点 900ms 不触发 `setOnLongClickListener`（实测差异 bbox 只有一个光标闪烁区），
+    # 所以这里走「…」分支取证，长按分支单独如实记录、不记为 PASS。
     d.open_host_field(needle)
     d.open_ai_panel()
     before = d.edit_text()
-    list_h = d.ime_frame()
     d.logcat_clear()
     if d.row_offset is None:
         d.fail("5a.2", "拿不到结果行坐标（5a.1 未定位成功）")
     else:
         y = d.panel_top() + d.row_offset
-        d.adb("shell", "input", "swipe", str(d.screen_width() // 4), str(y),
-              str(d.screen_width() // 4), str(y), "900")
+        list_fp = d.panel_fingerprint("5a2_list_before")
+        # 行尾「…」：按钮有 10dp 左右内边距，取右侧 16dp 处稳妥落点
+        dens = d.density()
+        more_x = d.screen_width() - int(16 * dens)
+        d.adb("shell", "input", "tap", str(more_x), str(y))
         time.sleep(2.5)
         text = d.edit_text()
         adopt = d.logcat()
-        detail_h = d.ime_frame()
-        grew = bool(list_h and detail_h) and (detail_h[1] - detail_h[0]) > (list_h[1] - list_h[0])
-        ok = text == before and "ai_adopt" not in adopt and grew
+        detail_fp = d.panel_fingerprint("5a2_detail_after")
+        # 详情态判据：底部出现主色「上屏」按钮（列表态没有主色块），且高度 / 白块布局变化。
+        # 不用「IME 高度变大」当唯一判据：面板是 WRAP_CONTENT，3 条 vs 10 行差 111px 会被
+        # 设备密度吃掉；而 #5B6CFF 主色按钮在列表态一次都不出现，是详情页特有的。
+        expanded = detail_fp["primary_px"] > list_fp["primary_px"] + 100
+        ok = text == before and "ai_adopt" not in adopt and expanded
         (d.pass_ if ok else d.fail)(
             "5a.2",
-            f"长按后输入框={text!r}（应不变），详情页展开={grew}"
-            f"（IME 高度 {list_h[1]-list_h[0] if list_h else '?'}→"
-            f"{detail_h[1]-detail_h[0] if detail_h else '?'}），"
+            f"点行尾「…」后输入框={text!r}（应不变），详情页展开={expanded}"
+            f"（主色像素 {list_fp['primary_px']}→{detail_fp['primary_px']}，"
+            f"白块行 {list_fp['white_rows']}→{detail_fp['white_rows']}，"
+            f"IME 高度 {list_fp['h']}→{detail_fp['h']}），"
             f"adopt 日志={'有' if 'ai_adopt' in adopt else '无'}",
         )
         d.adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(1.5)
+
+        # 长按分支：如实探测，不记为 PASS（模拟器上 input swipe 不触发长按监听）
+        d.open_host_field(needle)
+        d.open_ai_panel()
+        if d.row_offset is not None:
+            y2 = d.panel_top() + d.row_offset
+            lp_before = d.panel_fingerprint("5a2_longpress_before")
+            d.adb("shell", "input", "swipe", str(d.screen_width() // 4), str(y2),
+                  str(d.screen_width() // 4), str(y2), "900")
+            time.sleep(2.5)
+            lp_after = d.panel_fingerprint("5a2_longpress_after")
+            lp_ok = lp_after["primary_px"] > lp_before["primary_px"] + 100
+            print(f"NOTE 5a.2 长按分支：input swipe 900ms 后详情展开={lp_ok}"
+                  f"（主色像素 {lp_before['primary_px']}→{lp_after['primary_px']}）"
+                  f"；该分支需真机，模拟器不作为通过依据")
+            if not lp_ok:
+                d.adb("shell", "input", "keyevent", "KEYCODE_BACK")
+                time.sleep(1.0)
 
     # ── AC-5a.3 用户改过输入框 → 只插入不删除 ──
     d.open_host_field(needle)
@@ -541,12 +670,7 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
             "模型路径请用 --mock-llm 或真实 AI 配置重跑（见下方模型模式输出）",
         ))
 
-    print()
-    failed = [c for c in d.results if not c.ok]
-    for c in d.results:
-        print(f"{'PASS' if c.ok else 'FAIL'} {c.ac}  {c.detail}")
-    print(f"\n合计 {len(d.results)} 条，失败 {len(failed)} 条")
-    return 0 if not failed else 1
+    return 0 if all(c.ok for c in d.results) else 1
 
 
 class MockLlm:
