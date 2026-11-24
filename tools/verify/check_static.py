@@ -422,6 +422,71 @@ def check_isolated_braces() -> None:
         report("PASS", "孤立右花括号：未发现任何没有匹配 { 的顶层 }")
 
 
+def check_quick_search_box_flags() -> None:
+    """快捷短语搜索框的交互标志必须**晚于** `inputType` 生效，且四件套 + 长按开关齐全。
+
+    为什么值得静态卡住（VOCA-627 质检打回项 1）：`TextView` 的
+    `isSingleLine` / `inputType` 都会走 `setKeyListener -> fixFocusableAndClickableSettings()`，
+    在 `mMovement != null` 时把 `focusable / clickable / longClickable` **强制改回 true**。
+    写在 `inputType` 之前的 `isClickable = false` 因此是无效的：控件仍可点可长按，
+    `View.onTouchEvent` 吞掉 ACTION_DOWN，父行「点搜索框回到输入态」在文本区（weight=1f）
+    整段失效，OEM 长按还会弹选区手柄——这是相对 main 的行为退步。
+
+    本项目把这组标志收在 `pinDisplayOnly()` 里；检查两件事：
+      1. 该函数体包含 isFocusable / isFocusableInTouchMode / isCursorVisible /
+         isClickable / isLongClickable 全 false，且先摘 movementMethod；
+      2. `searchText` 的 apply 块里，`pinDisplayOnly()` 的调用在 `inputType` 之后。
+    """
+    kt = JAVA / "com" / "ispeech" / "input" / "QuickPhrasePanel.kt"
+    if not kt.is_file():
+        report("FAIL", f"缺少 {rel(kt)}：无法核对搜索框标志")
+        return
+    text = kt.read_text(encoding="utf-8", errors="replace")
+
+    fn = re.search(r"private fun TextView\.pinDisplayOnly\(\)\s*\{(.*?)\n    \}", text, re.S)
+    if not fn:
+        report("FAIL", f"{rel(kt)} 里找不到 `pinDisplayOnly()`（搜索框交互标志的唯一出口）")
+        return
+    body = fn.group(1)
+    required = {
+        "movementMethod = null": "movementMethod 非空时 setKeyListener 会把标志翻回 true",
+        "isCursorVisible = false": "光标必须自绘，系统光标要关",
+        "isFocusable = false": "抢焦点会让系统把它当新的输入目标",
+        "isFocusableInTouchMode = false": "同上，触摸模式也不能可聚焦",
+        "isClickable = false": "可点会吞 ACTION_DOWN",
+        "isLongClickable = false": "长按会弹系统选区手柄 / 工具栏",
+    }
+    missing = [f"{k}（{why}）" for k, why in required.items() if k not in body]
+    if missing:
+        report("FAIL", f"搜索框交互标志不全：{'；'.join(missing)}")
+        return
+    # movementMethod 必须最先摘：setMovementMethod 自己也会跑一遍 fixFocusableAndClickableSettings
+    if body.find("movementMethod = null") > body.find("isClickable = false"):
+        report("FAIL", "pinDisplayOnly() 里 `movementMethod = null` 必须放在其他标志之前："
+                       "`setMovementMethod` 会再跑一遍 fixFocusableAndClickableSettings 把它们翻回 true")
+        return
+
+    m = re.search(r"searchText\s*=\s*EditText\(context\)\.apply\s*\{(.*?)\n        \}", text, re.S)
+    if not m:
+        report("FAIL", f"{rel(kt)} 里找不到 `searchText = EditText(context).apply {{ ... }}` 块")
+        return
+    block = m.group(1)
+    pos_input = block.find("inputType")
+    pos_pin = block.find("pinDisplayOnly()")
+    if pos_input < 0:
+        report("FAIL", f"搜索框没有设置 inputType（{rel(kt)}）")
+        return
+    if pos_pin < 0:
+        report("FAIL", f"searchText 的 apply 块没有调用 pinDisplayOnly()（{rel(kt)}）")
+        return
+    if pos_pin < pos_input:
+        report("FAIL", "`pinDisplayOnly()` 写在 `inputType` **之前**："
+                       "`setInputType -> setKeyListener -> fixFocusableAndClickableSettings()` 会把标志改回 true，"
+                       "控件重新变成可点可长按（吞掉 ACTION_DOWN，父行点击在文本区失效）")
+        return
+    report("PASS", "搜索框交互标志齐全（含 isLongClickable = false），且 pinDisplayOnly() 在 inputType 之后生效")
+
+
 def check_asr_model_config() -> None:
     """默认模型源与网络安全配置必须自洽。
 
@@ -493,6 +558,7 @@ def main() -> int:
     check_delimiters()
     check_isolated_braces()
     check_asr_model_config()
+    check_quick_search_box_flags()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

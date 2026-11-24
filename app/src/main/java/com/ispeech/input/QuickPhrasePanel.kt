@@ -745,19 +745,19 @@ class QuickPhrasePanel @JvmOverloads constructor(
             setPadding(0, 0, 0, 0)
             background = null
             isSingleLine = true
-            // **不抢 Android 焦点**（本单唯一不能妥协的一条）：这是 IME 自己窗口里的控件，
-            // 一旦 requestFocus 系统会把它当成新的输入目标，触发输入法切换 / 页面跳转，
-            // 按键还会被它吞掉，表现为「只能打英文、打着打着跳到别的页面」。
-            // 输入统一由服务侧 handleSoftKey 路由，这里只负责显示文本，光标由 [caret] 自绘。
-            isCursorVisible = false
-            isFocusable = false
-            isFocusableInTouchMode = false
-            isClickable = false
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             showSoftInputOnFocus = false
             setTextColor(textSecondary)
             setHintTextColor(textSecondary)
             hint = context.getString(R.string.quick_panel_search_hint)
+            // 交互标志必须放在 `isSingleLine` / `inputType` **之后**：这两行都会走
+            // `TextView.setInputType → setKeyListener → fixFocusableAndClickableSettings()`，
+            // 而 EditText 的 `mKeyListener` 恒非空（`ArrowKeyMovementMethod`），该函数会把
+            // `clickable` 与 `longClickable` **强制改回 true**、并把 focusable 改成 FOCUSABLE。
+            // 写在前面等于白写：控件变成可点 → `View.onTouchEvent` 把 ACTION_DOWN 吃掉并
+            // `return true`，父行 [searchRow] 的「点搜索框回到输入态」在文本区（weight=1f，
+            // 占整行大部分）整段失效，这是相对 main（普通 TextView 不吞事件）的退步。
+            pinDisplayOnly()
         }
         caret = View(context).apply {
             setBackgroundColor(primary)
@@ -871,6 +871,30 @@ class QuickPhrasePanel @JvmOverloads constructor(
     }
 
     // ── 局部私有辅助（不跨文件共享）──
+
+    /**
+     * 把搜索框钉成「纯展示控件」：不聚焦、不点、不响应长按。
+     *
+     * 必须晚于任何会触发 `TextView.setInputType / setKeyListener` 的调用（`isSingleLine`、
+     * `inputType`）。那条路径最终会走 `fixFocusableAndClickableSettings()`，在 `mMovement != null`
+     * 时把 `focusable / clickable / longClickable` **全部改回 true**——也就是把这里关掉的东西又打开。
+     *
+     * `longClickable` 单独关掉的两个原因：
+     * 1. `View.onTouchEvent` 把 `LONG_CLICKABLE` 也算作可点，命中就吞掉 `ACTION_DOWN` 并 `return true`，
+     *    父行 [searchRow] 的点击回调在文本区（`weight = 1f`，占整行大部分）失效；
+     * 2. 防 OEM 长按在 EditText 上弹系统选区手柄 / 文本工具栏。
+     */
+    private fun TextView.pinDisplayOnly() {
+        // 先摘移动方法：`setMovementMethod` 自己会走一遍 `fixFocusableAndClickableSettings()`，
+        // 反过来把下面几个标志改回 true。放在最前面，后面设的值才是最终值。
+        movementMethod = null
+        isCursorVisible = false
+        // 「抢焦点」是硬约束：系统一旦接管就会把它当新的输入目标，触发输入法切换 / 页面跳转。
+        isFocusable = false
+        isFocusableInTouchMode = false
+        isClickable = false
+        isLongClickable = false
+    }
 
     private fun dp(value: Int): Int = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP,
