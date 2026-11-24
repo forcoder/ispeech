@@ -67,8 +67,6 @@
 - 九宫格页如果也画「图标 + 文字」，会出现两个箭头（label 本身就是 `↵`），
   且 `↵` 当文字渲染在 300 px 宽的键里只有 26 px，比相邻的 `⌫`（66 × 46）`☺`（72 × 67）小一大截。
 
-注：本键圆角/边距沿用当前全局值（4dp/10dp），尚未回填 §3 的 3dp/6dp，待单独立项。
-
 ## 5. 其他一起调整的细节
 
 - **字母页第 2 行居中**：`asdfghjkl` 只有 9 键，旧版每键比上下行宽 8 px、整行左对齐，行间错位；
@@ -85,5 +83,13 @@
 | `app/src/main/java/com/ispeech/input/SoftKeyboardView.kt` | 调色板 / 尺寸常量、`keyTextSize`、`buildRow` 补位、`createKey(inToolbar)`、`buildEnterKey`、`enterKeySelector` |
 | `app/src/main/java/com/ispeech/input/keyboard/KeyboardLayouts.kt` | 字母页底行权重（`符` / 空格 / `中/英` / `换行`） |
 | `app/src/main/res/drawable/ic_enter.xml` | 回车箭头（矢量，运行时着色） |
+| `tools/verify/check_keyboard_ui.py` | 把上面两行的取值写成静态断言（字号 / `keyMargin` / `keyRadius` / `LETTER_ROW_UNITS` / 底行权重 / 换行键图标接线） |
 
 改完跑 `python3 tools/verify/check_*.py`（纯静态解析源码），再按 `README` 的远端构建流程装机目检。
+
+断言为什么必须存在：本单的键面规格 11-10 合进 main（`0a53ab5`）后，11-14 被 `07214d6` 用一条陈旧分支的
+`SoftKeyboardView.kt` 整体覆盖，字母回到 21sp、键间距回到 4dp、圆角回到 10dp、`LETTER_ROW_UNITS` 直接消失；
+11-14 那轮挂着「UI 恢复」名字的提交只改了 `setMargins(dpInt(keyMargin))` 这类**引用点**，没动**取值**，
+所以回退在 main 上又静默存在了一段时间。改取值的人不会顺手记得改文档，改文档的人也不会知道取值被动过 ——
+只有断言能区分「规格」和「曾经是规格」。校验它有效：把 `keyTextSize` 非 T9 分支的 `else -> 18f` 改成 `21f`，
+`check_keyboard_ui.py` 必须 FAIL。
