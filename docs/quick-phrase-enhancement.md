@@ -737,6 +737,26 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 离线断言覆盖到「输入 `dtwsl` 的候选首位是泡池须知、插入文本与源文件 sha256 一致」；
 真实候选条截图 / 真机记录需要在装有输入法的设备上补（离线环境没有 Android SDK）。
 
+### 12.7 搜索框的「文本 + 光标」双状态（VOCA-627 / VOCA-65 条目 1 前置 D-2）
+
+`07214d6`（Vosk 离线语音引擎那次提交）把搜索框从 `EditText` + 自绘 `caret` 退化成 `TextView`，
+光标只剩「文本末尾拼一个 `|` 字符」的假渲染面，条目 1 的「光标处插入 / 删除」因此无处落地。
+本单只恢复渲染面：
+
+| 关注点 | 实现 |
+|---|---|
+| 不抢 Android 焦点（唯一硬约束） | `searchText`：`isCursorVisible=false` / `isFocusable=false` / `isFocusableInTouchMode=false` / `showSoftInputOnFocus=false`；`searchRow` 两个 focusable 同样关掉。**不调 `requestFocus()`**，只需「面板进入输入态」= `isSelected` 描边 + 光标闪烁 |
+| 光标由谁画 | 独立 `caret` 视图（2dp×18dp，`caretBlinkMs=500`），位置由新增的 `CaretField` 按「光标前子串的实测宽度」算 x；不再往文本里塞 `|` |
+| 位置怎么算 | 新增 `input/SearchCaret.kt`（纯函数，零 Android 依赖）：`clamp / insert / backspace / moveBy`，越界一律夹紧到 `0..length` |
+| 读取点 | `QuickPhrasePanel.cursor()` 返回当前索引（空词恒 0）；`setKeyword(keyword, cursor)` 供条目 1 的服务侧接线 |
+| 闪烁生命周期 | 面板 `onVisibilityChanged` / `onDetachedFromWindow` 自己停表，不依赖服务在关闭时回调 |
+
+**没有恢复的部分**：`904a98d` 的 `render()` 里恒 `setSelection(length)` 把光标钉在末尾——那正是条目 1 要修的缺陷，
+本单恢复渲染面时不带它。`◀ ▶` 键位、服务侧 `(keyword, cursor)` 状态机、四条写入路径仍属条目 1 本体。
+
+验证：`SearchCaretTest`（11 例，覆盖 AC-1.1~1.4 / 1.9 与空词边界）；
+模拟器 adb 取证见 issue VOCA-627 的交付评论（`caretX` 从 `140..145` 右移到 `238..243`，点搜索框不切 IME、字符不漏宿主）。
+
 ## 13. 导入「通用短语.csv」（2026-11-09 追加）
 
 来源：产品给的搜狗 / csBaby 导出文件 `通用短语.csv`（235 行、GBK、61 KB）。目标是「导进常用语，

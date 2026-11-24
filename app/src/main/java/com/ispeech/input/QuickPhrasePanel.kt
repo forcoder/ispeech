@@ -5,7 +5,9 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextUtils
@@ -14,6 +16,8 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -39,7 +43,10 @@ import com.ispeech.engine.QuickSource
  * 数据由服务在 IO 线程读完规则文件后调用 [submit] 灌入；关键词由软键盘字母键经
  * [setKeyword] 实时过滤，分类筛选与关键词筛选叠加，列表最多渲染 200 条。
  * 搜索框持有输入焦点（[requestSearchFocus]），并复用键盘「中/英」键的当前输入状态
- * （[setInputLanguage]）。
+ * （[setInputLanguage]）。这里的「焦点」是面板自己的语义（描边 + 自绘光标闪烁），
+ * **不调用 `requestFocus()`**：这是 IME 自己的窗口，抢系统焦点会被当成新的输入目标。
+ * 搜索框同时维护 `(filterKeyword, cursorIndex)` 双状态，光标位置由 [SearchCaret] 夹紧、
+ * 由 [CaretField] 渲染成一条真实位置的竖线（不再把 `|` 写进文本、也不再恒贴末尾）。
  * 关键词匹配走 PhraseSearch：完全 / 前缀 / 包含 / 拼音首字母四档 + 使用次数与收藏加权，
  * 即「智能联想」；无关键词时保持规则文件原始顺序。
  *
@@ -115,8 +122,41 @@ class QuickPhrasePanel @JvmOverloads constructor(
 
     // ── 视图（build() 中创建）──
     private lateinit var infoLabel: TextView
-    private lateinit var searchText: TextView
+    /** 搜索框文本：EditText 才能让系统在同一行内提供测量 / 省略能力，但它**不可聚焦、不画系统光标**。 */
+    private lateinit var searchText: EditText
     private lateinit var searchClear: ImageView
+
+    /**
+     * 自绘光标：位置由 [cursorIndex] 决定，跟文本末尾不是一回事。
+     *
+     * 为什么不用系统光标：`searchText` 刻意 `isCursorVisible = false`（抢焦点会触发输入法切换，
+     * 见 [buildSearchBox] 注释），所以闪烁、位置全部由这里负责。
+     */
+    private lateinit var caret: View
+
+    /** 把文本与自绘光标放在同一坐标系里的承载视图（位置算法见 [CaretField]）。 */
+    private lateinit var searchField: CaretField
+
+    /** 光标闪烁周期（与系统默认节奏一致）。 */
+    private val caretBlinkMs = 500L
+    private val caretHandler = Handler(Looper.getMainLooper())
+    private val caretBlink = object : Runnable {
+        override fun run() {
+            if (!::caret.isInitialized) return
+            caret.visibility =
+                if (caret.visibility == View.VISIBLE) View.INVISIBLE else View.VISIBLE
+            caretHandler.postDelayed(this, caretBlinkMs)
+        }
+    }
+
+    /**
+     * 搜索词的光标位置（与 `filterKeyword` 组成消费级 `(keyword, cursor)` 双状态）。
+     *
+     * 由 [SearchCaret] 的纯函数维护，越界一律夹紧；条目 1 会在服务侧接上移动与写入，
+     * 这里只把读取点与渲染面备好（D2-5 需要 `cursor()` 可读）。
+     */
+    @Volatile
+    private var cursorIndex: Int = 0
 
     /** 搜索框整行（可聚焦容器）：打开面板时把输入焦点移到这里。 */
     private lateinit var searchRow: LinearLayout
@@ -181,9 +221,20 @@ class QuickPhrasePanel @JvmOverloads constructor(
         runOnMain { render() }
     }
 
-    /** 筛选关键词（来自软键盘字母键）：实时过滤。 */
+    /** 筛选关键词（来自软键盘字母键）：实时过滤；默认把光标落在文本末尾（与 main 现值一致）。 */
     fun setKeyword(keyword: String) {
+        setKeyword(keyword, keyword.length)
+    }
+
+    /**
+     * 关键词 + 光标位置的写入点（条目 1 的服务侧会走这里）。
+     *
+     * 光标越界由 [SearchCaret.clamp] 夹紧，所以「移到中间」不需要服务自己算边界，
+     * 复用的也是 JVM 测试里那一份算式（[SearchCaretTest]）。
+     */
+    fun setKeyword(keyword: String, cursor: Int) {
         filterKeyword = keyword
+        cursorIndex = SearchCaret.clamp(keyword.length, cursor)
         runOnMain { render() }
     }
 
@@ -201,18 +252,53 @@ class QuickPhrasePanel @JvmOverloads constructor(
     /**
      * 把输入焦点移到搜索框（打开面板 / 切中英时由服务调用）。
      *
-     * 搜索框不弹系统键盘（输入来自同屏软键盘），但需要持有焦点：这样「正在往搜索框输入」
-     * 一目了然，搜索框也会显示焦点描边（见 [searchBoxBackground]）。
+     * 「输入焦点」是面板自己的语义，**不调用 `requestFocus()`**：一旦让系统接管焦点，
+     * 它会把它当新的输入目标并触发输入法切换 / 页面跳转（[buildSearchBox] 有完整说明）。
+     * 这里只做两件事：整行描焦点边（`isSelected`）+ 自绘光标开始闪烁。
      */
     fun requestSearchFocus() {
-        runOnMain { if (searchRow.isFocusable) searchRow.requestFocus() }
+        runOnMain {
+            if (!::searchText.isInitialized) return@runOnMain
+            if (::searchRow.isInitialized) searchRow.isSelected = true
+            startCaretBlink()
+            renderCaret()
+        }
     }
 
     /** 当前筛选关键词。 */
     fun keyword(): String = filterKeyword
 
+    /**
+     * 当前光标位置（D2-5 的读取点）。
+     *
+     * 面板不抢焦点，系统那套 `selectionStart` 不参与，所以位置必须能从这里读出来，
+     * 否则「空搜索框光标在索引 0」在测试里无从判定。
+     */
+    fun cursor(): Int = SearchCaret.clamp(filterKeyword.length, cursorIndex)
+
     /** 当前过滤结果第一条的 content（用于「空格上屏第一条」）。 */
     fun firstMatch(): String? = filtered().firstOrNull()?.content
+
+    /**
+     * 面板不可见（关闭 / 切到别的面板）或脱离窗口时停掉闪烁。
+     *
+     * 本单不改 `IspeechImeService`，所以不能指望服务在关闭时回调面板；面板自己收口，
+     * 避免关闭后 Handler 还每 500 ms 往一个不可见的 View 上翻转可见性。
+     */
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (changedView === this && visibility != View.VISIBLE) stopCaretBlink()
+    }
+
+    override fun onDetachedFromWindow() {
+        stopCaretBlink()
+        super.onDetachedFromWindow()
+    }
+
+    private fun stopCaretBlink() {
+        caretHandler.removeCallbacks(caretBlink)
+        if (::caret.isInitialized) caret.visibility = View.INVISIBLE
+    }
 
     // ── 过滤 ──
 
@@ -257,12 +343,12 @@ class QuickPhrasePanel @JvmOverloads constructor(
         // 只算一次过滤结果：标题行与列表共用，避免重复计算 id 哈希。
         val results = filtered()
         // 搜索框展示当前关键词（关键词来自软键盘，与服务同屏，搜索框本身不弹键盘）。
-        // 有关键词时尾部带一个光标「|」，并显示 ✕ 清空按钮，让「正在输入搜索」一眼可见。
+        // 光标是独立的 [caret] 视图，位置由 [cursorIndex] 决定，**不再用「|」字符贴在末尾**——
+        // 把光标画成文本的一部分正是条目 1 要修的缺陷（AC-1.9）。
         val typing = keyword.isNotEmpty()
-        searchText.text = if (typing) {
-            "$keyword|"
-        } else {
-            context.getString(R.string.quick_panel_search_hint)
+        cursorIndex = SearchCaret.clamp(keyword.length, cursorIndex)
+        if (searchText.text.toString() != keyword) {
+            searchText.setText(keyword)
         }
         searchText.setTextColor(if (typing) textPrimary else textSecondary)
         searchClear.visibility = if (typing) View.VISIBLE else View.GONE
@@ -274,7 +360,26 @@ class QuickPhrasePanel @JvmOverloads constructor(
         }
         renderPills()
         renderLanguageBadge()
+        renderCaret()
         renderList(results)
+    }
+
+    /**
+     * 把自绘光标摆到 [cursorIndex] 对应的位置。
+     *
+     * 位置不写进文本：`searchField` 按光标前的文本宽度算出 x 偏移（见 [CaretField]），
+     * 所以「光标在中间」和「文本被省略」是两件事，不会互相污染。
+     */
+    private fun renderCaret() {
+        if (!::searchField.isInitialized || !::caret.isInitialized) return
+        searchField.caretIndex = SearchCaret.clamp(filterKeyword.length, cursorIndex)
+    }
+
+    /** 开始闪烁；重复调用不会叠多个 runnable（先移除再排队）。 */
+    private fun startCaretBlink() {
+        caretHandler.removeCallbacks(caretBlink)
+        if (::caret.isInitialized) caret.visibility = View.VISIBLE
+        caretHandler.postDelayed(caretBlink, caretBlinkMs)
     }
 
     /** 搜索框右侧「中/英」徽标：当前态用主题色，另一态变灰（与键盘键面同一套语义）。 */
@@ -615,25 +720,50 @@ class QuickPhrasePanel @JvmOverloads constructor(
     }
 
     /**
-     * 搜索栏：`🔍` + 关键词（无关键词时显示占位文案）+ `中/英` 状态徽标 + `✕` 清空按钮。
+     * 搜索栏：`🔍` + 关键词（无关键词时显示占位文案）+ 自绘光标 + `中/英` 状态徽标 + `✕` 清空按钮。
      *
      * 与软键盘同屏：关键词由软键盘字母键经 [setKeyword] 流入并即时过滤
      * （完全 / 前缀 / 包含 / 拼音首字母四档智能联想），所以这里不弹系统键盘。
      * 整行是**可聚焦容器**：打开面板时服务调用 [requestSearchFocus] 把输入焦点落在搜索框，
      * 获得焦点时描一圈主题色（见 [searchBoxBackground]），让「焦点在哪」可见。
      * 右侧 `✕` 是独立可点子 View，只回调 [onClearKeyword]（服务清空关键词），不会触发上屏。
+     *
+     * 光标是独立的 [caret] 视图，位置按 [cursorIndex] 在文本里的宽度算（见 [CaretField]）；
+     * 它既不抢焦点、也不写进文本，所以「光标在中间」既不会被系统光标覆盖，
+     * 也不会退化成「末尾多一个 `|` 字符」。
      */
     private fun buildSearchBox(): View {
         val icon = ImageView(context).apply {
             setImageResource(R.drawable.ic_search)
             scaleType = ImageView.ScaleType.CENTER
         }
-        searchText = TextView(context).apply {
+        searchText = EditText(context).apply {
             textSize = 14f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 0)
+            background = null
+            isSingleLine = true
+            // **不抢 Android 焦点**（本单唯一不能妥协的一条）：这是 IME 自己窗口里的控件，
+            // 一旦 requestFocus 系统会把它当成新的输入目标，触发输入法切换 / 页面跳转，
+            // 按键还会被它吞掉，表现为「只能打英文、打着打着跳到别的页面」。
+            // 输入统一由服务侧 handleSoftKey 路由，这里只负责显示文本，光标由 [caret] 自绘。
+            isCursorVisible = false
+            isFocusable = false
+            isFocusableInTouchMode = false
+            isClickable = false
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            showSoftInputOnFocus = false
+            setTextColor(textSecondary)
+            setHintTextColor(textSecondary)
+            hint = context.getString(R.string.quick_panel_search_hint)
         }
+        caret = View(context).apply {
+            setBackgroundColor(primary)
+            visibility = View.INVISIBLE
+        }
+        searchField = CaretField(context, searchText, caret)
         langBadge = TextView(context).apply {
             textSize = 12f
             gravity = Gravity.CENTER
@@ -649,16 +779,20 @@ class QuickPhrasePanel @JvmOverloads constructor(
             isFocusable = false
             visibility = View.GONE
             contentDescription = context.getString(R.string.btn_close)
-            setOnClickListener { onClearKeyword?.invoke() }
+            setOnClickListener {
+                onClearKeyword?.invoke()
+                requestSearchFocus()
+            }
         }
         searchRow = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(6), dp(6), dp(6))
             background = searchBoxBackground()
-            // 输入焦点常驻搜索框：键盘按键经服务进入面板关键词，焦点只是「输入目标」的可视锚点
-            isFocusable = true
-            isFocusableInTouchMode = true
+            // 「输入焦点」是面板自己的语义（描边 + 自绘光标），**不交给系统**：
+            // 两个 focusable 都关掉，避免它成为新的输入目标（见 searchText 同段说明）。
+            isFocusable = false
+            isFocusableInTouchMode = false
             isClickable = true
             contentDescription = "快捷短语搜索框"
             setOnClickListener { requestSearchFocus() }
@@ -670,7 +804,7 @@ class QuickPhrasePanel @JvmOverloads constructor(
                 )
             )
             addView(
-                searchText,
+                searchField,
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     marginStart = dp(4)
                 }
@@ -694,11 +828,12 @@ class QuickPhrasePanel @JvmOverloads constructor(
         return searchRow
     }
 
-    /** 搜索框背景：获得输入焦点时描一圈主题色边框，其余时候是普通胶囊底色。 */
+    /** 搜索框背景：面板处于输入态（[searchRow] `isSelected`）时描一圈主题色边框，其余时候是普通胶囊底色。 */
     private fun searchBoxBackground(): StateListDrawable {
         val focused = rounded(pillBg, radiusKeyDp).apply { setStroke(dp(1), primary) }
         return StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), focused)
+            addState(intArrayOf(android.R.attr.state_selected), focused)
             addState(intArrayOf(), rounded(pillBg, radiusKeyDp))
         }
     }
@@ -766,6 +901,99 @@ class QuickPhrasePanel @JvmOverloads constructor(
         orientation = VERTICAL
         setBackgroundDrawable(rounded(panelBg, 0))
         build()
+    }
+}
+
+/**
+ * 搜索框的「文本 + 自绘光标」承载视图。
+ *
+ * 为什么不把 caret 直接塞进 LinearLayout 里做兄弟节点：光标要落在**某个字符之后**，
+ * 位置取决于光标前那段文本的实际宽度（中文 / 英文 / 省略号宽度都不同），线性布局做不到。
+ * 这里把文本控件与 2dp 光标的**左偏移**都算在同一坐标系里：
+ *
+ * 1. 文本单行、超出宽度时按 [TextUtils.TruncateAt.END] 省略（`PANEL_SEED_MAX_CHARS = 20`
+ *    的上限下，中文 14sp 通常在宽度内；省略只影响极端窄屏，不影响光标索引本身）；
+ * 2. 光标 x = 光标前子串的实测宽度，再夹到可视区内（极端窄屏时不越出控件边界），
+ *    所以「光标移到中间」不用改文本、也不用 `setSelection`（`setSelection` 把光标钉在末尾
+ *    正是条目 1 要修的缺陷）；
+ * 3. 光标是 2dp 细条、高度 18dp，垂直居中对齐文本基线。
+ *
+ * 纯测量 + 布局，不持有数据、不回调服务：数据仍由 [QuickPhrasePanel] 持有。
+ */
+private class CaretField(
+    context: Context,
+    private val textView: TextView,
+    private val caret: View
+) : ViewGroup(context) {
+
+    /** 光标索引（字符位置，0 = 文本最前）。越界由调用方夹紧，这里只负责摆放。 */
+    var caretIndex: Int = 0
+        set(value) {
+            if (field == value) return
+            field = value
+            requestLayout()
+        }
+
+    private val caretWidthPx = dp(2)
+    private val caretHeightPx = dp(18)
+    private val caretGapPx = dp(1)
+
+    init {
+        // ViewGroup 基类的 generateDefaultLayoutParams() 返回 null，必须显式给参数。
+        addView(
+            textView,
+            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+        )
+        addView(
+            caret,
+            LayoutParams(caretWidthPx, caretHeightPx)
+        )
+        // 文本控件自身不再拦截触摸：整行由父容器负责「点搜索框 = 回到输入态」。
+        textView.isClickable = false
+        textView.isFocusable = false
+        textView.isFocusableInTouchMode = false
+    }
+
+    private fun dp(value: Int): Int = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_DIP,
+        value.toFloat(),
+        resources.displayMetrics
+    ).toInt()
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = View.MeasureSpec.getSize(widthMeasureSpec)
+        val heightMode = View.MeasureSpec.getMode(heightMeasureSpec)
+        // 文本宽度固定占满（减去光标与间隙）：宽度用 EXACTLY 而不是 AT_MOST，
+        // 这样 `measuredWidth` 就是可用宽度，光标贴文本末尾时不会被误夹到文本中间；
+        // 超宽由 `singleLine + ellipsize=END` 自己省略。高度按内容，父容器给 AT_MOST / EXACTLY 都收。
+        val textWidth = (width - caretWidthPx - caretGapPx).coerceAtLeast(0)
+        textView.measure(
+            View.MeasureSpec.makeMeasureSpec(textWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val contentHeight = maxOf(textView.measuredHeight, caretHeightPx)
+        val measuredHeight = when (heightMode) {
+            View.MeasureSpec.EXACTLY -> View.MeasureSpec.getSize(heightMeasureSpec)
+            else -> contentHeight
+        }
+        caret.measure(
+            View.MeasureSpec.makeMeasureSpec(caretWidthPx, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(caretHeightPx, View.MeasureSpec.EXACTLY)
+        )
+        setMeasuredDimension(width, measuredHeight)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val textLeft = 0
+        val textTop = (height - textView.measuredHeight) / 2
+        textView.layout(textLeft, textTop, textLeft + textView.measuredWidth, textTop + textView.measuredHeight)
+        // 光标 x：光标前子串的实测宽度（`TextView.paint` 与控件用同一 Typeface / textSize）
+        val prefix = textView.text.toString().take(caretIndex.coerceIn(0, textView.text.length))
+        val prefixWidth = textView.paint.measureText(prefix).toInt()
+        val maxCaretLeft = (textView.measuredWidth - caretWidthPx).coerceAtLeast(0)
+        val caretLeft = (textLeft + prefixWidth + caretGapPx).coerceIn(0, maxCaretLeft)
+        val caretTop = (height - caretHeightPx) / 2
+        caret.layout(caretLeft, caretTop, caretLeft + caretWidthPx, caretTop + caretHeightPx)
     }
 }
 
