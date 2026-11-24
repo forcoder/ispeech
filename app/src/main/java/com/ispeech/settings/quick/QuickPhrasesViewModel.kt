@@ -13,6 +13,8 @@ import com.ispeech.data.PhraseMatch
 import com.ispeech.data.PhraseSearch
 import com.ispeech.data.PhraseUsageStore
 import com.ispeech.data.RemoteKeywordRule
+import com.ispeech.data.RemoteRulesChanges
+import com.ispeech.data.RemoteRulesReload
 import com.ispeech.data.SyncRepository
 import com.ispeech.data.unescapeLineText
 import com.ispeech.di.AppContainer
@@ -75,6 +77,9 @@ data class QuickPhrasesUiState(
  * 保存时除了写盘，还会把本地增 / 改 / 删同步到 csBaby 远端（未登录则只落本地并提示）；
  * 搜索栏的关键词过滤与智能联想（拼音首字母 / 使用频次 / 收藏加权）由 PhraseSearch 负责，
  * 使用数据在 [load] 里一次性读入内存，输入时只做纯计算，不在主线程碰磁盘。
+ *
+ * 本类作用在导航栈条目上，去同步页拉完远端再返回不会重建，所以 [load] 之外还订阅了
+ * [RemoteRulesChanges]：同步写盘后当场重新读盘（VOCA-293）。
  */
 class QuickPhrasesViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -94,13 +99,21 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
         const val REMOTE_OVERRIDE_WEIGHT_BONUS = 1000
     }
 
+    /** 远端规则文件被别处（同步页）改写后的重载订阅器；重载就是再走一遍 [load]。 */
+    private val remoteRulesReload = RemoteRulesReload(RemoteRulesChanges.version, ::load)
+
     init {
         load()
+        // 本页 ViewModel 作用在导航栈条目上：去同步页拉完再返回不会重建，
+        // 靠这条订阅让「刚写盘的远端规则」当场可见（VOCA-293）。
+        remoteRulesReload.start(viewModelScope)
     }
 
     /** 读取用户文件 / 远端文件与使用记录；文件不存在时对应来源为空。 */
     fun load() {
         viewModelScope.launch {
+            // 必须在碰磁盘之前记录版本：读盘期间到来的变更才会被判定为「我还没读到」
+            remoteRulesReload.markReadStarted()
             val loaded = withContext(Dispatchers.IO) {
                 val user = parseFile(AppContainer.quickPhrasesUserFile(app), applyRemoteModeGuard = false)
                     .map { it.copy(source = QuickSource.USER) }
