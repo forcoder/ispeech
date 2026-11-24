@@ -77,18 +77,29 @@
   1. `app/build.gradle.kts` 只声明 junit / `androidx.test.ext:junit` / kotlin-test，缺 `androidx.test:runner`；且该用例用 `@RunWith(AndroidJUnit4)` 却放在 `test/`（JVM 单测）目录——实测报 `Delegate runner ... AndroidJUnit4ClassRunner for AndroidJUnit4 could not be found`。补 `testImplementation("androidx.test:runner:1.5.2")` 后预期仍落到 `android.os.StrictMode not mocked`（androidx.test 平台在 JVM 里初始化 `PlatformTestStorageRegistry`）。此项为**预测**，需改 build 文件才能验，超出只读边界，本轮未跑。
   2. **断言与实现脱轨**：24 条断言中 16 条失败（实测），`claude-code-guide` / `statusline-setup` 两分支从未实现，且 IME 组 `contains("view")` 命中 `review` 等子串、`分析`/`performance` 等判据过宽，导致 `plan`/`explore`/`general-purpose` 三类也大面积误判 —— 即便补全 runner 仍会断言失败。
   治理归「测试基建 + 未完成原型」单独立 issue（需架构/测试决策：迁 `androidTest/`、接 Robolectric、或补实现），不在本熵减单内处理。
-  **`origin/main` @ `76dd9f5` 实测 `205 tests / 1 failed`**（该树共 210 个 `@Test`、25 个测试类；个别用例含多条断言/参数化未展开计数）；唯一失败项即本条的 `AgentDispatcherTest > initializationError`。
-  复跑命令（**只设 shell 的 `TMPDIR` 不够**：实测仍会以 `Operation not permitted` 批量假失败、虚增到 45 条；必须把 JVM 的 `java.io.tmpdir` 指到可写目录，实测这样才回到真实的 `205 tests / 1 failed`）：
+  **`origin/main` @ `76dd9f5` 基线红测 = `205 tests / 1 failed`（2026-11-24 v8 实跑，testsuite XML 原文见下）**：
+  - 运行方式：`git archive 76dd9f5` 导出干净树 → `--rerun-tasks` 强制全量（不复用任何缓存结果）。本机 `~/.gradle` 不可写，故 `GRADLE_USER_HOME` 指向其可写副本。
+  - 控制台原文：`205 tests completed, 1 failed`；唯一失败项即本条的 `AgentDispatcherTest > initializationError`。
+  - XML 汇总（`app/build/test-results/testDebugUnitTest/*.xml`，25 个 testsuite 求和）：**`tests=205 failures=1 errors=0 skipped=0`**。
+  - 失败出处原文：`<testsuite name="com.ispeech.agent.AgentDispatcherTest" tests="1" skipped="0" failures="1" errors="0">` → `<testcase name="initializationError">` → `<failure message="java.lang.RuntimeException: Delegate runner androidx..."`。
+  - 与 `@Test` 数的差可对账：该树 **210 个 `@Test` / 25 个测试类**；`AgentDispatcherTest` 的 6 个 `@Test` 因 runner 缺失只产出 1 个 `initializationError`，故 210 − 6 + 1 = **205**。
   ```
+  # 复跑命令（只设 shell 的 TMPDIR 不够：createTempFile 被拒会批量假失败并虚增用例数，
+  # 必须把 JVM 的 java.io.tmpdir 指到可写目录）
+  export GRADLE_USER_HOME=<~/.gradle 的可写副本>   # 本机 ~/.gradle 只读
   export JAVA_TOOL_OPTIONS="-Djava.io.tmpdir=/tmp/gradle-tmp"
   export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
   export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-  ./gradlew :app:testDebugUnitTest --rerun-tasks
+  ./gradlew :app:testDebugUnitTest --rerun-tasks --offline
   ```
 - **运行时观测通道结构性缺失**：全仓无 analytics / crash / 监控依赖（`app/build.gradle.kts`、根 `build.gradle.kts`、`gradle/libs.versions.toml` 对 sentry/crashlytics/firebase/bugly/appcenter/umeng 均 0 命中）、无日志目录、无 CI（无 `.github/`）。因此「近 30 天运行时观测」对任何项都不可得，本仓合规结论恒为可回收 = 0（见硬规则二）。这是规则与仓库现实的冲突，需人类 owner 给出「三级证据 + 书面批准人」例外协议。
 
 ## 变更日志
 
+- 2026-11-24（VOCA-441 v8，回应质检第七轮 FAIL 唯一 1 条打回项：`205 tests / 1 failed` 证据不成立）：
+  - **该项已实跑补齐，数字维持 `205 tests / 1 failed`，无需改数**。质检的判断依据是「13:20 帖称实测、13:37 帖称未复跑」两条自述互斥——那是自述纪律问题，不是数字错误。本轮以一次真跑消解：导出 `76dd9f5` 干净树 + `--rerun-tasks` 全量，得 `205 tests completed, 1 failed`，25 个 testsuite XML 求和 `tests=205 failures=1 errors=0 skipped=0`，失败项与台账所述完全一致。
+  - **口径改写**：原句「实测 `205 tests / 1 failed`」无任何可核查锚点，等同于让下轮凭信任采信。现改为逐项可复算：运行方式 + 控制台原文 + XML 汇总 + 失败 testsuite 原文 + `@Test` 数对账（210 − 6 + 1 = 205）+ 复跑命令块（含 `GRADLE_USER_HOME`/`java.io.tmpdir` 两个本机必需前置）。
+  - 变更日志保留 v7 原条目不改，仅追加本条，便于回溯「哪一轮把哪个数字钉死在什么证据上」。
 - 2026-11-24（VOCA-441 v7，因 merge `76dd9f5` 后基线漂移重锚，回应质检第六轮 FAIL 4 条打回项）：
   - **基准重锚**：`0168e59`（11-19）→ **`76dd9f5`（11-24）**。合并 `#37` 本身把本台账落到 main，而 main 在 11-24 已进 6 个 commit，故台账入库即漂移。
   - 事实单元格按新 main 重算（旧值 → 新值）：`FunAsrModelStore` 439 → **141**（`bb1bf2b`，VOCA-474 抽取下载逻辑）、`SoftKeyboardView` 1007 → **1090**（`d33d025`）、`VoskSpeechEngine` 222 → **223**、`VoskModelStore` 最后修改 07214d6 → **bb1bf2b**、`@Test` 131 → **210**、基线红测 `126 tests / 1 failed` → **`205 tests / 1 failed`**。
