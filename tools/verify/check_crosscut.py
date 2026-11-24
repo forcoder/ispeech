@@ -28,6 +28,9 @@
 13. 联想词上屏去重（VOCA-121）：AssociationCommit 规则 -> 服务 pickCandidate 联想分支接线 ->
     规则本身用 Python 复刻跑用例（「你」+「你好」不能变「你你好」；
     多字候选「指导老师」+「师专」不能变「指导老师师专」）
+14. 词组自学习（VOCA-65 条目 3 / ADR-0001）：PhraseCodeDeriver / PhraseLearningTracker 纯函数
+     -> WubiEngine 反向索引 -> 服务接线（onCommit / onInterrupt / reset / onUpdateSelection）
+     -> 写盘线程与学习开关
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -1657,10 +1660,19 @@ def check_cell_dict_chain() -> None:
     )
     check(
         "internal const val CELL_DICT_WEIGHT = 80_000" in cell_engine
-        and "UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE" in cell_engine
+        and "UserDictMode.WUBI -> entryKindOf(text)" in cell_engine
         and "UserDictMode.PINYIN -> LookupKind.PINYIN" in cell_engine,
-        "权重 8 万（让位用户词 / 压过系统词），多字条目走 WUBIPHRASE（不混入快捷短语组）",
+        "权重 8 万（让位用户词 / 压过系统词），档位与用户词库共用 entryKindOf",
         f"{rel(CELL_DICT_ENGINE)} 权重或档位映射缺失",
+    )
+    # 共用判定的落点在 UserDictStore.entryKindOf：按码点判定，多字走 WUBIPHRASE。
+    # 候选条按「快捷短语 → 单字 → 词组 / 句子」分组（CandidateRanking.tier），档位写错
+    # 会让学到的词混进快捷短语组，所以这条必须与 VOCA-185 的分组口径一起守住。
+    check(
+        "if (codePointLength(text) == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE"
+        in read(USER_DICT_STORE),
+        "entryKindOf 按码点把多字条目归 WUBIPHRASE（候选条分组前提）",
+        f"{rel(USER_DICT_STORE)} entryKindOf 档位与候选条分组不一致",
     )
     check(
         100_000 > 80_000 > 65_535 > 9_999,
@@ -1929,8 +1941,8 @@ def check_association_commit() -> None:
         "pickCandidate 未把光标前文本作为兜底锚点，宿主重启输入连接后仍可能重复",
     )
     check(
-        "commit(text, allowAssociation = false)" in body,
-        "联想词上屏后不再接续联想（沿用原语义，只改上屏文本）",
+        "allowAssociation = false" in body and "CommitSource.ASSOCIATION" in body,
+        "联想词上屏后不再接续联想，并标注 ASSOCIATION 来源（沿用原语义，只改上屏文本）",
         "pickCandidate 联想分支的上屏调用被改动，需人工确认",
     )
 
@@ -1988,6 +2000,70 @@ def check_association_commit() -> None:
     )
 
 
+
+# ═════════════════════════════════════════════════════════════
+# 13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：纯函数 + 接线 + 写盘线程
+# ═════════════════════════════════════════════════════════════
+
+def check_phrase_learning() -> None:
+    service = read(SERVICE)
+    deriver = read(JAVA / "engine" / "PhraseCodeDeriver.kt")
+    tracker = read(JAVA / "engine" / "PhraseLearningTracker.kt")
+    wubi = read(JAVA / "engine" / "WubiEngine.kt")
+    check(
+        "internal object PhraseCodeDeriver" in deriver
+        and "fun derive(first: String, second: String" in deriver
+        and "fun isSingleCjk(text: String)" in deriver,
+        "PhraseCodeDeriver 为纯函数对象（无 Android 依赖）",
+        f"{rel(JAVA / 'engine' / 'PhraseCodeDeriver.kt')} 缺少纯函数判定入口",
+    )
+    check(
+        "android." not in tracker and "import com.ispeech.data.codePointLength" in tracker,
+        "PhraseLearningTracker 零 Android 依赖（可 JVM 单测）",
+        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 引入了 Android 依赖",
+    )
+    check(
+        "const val LEARN_WINDOW_MILLIS = 5_000L" in tracker
+        and "private val windowMillis: Long = LEARN_WINDOW_MILLIS" in tracker,
+        "时间窗 W 是构造参数（默认 5 s），非写死",
+        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 时间窗未参数化",
+    )
+    check(
+        "fun fullCodeOf(char: String): String?" in wubi and "fun hasWord(word: String): Boolean" in wubi,
+        "WubiEngine 提供 fullCodeOf / hasWord（推导与「系统已有不学」）",
+        f"{rel(JAVA / 'engine' / 'WubiEngine.kt')} 缺少反向索引接口",
+    )
+    check(
+        "phraseTracker.onCommit(text, source)" in service
+        and "phraseTracker.onInterrupt()" in service
+        and "phraseTracker.reset()" in service,
+        "服务侧三个 tracker 调用点（onCommit / onInterrupt / reset）齐全",
+        f"{rel(SERVICE)} 词组学习接线不全",
+    )
+    check(
+        "override fun onUpdateSelection(" in service
+        and "isSelfCausedSelectionChange(newSelStart, lastKnownCursor, selectionTolerance)" in service,
+        "AC-3.4 光标分支：新增 onUpdateSelection 并走自因过滤",
+        f"{rel(SERVICE)} 缺少 onUpdateSelection 覆写或自因过滤",
+    )
+    phrase_region = function_region(service, r"private fun learnPhrase\(decision: PhraseLearningDecision\)")
+    check(
+        "serviceScope.launch(Dispatchers.IO)" in phrase_region,
+        "AC-3.11 词组写盘走 Dispatchers.IO",
+        f"{rel(SERVICE)} learnPhrase 未走 IO 线程（主线程会 ANR）",
+    )
+    check(
+        "if (!settings.learning)" in phrase_region,
+        "AC-3.8 复用「用户词频学习」开关，未新增设置项",
+        f"{rel(SERVICE)} learnPhrase 未检查 settings.learning",
+    )
+    check(
+        "store.record(decision.code, decision.text, UserDictMode.WUBI)" in phrase_region,
+        "词组写入 wb 用户词库（复用 record，格式不变）",
+        f"{rel(SERVICE)} 词组未写入 wb 库",
+    )
+
+
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
     print("-- 1. LookupKind（WUBIPHRASE / PINYIN）--")
@@ -2016,6 +2092,8 @@ def main() -> int:
     check_candidate_style()
     print("-- 13. 联想词上屏去重（VOCA-121）--")
     check_association_commit()
+    print("-- 14. 词组自学习（VOCA-65 条目 3）--")
+    check_phrase_learning()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

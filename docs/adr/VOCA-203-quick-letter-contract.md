@@ -1,7 +1,7 @@
 # ADR-0002：快捷字母长度、本地-远端同 trigger 所有权、同步回写安全线（VOCA-203/S1）
 
-- **状态**：Accepted（人类 qiaozhou 于 2026-11-15 在 VOCA-206 批示「合并」；§11 的 6 项按本文推荐口径执行，如有异议以评论为准。进入 main 仍走统一合并窗口。阶段 2 实现 VOCA-207 以本文唯一输入为准）
-- **决策日期**：2026-11-14（2026-11-15 修订：补 §7.3 与 C1-2 的 `check_phrase_csv_import.py` 口径）
+- **状态**：Accepted（人类 qiaozhou 于 2026-11-15 在 VOCA-206 批示「合并」；§11 的 6 项按本文推荐口径执行，如有异议以评论为准。进入 main 仍走统一合并窗口。阶段 2 实现 VOCA-207 以本文唯一输入为准。）**第二次修订（C3-5′ / C3-11）状态 = Proposed**：由架构师在 VOCA-207 评审中裁决，随实现一并在合并窗口由人类确认；若人类否决，退回原文（同码被占时走 create）并在 §11 记录理由。
+- **决策日期**：2026-11-14（2026-11-15 第一次修订：补 §7.3 与 C1-2 的 `check_phrase_csv_import.py` 口径；2026-11-15 第二次修订：应答 VOCA-207 实现追问，C3-5 改为「映射失效即视同无映射」（C3-5′），新增 C3-11 软删集合口径与 §7.1 两条脚本断言）
 - **决策人**：架构师（agent `e7ea905a-48f9-4dc9-86d5-32346dc237da`，代 VOCA-203 用户 4 张标注截图）
 - **关联 issue**：VOCA-206（本 ADR）→ VOCA-203（父）；下游 VOCA-207（实现）、VOCA-208（回归与 go/no-go）
 - **关联既有文档**：`docs/quick-phrase-enhancement.md` 12.3 / 12.4 / 12.5 / 12.6、`docs/adr/VOCA-65-phrase-learning.md`（格式与编号前例）
@@ -137,7 +137,7 @@ main `tools/verify/check_quick_trigger.py:70` 有 `UNGUARDED_MODES = {"exact", "
 ### 回滚方式
 
 长度上限是单一常量 + 一处文案，回滚 = 把 `MAX_TRIGGER_LENGTH` 改回 4 并还原 `quick_trigger_error`。
-**已保存的 >4 位条目不会被回滚删除**（读取侧从不校验长度，C1-5），回滚只影响新建/编辑入口，无数据风险。
+**已保存的 >4 位条目不会被回滚删除**（读取侧从不按长度丢弃条目，C1-5；云端存量行只按 C1-6b 收严匹配方式，条目本身不删），回滚只影响新建/编辑入口，无数据风险。
 
 ---
 
@@ -236,14 +236,31 @@ when {
 | C3-2 | 无映射 + keyword 命中 + 正文一致 → 只补映射，不推送（现状 `:122-123` 保留） |
 | C3-3 | 无映射 + keyword 命中 + 正文不一致 → 判为 **conflict**：不推送、不补映射、不计 `applied`；`RuleSyncReport`（`:30-42`）新增 `conflicts: Int`；冲突条数必须出现在同步文案里，且**不能复用** `quick_synced_partial`（那条语义是「后端不支持修改/删除」，不是「有冲突」） |
 | C3-4 | 有映射 + 指纹变化 → 允许推送更新（这才是「用户改了本地自己拥有的规则」） |
-| C3-5 | 有映射 + 远端已无该 id → 走 create 分支（现状 `remoteById[it.id]` 为 null → `target == null` 已覆盖，保持） |
+| C3-5 | **（2026-11-15 修订，见下节）** 映射指向的 id 已不在远端返回集内 ⇒ 该映射**即失效，视同无映射**，按 C3-1／C3-2／C3-3 重新分类：码无人占用 → create；同码被占且正文一致 → 只把映射改绑到占用者 id、不推送；同码被占且正文不一致 → conflict，**不得新建同码重复规则**。失效映射在任一分支都要改写或清除，表里不留死凭证 |
 | C3-6 | 新建云端规则仍走 `POST api/rules`，拿到非空 id 才登记映射（现状 `:116` 保持） |
 | C3-7 | 「以本地为准并更新云端」只能由**用户显式动作**触发（决策 2 的冲突动作，或本地编辑器保存自己拥有的规则）；`pushLocalRules` 不得自行进入该分支 |
 | C3-8 | `toRuleRequest` / `toPushRule` 不再硬编码 `enabled = true`（`:202`/`:212`），改传 `null`。本地规则文件里没有 enabled 语义，**本地不知道就别写** —— 同一原则的延伸。现状会把远端已禁用的规则悄悄启用 |
 | C3-9 | 冲突清单落盘 `filesDir/quick_phrases_conflicts.txt`（`trigger \t remoteId \t remoteFingerprint \t detectedAt`），使冲突跨多次同步可追踪；正文一致后该条自动移出 |
+| C3-11 | **（2026-11-15 新增）** 参与身份判定的远端集合 = `listRules` 返回中 `deleted == false` 的条目；`remoteById` 与 `remoteByKeyword` 必须由这一个集合构建，软删条目既不占码也不算所有权 |
 
 **能否不依赖后端改动闭环**：能。C3-1…C3-9 全部只用现有 `listRules` / `sync/push` / `api/rules` 与本地映射表，
 不需要 csBaby 提供新字段或新路由。后端能改进的两点（`updated_at`/版本号、可用的 PUT/DELETE）列为**建议但不阻塞**，见 §11 项 3。
+
+### 修订（2026-11-15）：映射失效 + 同码被占怎么判（VOCA-207 追问，原 C3-5 未覆盖）
+
+**背景**：原 C3-5 把「映射 id 消失」等价于「码空闲」，直接 create。实现方追问的组合是 —— id 消失**且**云端存在别人建的同码规则。该分支不写别人的 id（安全线没破，单测已锁），但代价是云端留下两条同 `keyword` 规则。
+
+**决策**：判 **conflict，不上传、不新建重复码**（下表 C3-5 即修订后口径，评审中引用作 **C3-5′**）。理由按权重：
+
+1. **设备表达不了「同码两条规则」**。C2-1 把归一化 trigger 定成本地唯一主键，`QuickPhraseCodec.parse` 同 trigger 只留一条；`remoteByKeyword` 用 `associateBy` 建索引，同码时**后者覆盖前者**，命中哪条取决于服务端返回顺序。用 create「解决」冲突，只是把它从「可发现的冲突」换成「按顺序二义的静默数据」——本节目的正是让前者发生。
+2. **映射是一条会失效的凭证，不是永久产权**。远端不再返回该 id 时，「我有映射」携带的信息量为 0，剩下的事实与「无映射 + 同码被占」逐字相同，因此走同一条分类路径；C3-1 的保护面不缩（把「无映射记录」改述为「无有效映射」）。
+3. **不损失任何能力**。conflict 之后用户仍有出口：弹窗里的「采用云端正文」/「以本地为准并更新云端」（决策 2 的两个动作），以及在编辑器里手动把本地条目的触发词改成别的码 —— 改完这条就变成「无人占用」，下一轮同步自然走 create。三条出口的代价各不相同，但**由用户选**，而不是由服务端返回顺序选。
+
+**否决的备选**：A 保持 create（原文）—— 见理由 1，且把取舍推给了返回顺序；C 同步路径里自动换码 create —— 静默改用户肌肉记忆里的触发词，而该能力已经是冲突弹窗里的显式选项，不该在后台替用户做。
+
+**代价**：该 trigger 在用户处置前不会上云（安全线一律是「少做事」的变更），界面必须把它算进冲突计数并给文案（C3-3 已具备）。
+
+**重新考虑的条件**：csBaby 提供 `keyword` 唯一约束，或提供 `updated_at`/版本号使同码两条可排序裁决（§11 项 3）时，A 才重新可行。
 
 ### 回滚方式
 
@@ -297,8 +314,9 @@ when {
 | C1-2 | 校验只有**一个**实现，Screen / ViewModel / SyncRepository 都委托它 | `app/src/main/java/**` 内 `in 2..4` 字面量出现次数 == 0；`isValidShortcutTrigger` 定义处 == 1。`tools/verify/**` 里的 `2..4` 只允许出现在断言**文案**中，不得充当判定值（否则 `check_phrase_csv_import.py:641` 自己就把这条断言判红，见 §7.3） |
 | C1-3 | `setRemoteShortcut` 非法输入不静默 return | main `:309` 的 `return` 改为可呈现的错误（或调用方先校验），有对应单测 |
 | C1-4 | 长度不改变 mode：编辑器不因 >4 位改写用户选的匹配方式 | 输入 5 位 trigger 后 mode 字段值不变（单测） |
-| C1-5 | 读取侧从不校验长度、从不截断 | 13 位 trigger 的规则行仍完整解析、完整参与匹配（`QuickPhraseEngine.fromText` 单测） |
+| C1-5 | 读取侧从不按长度**丢弃 / 截断**条目：不丢行、不截 `trigger`、不截正文。唯一例外是 C1-6b —— 对云端落盘文件可以按长度把 `PREFIX` / `CONTAINS` **收严为 `EXACT`**，那是重新解释匹配方式，不是校验长度判死；`trigger` 本身仍不校验、不截断，`trigger` / `label` / `content` / `weight` / `kind` 一律原样 | 13 位 trigger 的规则行仍完整解析、完整参与匹配（`QuickPhraseEngine.fromText` 单测）；`fromRemoteText` 对同一行只改 mode，trigger 长度与正文逐字不变；`check_phrase_csv_import.py` 按语义断言读盘侧没有「按长度 `continue` / 丢弃 / 截断」的分支（不是按 token 一刀切，否则 C1-6b 的合法收严会被误判成 C1-5 违规）；**字面量阈值的定长截断**（`fields[0].take(4)` / `substring(0, 4)` / `drop(5)`）自 VOCA-454 质检打回项 1 起也由本条静态检查直接判红 —— 在那之前它只认「长度判据与丢弃语句落在同一缩进块」，`take(4)` 一个长度 token 都不含，实测报绿；**该漏点的第二形态**：截断长度只要不写成字面量就抓不到 —— 先存进局部变量再 `take(n)`、或收敛成具名常量再 `take(TRIGGER_TRUNC)`，架构师复审实测两种都是 `48/0` 绿（实参是变量时与候选条数上限 `out.take(limit)` 静态无法区分，硬判会误伤）；①b 判的是**字面量**，作用域是 `QuickPhraseEngine.kt` / `QuickLocator.kt` **整份文件** + `QuickPhraseCodec` **整个 object**（VOCA-454 质检打回项 1 复审：第三处此前只是 `QuickPhrasesViewModel.kt` 里 parse 之后 1500 字符的窗口，「三处都整份文件」把覆盖率说大了 —— 那份文件是 UI 文件；现按大括号配平取 object 全体 —— `QuickPhrasesViewModel.kt:567-623`，2558 字符 / 57 行；旧窗口那 1500 字符是它的**真子串**（结构性无覆盖回退），object 体比旧窗口多 1058 字符 / 24 行，即旧窗口尾之后还多出 924 字符 / 19 行，新进门的作用域的成员是 `format` 尾部、`sanitizeField`、`sanitizeContent`（`unescapeLineText` 不是 object 成员 —— 定义在 `UserDictStore.kt:387`，object 第 580 行只是调用它，旧窗口内就已覆盖），object 之外的 UI 侧代码不在作用域内，object 挪出该文件时存在性断言先红（fail-closed，不会静默变绿），命中按文件绝对行号报），作用域内与 trigger 长度无关的 `out.take(8)` 也会红，规定出口是收敛成具名常量 —— 常量化只关掉静态那半，真在裁 `trigger` 时 `QuickPhraseLegacyRemoteRowTest` 实测仍 5 条 FAILED，不是绕过；这几种形态与下面的布尔函数写法同由行为单测兜；**已知漏点**：把长度判定抽成独立布尔函数再 `if (helper(t)) continue` 的间接写法，本条静态检查抓不到（豁免边界按返回类型划，`Boolean` 落在边界外），兜它的是 `QuickTriggerReadSideTest`（`entries.single()` / 条目数断言 / 13 位敲全仍命中）与 `QuickPhraseLegacyRemoteRowTest` ② 这两份**行为**单测，不是静态门禁 —— 改读取侧结构时这两份必须跟着跑 |
 | C1-6 | 覆盖条目（`setRemoteShortcut` 新建）mode 规则：`len ≤ 4 → PREFIX`，`len > 4 → EXACT` | 5 位简写生成的覆盖条目 `mode == EXACT`；4 位的仍 `== PREFIX`。与 main `UNGUARDED_MODES = {exact, regex}` 同口径 |
+| C1-6b | **读盘侧同源守卫（2026-11-17 VOCA-423 追加；同日 VOCA-454 按质检打回项改稿）**：解析 `filesDir/quick_phrases_remote.txt` 时，**规则文件第 1 字段的原样长度**（不 trim、不小写折叠）`> 4` 且**生效 mode** ∈ `{PREFIX, CONTAINS}` 的行按 `EXACT` 生效。「生效 mode」指 `QuickMatchMode.parse` 之后的值，故声明 `contains` / `fuzzy` / `~` 与缺省第 4 字段（→ `PREFIX`）都在守卫内；`EXACT` / `REGEX` 不受守卫，与 `check_quick_trigger.py` 的 `UNGUARDED_MODES = {exact, regex}` 同口径。阈值 4 的**单一来源是 `QuickTrigger.WUBI_REACHABLE_LENGTH`**。`IspeechImeService.MAX_CODE_LENGTH` 是 `private`（`check_quick_trigger.py:946` 单独读它），引擎侧引用不到；但 `QuickPhraseEngine.WUBI_REACHABLE_TRIGGER_LENGTH` 与 `CsBabyClient.WUBI_REACHABLE_TRIGGER_LENGTH` 是**待收敛的副本**，收敛前本条的「拉取侧 ≡ 读盘侧等价」只由单测 `QuickPhraseLegacyRemoteRowTest` 兜，没有跨脚本断言兜（已知缺口，承载单待收敛）。副本值任何变动必须同时改本条并重审。口径与拉取侧 `CsBabyClient.remoteMatchMode`（VOCA-391 / PR #19）等价且幂等 —— **两边都按原样字段长度计**，已落盘的 `EXACT` 再读仍是 `EXACT`。把 `guardedRemoteMode` 改为委托 `QuickTrigger.mayMisfire`（归一化口径）**列为待确认，不是等价改写**：带尾随空格的畸形行 `"dtws \t…"` 归一化后长度 4 会逃出守卫，而 `QuickPhraseEngine` 的 PREFIX 是双向 `startsWith`，敲 `dtws` 仍能顶出长正文；写侧 `SyncRepository` 不 trim，这种行可以落盘。要收成归一化口径必须先改代码 + 补一条带尾随空格的单测，再动本条文字。守卫只重解释匹配方式，`trigger` / `label` / `content` / `weight` / `kind` 原样，磁盘文件不回写。作用域限**云端落盘文件**：用户文件的 mode 是用户在编辑器里选的（C1-4 / C1-9），CSV 导入写的也是用户文件（`PhraseCsvImport.kt:189`，`len==1→EXACT`、其余 `PREFIX`），内置 assets 的 `>4 位 + prefix` 是已裁封闭例外（C1-10，实测 `sogou_phrases.txt` 25 行、18 条 5 位 `prefix`），三者都不受本条约束；只有云端文件的 mode 由客户端映射决定、无独立语义。**已知偏差**：设置页卡片仍按磁盘声明的 mode 展示（`QuickPhraseCodec.parse`），归口 VOCA-207 的 C1-6 / C1-7 同批改；**认领记录（2026-11-18，VOCA-454 质检复跑回帖）**：该偏差由前端工程师接手，修复仍随 VOCA-207 的 C1-6 / C1-7 同批落地，不在本门禁单范围内；本条只约束引擎生效口径与快捷短语面板 | 单测 `QuickPhraseLegacyRemoteRowTest`：①存量 `dtwsl\t…\tCONTAINS` 行走 `fromRemoteText` 后五笔态敲 `dtws` 无快捷候选；②敲满 `dtwsl` 仍命中 245 字正文；③`dtws` 及以内行为不变；④`fromText` 仍原样返回声明的 mode（C1-5 不回归）；⑤缺省与 `fuzzy` 同样降级；⑥`exact` / `regex` 行不受守卫。**接线断言（C1-6b 不可分割的一部分）**：`tools/verify/check_phrase_csv_import.py` 断言云端读取链路的解析调用是 `fromRemoteText` —— PR #26 独立形态锁「`openRemote(...)` 的解析走 `fromRemoteText`」，并入 VOCA-207 的 `ruleGroups()` / `addGroup(input, source)` 形态后锁「`source == QuickSource.REMOTE` 分支不得走 `fromText`」；①–⑥ 只调函数，守卫退化成无人调用的正确函数时**只有这条会红**。该断言的求值面是抠掉注释与字符串字面量后的代码（`code_only()`，单遍 Kotlin 词法扫描，认**嵌套块注释**与**三引号原始串**）—— VOCA-454 质检打回项 1 第二轮实测：`parse` 里摘掉守卫调用、同函数体留一行提到守卫名的注释，此前 `48/0` 假绿，行注释 / 整行块注释 / 行尾 `/* … */` / 跨行块注释 / 字符串字面量五种形态都能绕，改后五者各自 `47/1`；第三轮延伸探针补两条同类可编译假阴性：嵌套块注释 `/* outer /* inner */ guardedRemoteMode(…) */`（Kotlin 块注释可嵌套，非贪婪正则停在第一个 `*/` 就漏出后半段）与三引号原始串 `"""x"guardedRemoteMode(…)"`（串内裸双引号把守卫名留在代码面），两者改后各自 `47/1`；第四轮质检自拟探针 N9：原始串尾随第四引号 `"""x"""" + "guardedRemoteMode(…)"`（kotlinc 取 ≥3 连引号串的**最后**三个作收尾，旧实现停在第一个三连，尾随引号漏进代码面开幻影串、把邻串里的守卫名吐回来）可编译且 `48/0` 假绿，收尾规则改成与 kotlinc 一致后 `47/1`。抠完仍然锁不住的是「调用点写在代码里、返回值却被丢弃或落在永不成立的条件里」，那一层归 ①–⑥ 的行为单测，不是静态门禁的能力 |
 | C1-7 | >4 位时 UI 给可达性提示（非阻断）；确认按钮禁用时必须显示禁用原因 | 存在 `quick_trigger_reachable_hint` 中英文案；`enabled == false` 时弹窗内可见「还差什么」（修 §0 修正 5 的归因错位） |
 | C1-8 | `MAX_CODE_LENGTH = 4`、`MAX_PINYIN_LENGTH = 12` 不变 | `check_quick_trigger.py` L8 / L9 缓冲区断言原样通过 |
 | C1-9 | 用户为 >4 位 trigger 显式选 PREFIX/CONTAINS 时允许保存，但显示误弹警示 | 存在 `quick_trigger_prefix_long_content_warn` 文案；`len(trigger) > 4 && mode ∈ {PREFIX, CONTAINS}` 时可见；与脚本 `:159` 的 warn 同级 |
@@ -324,12 +342,13 @@ when {
 | C3-2 | 无映射 + 正文一致 → 只补映射 | 单测：`created == 0`、`updates.isEmpty()`、映射表新增该 trigger |
 | C3-3 | 冲突计入 `conflicts`，不计 `applied`，不复用 partial 文案 | `RuleSyncReport` 有 `conflicts`；`quick_synced_conflict` 新文案存在（中英）；`syncTip` 冲突分支优先于 partial 分支 |
 | C3-4 | 有映射 + 指纹变化 → 允许更新 | 单测：`known[trigger] = (id, oldFp)`、正文已改 → `updates.size == 1` |
-| C3-5 | 有映射 + 远端无该 id → create | 单测：`known` 有 id 但 `remoteById` 无 → 走 create |
+| C3-5 | 映射指向的 id 已不在远端返回集内 ⇒ 视同无映射，按 C3-1／C3-2／C3-3 分类（§3 修订节） | 单测三条：①`known` 有 id、`remoteById` 无、该码无人占用 → create；②同上但云端有别人建的同码规则且正文不一致 → `creates.isEmpty()` 且 `conflicts == 1` 且 `updates.none { it.remoteId == 占用者id }`；③同上但正文一致 → `bindings` 命中占用者 id、`creates.isEmpty()` |
 | C3-6 | 只有 `rule.id` 非空才登记映射 | 现状 `:116` 的 `if (rule.id.isNotBlank())` 保持 |
 | C3-7 | 「以本地为准覆盖云端」只能由显式用户动作触发 | `pushLocalRules` 内不存在「冲突未解决即推送」的可达路径；显式动作有独立入口与单测 |
 | C3-8 | 不硬编码 `enabled = true` | `toRuleRequest` / `toPushRule` 的 `enabled` 传 `null`；`SyncRepository.kt` 内不再出现 `enabled = true` |
 | C3-9 | 冲突清单落盘且跨同步可追踪 | `quick_phrases_conflicts.txt` 格式为 `trigger \t remoteId \t remoteFingerprint \t detectedAt`；正文一致后该 trigger 移出 |
 | C3-10 | 覆盖条目绝不被当作新规则推送 | 现状 `filterNot { QuickOverride.matchesAny(...) }`（`:90-91`）保持，判定按 C2-2（trigger） |
+| C3-11 | 身份判定只看未软删的远端条目 | 单测：占码规则 `deleted = true` → 不算占用 → create 且不报冲突；映射指向软删 id 且本地正文已改 → 不进 `updates`（按软删 id 推送永远复核不过，用户会卡在「未同步」），走 create |
 
 ### 5.4 挂载与可见性
 
@@ -402,6 +421,7 @@ when {
 | `:488` | `"QuickLocator.buildQuickEngines(" in chunk and "includeLocal = enableQuick" in chunk` | 保留；**新增**断言：`loadQuickPhrases` 内 `includeLocal`/`includeRemote` 不引用输入方式（C4-1） |
 | L8 `:855-873` / L9 `:875-887` | 拼音态 5 位命中 / 五笔态打不全 | **不改**（C1-8、C4-3） |
 | 新增 M 节 | — | 冲突与回写安全线：C3-1、C3-3（`conflicts` 字段 + 新文案）、C3-8（无 `enabled = true`）、C2-3（同 trigger 折叠为 1 条）、C2-6（迁移不改写任何一侧）各一条静态断言 |
+| 新增 M 节（2026-11-15 修订追加） | — | C3-5′：`LocalRuleSyncPlan.decide` 内映射有效性判定必须先于 keyword 兜底（`known[...]?.takeIf { 远端仍返回该 id }` 一类写法），且 `creates` 不得在「同码已被占用」时产生条目；C3-11：构建 `remoteById` / `remoteByKeyword` 的列表带 `deleted` 过滤。两条都要有对应 JVM 单测（脚本只锁源码形态，语义由单测锁） |
 
 `tools/verify/check_phrase_usage.py`、`check_input_logic.py`、`check_crosscut.py`：**预期零改动**；
 若因 `MAX_CODE_LENGTH` 同名混淆被改动，视为回归，VOCA-208 需拦。
@@ -428,9 +448,10 @@ F 节的自我声明正是决策 1 要废止的那条不变量。漏改它，`to
 | 位置（行号取 main `f728231`） | 现状 | 调整为 |
 |---|---|---|
 | `:24`（模块 docstring F 项） | 「导入不破坏既有约束：手动录入仍是 2–4 位小写…」 | 口径改 2–12、单一来源 `QuickTrigger`；后半句「落盘转义仍只 CR/LF/TAB」保留不变 |
-| `:637`（`check_existing_contract_unchanged` docstring） | 「导入不能放宽手动录入的 2–4 位约束」 | 改为「导入路径不放宽**读取侧**（不截断、不校验长度，C1-5），手动录入口径与 `QuickTrigger` 同源」 |
+| `:637`（`check_existing_contract_unchanged` docstring） | 「导入不能放宽手动录入的 2–4 位约束」 | 改为「导入路径不放宽**读取侧**（不按长度丢弃 / 截断条目，C1-5；对云端文件允许按长度把 `PREFIX`/`CONTAINS` 收严为 `EXACT`，C1-6b），手动录入口径与 `QuickTrigger` 同源」 |
 | `:640-642` | 断言 `internal fun isValidShortcutTrigger(...)` 与 `"trigger.length in 2..4"` 同时存在于 `QuickPhrasesScreen.kt` | 改为 ①`QuickPhrasesScreen.kt` 内不再出现 `2..4` 字面量；②校验定义处 == 1（C1-2）。若该函数迁出 Screen，断言目标同步改指 `QuickTrigger.kt`，**不得**靠删掉整段 F 节来「通过」 |
 | `:646-647` | 断言 `QuickEntry.kt` 内 `fun matchesAny(` 存在，文案「QuickOverride 覆盖判定未被改动」 | 断言**保留**（C3-10 要求 `matchesAny` 仍在用）；文案改为「覆盖判定按归一化 trigger（C2-2）」——阶段 2 改的就是它的判定基准，写「未被改动」会在下一轮把正确修复判成回归 |
+| C1-5 读取侧断言的**判定方式**（2026-11-17 VOCA-454 追加，合并窗口门禁 DEF-4） | 按 token 一刀切：`QuickPhraseEngine.kt` + `QuickLocator.kt` + `QuickPhraseCodec.parse` 里出现 `isValidShortcutTrigger` / `MIN_TRIGGER_LENGTH` / `MAX_TRIGGER_LENGTH` / `trigger.length` 任一即 fail | 拆成两条语义断言：①**禁止**「按 trigger 长度 `continue` / 丢弃 / 截断条目」的分支，唯一豁免是返回值类型为 `QuickMatchMode` 的判定函数（C1-6b 的 mode 收严）；②**必须**有接线断言 —— `source == QuickSource.REMOTE` 的读取链路调用 `fromRemoteText`，PR #26 独立形态则锁 `openRemote(...)` → `fromRemoteText`。按 token 判会把 C1-6b 允许的收严误判成 C1-5 违规（并集树实测 `passed=45 failed=1`），而真正的「判死条目」换个等价写法反而测不到 —— 门禁要判的是意图，不是字面。落地是两条各自独立的锚点：①a 长度判据（`.length` / `*LENGTH`）与丢弃 / 截断语句落在同一缩进块；①b **字面量**定长截断 `take(<数字>)` / `drop(<数字>)` / `substring(<数字>…)`（VOCA-454 质检打回项 1 实测：`fields[0].take(4)` 一个长度 token 都不含，只挂 ①a 时门禁报绿）。仍然抓不到的是把判定抽成布尔函数再 `if (helper(t)) continue`，以及截断长度不写成字面量的形态（局部变量 `take(n)` / 具名常量 `take(TRIGGER_TRUNC)`，实测各 `48/0` 绿）—— 三者都不由这条静态检查兜，兜它的是 5.1 C1-5 行末尾那句「已知漏点」点名的两份行为单测。反向代价：①b 按字面量判，作用域是前两份文件整份 + `QuickPhraseCodec` 整个 object（第三处**不是**整份 `QuickPhrasesViewModel.kt` —— 那是 UI 文件；旧实现取的是「parse 之后 1500 字符窗口」，VOCA-454 质检打回项 1 后改为按大括号配平取 object 体（object 挪出该文件、声明名不再含 `QuickPhraseCodec`、或调用点文本不再是 `QuickPhraseCodec.parse(` —— codec 整体改名 / 拆文件 —— 三种成因都会让存在性断言先红，fail-closed，不会静默变绿），作用域外的 UI 侧 `take(8)` 不红），作用域内与长度无关的 `out.take(8)` 也会红（规定出口是具名常量）；②接线锚点 parse→守卫那半采**名字无关**写法（取本文件内返回 `QuickMatchMode` 的函数名集合），守卫等价改名不会误红；但名字无关的范围是**本文件内** —— 守卫挪出 `QuickPhraseEngine.kt`（同包另建文件、调用点与语义不变）仍会红，出口是把守卫与 parse 留在同一文件，FAIL 文案已收成中性表述，不再断言「开关是死的」；接线的三段匹配自 VOCA-454 质检打回项 1 第二轮起在 `code_only()`（单遍 Kotlin 词法扫描，抠掉注释与字符串字面量，认**嵌套块注释**与**三引号原始串**）的文本上求值 —— 此前「摘掉守卫调用 + 同函数体留一行提到守卫名的注释」实测 `48/0` 假绿，注释冒充代码是同一个函数体内的事，不需要跨函数分析就能堵；第三轮延伸探针补两条同类可编译假阴性（嵌套块注释 `/* outer /* inner */ guardedRemoteMode(…) */`、三引号原始串 `"""x"guardedRemoteMode(…)"`），改后各自 `47/1`；第四轮探针 N9（原始串尾随第四引号 + 邻串走私守卫名，`"""x"""" + "guardedRemoteMode(…)"`）同为可编译假绿，收尾按 kotlinc 取连引号串最后三个后 `47/1`；抠完仍锁不住「调用点在、返回值被丢弃」那一层，归行为单测 |
 
 新增一条跨脚本口径断言（防第三次「编辑器与校验器分裂」，即修正 4 的同一类病）：`check_quick_trigger.py` 与 `check_phrase_csv_import.py` 对快捷字母长度不得各说一套，长度判定值只从 `QuickTrigger` 取，脚本侧不再抄第二份常量。
 
@@ -463,7 +484,7 @@ F 节的自我声明正是决策 1 要废止的那条不变量。漏改它，`to
 **回滚顺序**（最小代价路径）：
 ① C3 不可单独回滚 —— 若必须回滚则整个 PR 一起回滚，并在发布说明标注数据风险；
 ② C4 可单独回滚，只影响可见性（且 main 现状已是修复态，回滚等于退回 `2a1883e` 的缺陷）；
-③ C1 可单独回滚为 4，>4 的已存条目继续有效（读取侧不校验），只是不能编辑；
+③ C1 可单独回滚为 4，>4 的已存条目继续有效（读取侧不按长度丢弃条目，C1-5），只是不能编辑；
 ④ C2 回滚需同时清掉冲突文件，否则冲突徽标会指向已不存在的判定口径。
 
 ## 10. 可观测性（新增，必须实现）
@@ -507,3 +528,4 @@ F 节的自我声明正是决策 1 要废止的那条不变量。漏改它，`to
 5. C1-7 的「禁用原因可见」是否覆盖三个弹窗 + 远端简写入口共 4 处？（是，见 6.1）
 6. C1-9 的误弹警示是否在 mode 与 trigger 长度都变化时实时重算？（是，纯计算，不读盘）
 7. `UNGUARDED_MODES`（脚本 `:70`）与 Kotlin 侧 C1-6 的判定，谁是权威？（Kotlin 侧 `QuickTrigger` 为权威，脚本断言与之对齐，不得反向让脚本定义语义）
+8. 映射指向的 id 已从远端消失、**且**同码被别的规则占用时怎么判？（2026-11-15 裁决：判冲突、不上传、不新建同码重复规则 —— 见 §3 修订节与 C3-5′。原 C3-5 的「→ create」只覆盖「该码无人占用」）

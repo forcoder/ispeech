@@ -15,6 +15,7 @@
 ```bash
 python3 tools/verify/check_static.py
 python3 tools/verify/check_input_logic.py
+python3 tools/verify/check_dist_manifest.py         # dist/SHA256SUMS 出包门禁
 ```
 
 模型源探测（需要联网，退出码非 0 = 源不可用）：
@@ -49,6 +50,52 @@ python3 tools/verify/check_model_host.py --self-test        # 不联网验证判
 | 3 | 键盘布局 | 解析 `KeyboardLayouts.kt` + `KeyDef.kt` + `EmojiData.kt`：`KeyAction` 使用值 ⊆ 声明值；`KeyboardLayoutKind` 四值在 `pages()` 的 `when` 里全覆盖；EmojiData 类别数 >= 6、每类 >= 24、全局去重；每个 `KeyboardPage` 的行数与每行键数（字母页应为 4 行 = 10/9/9/5） |
 | 4 | 标点转换 | 解析 `Punctuation.kt` 的 `chineseMap`，用 Python 复刻 `PunctuationConverter.convert`（成对引号 + 先映射后全角）并断言 6 组用例 |
 | 5 | 候选排序 | 用 Python 复刻 `CandidateRanking` 比较器 + `UserDictEngine` 的 `+100000` 加成，验证同码下用户词排在系统词前，并校验「精确码优先 → 应用<短语<五笔 → 权重降序」 |
+
+## check_dist_manifest.py —— 随包校验清单门禁（VOCA-400）
+
+校验 `dist/SHA256SUMS` 与包字节是否一致，并把它接进出包流程。口径的出处是
+`docs/adr/VOCA-400-dist-checksum-manifest.md`（ADR-0003），这里只列判据。
+
+| # | 检查项 | 为什么 |
+|---|--------|--------|
+| 1 | 每行格式合法（64 位小写 hex + 两空格 + 路径），路径不越出 `dist/` | 手写 / 编辑器折行造成的坏行会被 `shasum -c` 静默跳过 |
+| 2 | 同一路径不重复 | `>> SHA256SUMS` 追加的后果：两行并存时只认后一行，前一行永久静默 |
+| 3 | 每条记录指向的文件真实存在 | 防止「包已删除、记录还在」的孤儿行 |
+| 4 | 每条记录的 sha256 == 实际字节 | 等价 `cd dist && shasum -a 256 -c SHA256SUMS`；main 上曾有 2 条 FAILED |
+| 5 | **穷尽覆盖**：`dist` 下每个该记录的 APK 都有一行 | 只校验「清单里有的」，漏记的包一声不吭 —— `_archive/` 三个历史包就是这么漏掉的 |
+| 6 | 未跟踪且 >100 MB 的包不入册即中止 | 记了也推不上 GitHub（GH001），清单会指向仓库里永远不存在的字节。已跟踪超限只 `WARN`（归 VOCA-292），无 git 元数据时同样只 `WARN` 并写明「跟踪状态未知」—— 分不清就不抢判定权，也不谎称已跟踪 |
+
+「该记录的集合」= `git ls-files --cached --others --exclude-standard -- dist` 里的 `*.apk`
+（已跟踪 + 会被 `git add -A` 扫进来的），因此刚 `cp` 进 `dist/` 还没入库的新包立刻要求记录；
+`.gitignore` 排除的本机残留不强加。无 git 元数据时（`git archive` 解出来的包）退回目录扫描。
+
+**这条口径有一个必须知道的边界**：`deploy.sh` 不带 `--release` 时的产物名
+`dist/ispeech-debug-<versionName>-<ts>.apk` 正落在 `.gitignore:43` 里，所以它**既不被要求入册、
+`--regen` 也不会记它** —— 第五条门禁的「归档即记录」只对 `--release` 路径成立。
+debug 包归手机自查用出包日志里的 `sha256=` 行 + 设备侧 `dumpsys package`，清单答不了它。
+理由与待拍板冲突见 ADR-0003 D2。
+
+```bash
+python3 tools/verify/check_dist_manifest.py           # 校验；任一 FAIL 退出码 1
+python3 tools/verify/check_dist_manifest.py --regen   # 按当前字节整份重写清单（唯一写入路径）
+python3 tools/verify/check_dist_manifest.py --self-test  # 8 场景双向验判定逻辑本身，不动仓库（超限那条把两个分支各跑一次）
+```
+
+**出包门禁（第五条）**：`tools/deploy/deploy.sh` 在 ③ 校验段调用它，位置在 `--skip-verify`
+分支**之外** —— 跳过这项等于允许带着一份会说谎的清单出包，而「会说谎」正是 VOCA-400 的原始故障。
+⑤ 归档段在 `cp` 之后立即 `--regen`（重写 + 整份回读校验，FAIL 即中止出包），随后按本包是否真进了
+清单分支打印：入册报「本包已入 dist/SHA256SUMS：<路径>」，被 `.gitignore` 排除则 `[warn]` 明说未入册
+并给出自查方式。**不会对着一个没记录的 debug 包说「已记录」。**
+
+超限那条断言的是**输出行的级别**，不只是退出码：`git add` 后（已跟踪）必须出现一行 `WARN:` 且 `rc=0`，
+`git rm --cached` 后（未跟踪）必须出现一行 `FAIL:` 且 `rc=1`。上一版只比退出码，结果「已跟踪只 WARN」
+在机器上打的其实是一行 `PASS`（连「超限」两个字都没有），文案与机器分叉了一整轮 —— 只比 `rc` 的自测
+挡不住这种漂移，所以本条把两个分支的级别都验上。**同理**：演练脚本自己也要断言「被检对象真的执行了」，
+上一版回滚演练用 `git revert --no-edit -q`（`-q` 不是 revert 的选项）导致命令直接吐 usage，而判定语句
+只比 `git diff` 就打印「逐位一致」—— 假演练给出过假 PASS，读数见 ADR-0003 §5.3。
+
+要改这项门禁或它的接线，先看 ADR-0003 **§5**（回滚两种粒度 + 触发阈值 + 实测时长）与 **§7**
+（发布顺序、灰度等价物、成功/失败判定、通知对象）—— 它拦在出包链路上，止血时不必整包 revert。
 
 ## check_model_host.py —— 模型托管源可用性（**需联网**）
 

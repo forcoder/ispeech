@@ -20,6 +20,12 @@ class WubiEngine(text: String) : LookupEngine, AssociationSource {
     /** 首字 -> 以该字开头的词组（权重降序，每字最多 [ASSOCIATION_PER_CHAR] 条），供词语联想使用。 */
     private val phrasesByFirstChar: Map<Char, List<DictEntry>>
 
+    /** 单字 -> 「全码 + 权重」候选（同字多条记录时按 [FULL_CODE_RANK] 淘汰），见 [fullCodeOf]。 */
+    private val byText: Map<String, Pair<String, Int>>
+
+    /** 全部词条文本，供「系统词库是否已有该词」的精确查询使用。 */
+    private val knownTexts: Set<String>
+
     override val displayName: String = "wubi86"
 
     /** 词条总数。 */
@@ -37,6 +43,10 @@ class WubiEngine(text: String) : LookupEngine, AssociationSource {
     init {
         val table = HashMap<String, MutableList<DictEntry>>()
         val phraseIndex = HashMap<Char, MutableList<DictEntry>>()
+        // 词组编码推导与「系统已有不学」共用的两张表，与主表在同一次遍历里填好：
+        // 单字全码（字 -> 最长码）与全部词条文本。分两遍解析等于把 2.9 MB 词库读两遍，没必要。
+        val singleCodes = HashMap<String, Pair<String, Int>>(70_000)
+        val texts = HashSet<String>(165_000)
         var total = 0
         var singles = 0
         var phrases = 0
@@ -53,8 +63,17 @@ class WubiEngine(text: String) : LookupEngine, AssociationSource {
             val isPhrase = if (fields.size >= 4) fields[3] == "p" else word.length > 1
             val entry = DictEntry(code, word, weight, isPhrase)
             table.getOrPut(code) { ArrayList() }.add(entry)
-            if (isPhrase && word.length in 2..MAX_ASSOCIATION_WORD_LENGTH) {
-                phraseIndex.getOrPut(word[0]) { ArrayList() }.add(entry)
+            texts.add(word)
+            if (isPhrase) {
+                if (word.length in 2..MAX_ASSOCIATION_WORD_LENGTH) {
+                    phraseIndex.getOrPut(word[0]) { ArrayList() }.add(entry)
+                }
+            } else {
+                // 单字全码：最长码优先，同长取权重最高，再同取字典序最小（ADR-0001 §2 步骤 1）
+                val current = singleCodes[word]
+                if (current == null || FULL_CODE_RANK.compare(code to weight, current) < 0) {
+                    singleCodes[word] = code to weight
+                }
             }
             total++
             if (isPhrase) phrases++ else singles++
@@ -73,6 +92,8 @@ class WubiEngine(text: String) : LookupEngine, AssociationSource {
         byCode = normalized
         sortedCodes = normalized.keys.sorted()
         phrasesByFirstChar = normalizedPhrases
+        byText = singleCodes
+        knownTexts = texts
         entryCount = total
         codeCount = normalized.size
         singleCount = singles
@@ -167,6 +188,20 @@ class WubiEngine(text: String) : LookupEngine, AssociationSource {
         return result
     }
 
+    /**
+     * 单字全码：同字多条记录时取最长码，同长取权重最高，再同则取字典序最小；查不到返回 null。
+     *
+     * 词组编码推导（[PhraseCodeDeriver]）依赖这里的取值口径：必须取**最长码**而不是最高权重码，
+     * 否则 `产`（最高权重码是 1 位的 `u`）这类字会让整类词静默算错，见 ADR-0001 §0。
+     *
+     * [char] 是单个码点的 String 而不是 [Char]：词库里有 42,870 个非 BMP 单字（`𧝣` 等），
+     * 用 Char 会被拆成代理对的一半，必然查不到。
+     */
+    fun fullCodeOf(char: String): String? = byText[char]?.first
+
+    /** 系统词库是否已有该词条文本（精确匹配）；用于「系统已有则不学」。 */
+    fun hasWord(word: String): Boolean = knownTexts.contains(word)
+
     /** 随机取一条指定类型的词条（用于预览 / 调试展示）。 */
     fun sampleEntry(isPhrase: Boolean): DictEntry? {
         val matching = ArrayList<DictEntry>()
@@ -244,6 +279,16 @@ class WubiEngine(text: String) : LookupEngine, AssociationSource {
             if (a.code.length != b.code.length) return@Comparator a.code.length - b.code.length
             if (a.weight != b.weight) return@Comparator b.weight.compareTo(a.weight)
             a.text.compareTo(b.text)
+        }
+
+        /**
+         * 单字取码口径（code to weight）：码更长者优先，同长权重更高者优先，
+         * 再同则码字典序更小者优先。与 ADR-0001 §2「最长码优先」一致。
+         */
+        val FULL_CODE_RANK: Comparator<Pair<String, Int>> = Comparator { a, b ->
+            if (a.first.length != b.first.length) return@Comparator b.first.length - a.first.length
+            if (a.second != b.second) return@Comparator b.second.compareTo(a.second)
+            a.first.compareTo(b.first)
         }
     }
 }
