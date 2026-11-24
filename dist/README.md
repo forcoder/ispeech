@@ -11,7 +11,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `ispeech-internal-v1.6-final-<本轮出包日期>.apk` | **内测交付包（最终包，11-24 重打待出）**：versionCode 6 / versionName 1.6，Android Debug 证书（SHA-256 `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`），含 4 ABI `libsherpa-onnx-jni.so`，构建基线 = 吸收 main `bb1bf2b2` 的 merge 提交（BUILD，见「重出路线」）。**字节不在 git 树内，也不在 issue 附件**（>100 MB 超 GitHub 硬限；唯一副本 = 出包机本地对象库 ref）；sha256 与字节数由出包提交回写本行与「取包方式」 |
+| `ispeech-internal-v1.6-final-<本轮出包日期>.apk` | **内测交付包（最终包，11-24 重打待出）**：versionCode 6 / versionName 1.6，Android Debug 证书（SHA-256 `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`），含 4 ABI `libsherpa-onnx-jni.so`，构建基线 **BUILD = merge 提交 `f1d9124`**（吸收 main `bb1bf2b2`，见「重出路线」）。**字节不在 git 树内，也不在 issue 附件**（>100 MB 超 GitHub 硬限；唯一副本 = 出包机本地对象库 ref）；sha256 与字节数由出包提交回写本行与「取包方式」 |
 | `ispeech-internal-v1.6.apk` | 试包（11-15 基线证据，sha256 `9cddcec5…43f42`）：路径与字节不动，不含窗口修复，勿用于验收 |
 | `SHA256SUMS` | 完整性校验，**生成物**：唯一写入路径是 `python3 tools/verify/check_dist_manifest.py --regen`（口径见 `docs/adr/VOCA-400-dist-checksum-manifest.md`）。树外最终包**不入本表**（无文件即无行，写了会判 FAIL），其期望值只登记在下方「取包方式」 |
 | `_archive/` | 历史包 v1.0–v1.5，**均不含语音**（无 sherpa-onnx / FunASR 运行时），仅用于回归对比 |
@@ -184,7 +184,7 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-git checkout <BUILD>                             # 11-24 重打 = 吸收 main bb1bf2b2 的 merge 提交（旧 2b393b2 / a9c5109 作废）
+git checkout f1d9124                             # 11-24 重打 BUILD = 吸收 main bb1bf2b2 的 merge 提交（旧 2b393b2 / a9c5109 / 1597c80 作废）
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties   # 本机文件，不入库
 ./gradlew assembleRelease                        # 不带 -PasrModelUrl / -PvoskModelUrl，走默认源
 
@@ -218,10 +218,10 @@ cd dist && shasum -a 256 -c SHA256SUMS
 
 ## 重出路线（门禁事后 FAIL / 基线错时）
 
-1. 前提：本轮五条新合入已在 `main`（MAIN_NEW `bb1bf2b2`：`0168e59` 自学习 / `7eb60a4` #30 / `52ae190` #22 清单门禁 / `d33d025` #24 键盘规格 / `bb1bf2b` #31 下载校验）；发布分支已含吸收 main 的 merge 提交（BUILD）。旧 WINDOW_HEAD `a9c5109` 与旧出包提交 `1597c80` **作废**。
-2. 从 BUILD `assembleRelease` + 本机 debug keystore 重签（同上 recipe；`versionCode` 仍为 6，靠**新文件名 + 新 sha256** 区分批次）。
+1. 前提：本轮五条新合入已在 `main`（MAIN_NEW `bb1bf2b2`：`0168e59` 自学习 / `7eb60a4` #30 / `52ae190` #22 清单门禁 / `d33d025` #24 键盘规格 / `bb1bf2b` #31 下载校验）；发布分支已含吸收 main 的 merge 提交 **BUILD = `f1d9124`**（父 `c960914` + `bb1bf2b2`；已在远端分支 `agent/sre/voca-186-rebuild`，**尚未 FF 进 `release/voca-186-v1.6`**，需再过一次 cfg_gate）。旧 WINDOW_HEAD `a9c5109` 与旧出包提交 `1597c80` **作废**。
+2. 从 BUILD `f1d9124` `assembleRelease` + 本机 debug keystore 重签（同上 recipe；`versionCode` 仍为 6，靠**新文件名 + 新 sha256** 区分批次）。
 3. 更新本文件「本版定位 / 本版文件 / 取包方式」的包名、BUILD 与 sha256 三处；`SHA256SUMS` 只用 `--regen`（树外最终包不入表）；试包路径与字节不动。
-4. **跑 `tools/deploy/assert_apk_fix.sh <apk> <BUILD> bb1bf2b2`（final 模式）+ `APK_MODE=probe404` 变体，均 exit 0 才算包合规**；另跑 `python3 tools/verify/check_dist_manifest.py`（failed=0）与 `python3 tools/verify/check_keyboard_ui.py`（19/19）。不命中不覆盖发布分支、不装机，回第 1 步查合并漏了哪条。
+4. **跑 `tools/deploy/assert_apk_fix.sh <apk> f1d9124 bb1bf2b2`（final 模式）+ `APK_MODE=probe404` 变体，均 exit 0 才算包合规**；另跑 `python3 tools/verify/check_dist_manifest.py`（failed=0）与 `python3 tools/verify/check_keyboard_ui.py`（19/19）。不命中不覆盖发布分支、不装机，回第 1 步查合并漏了哪条。
 5. 装机（`adb install -r`，同 debug 证书不用卸载、不丢词库）→ 交装机专员执行、测试工程师判定 AC-1…AC-5。
 
 **回滚点**：新最终包 = 出包后本文件登记的 sha256（出包机 ref 取回，通道见「取包方式」）；**旧包回滚 = 出包机 ref `refs/archive/voca-186/v1.6-final-20261119`（sha256 `73623629…430a6`，blob `5649116…ab9c`）**，仅在新包门禁 FAIL 时退回；试包 = 本分支 `dist/ispeech-internal-v1.6.apk`（sha256 `9cddcec5a88d…`，98,416,118 字节），`git checkout release/voca-186-v1.6 -- dist/` 取回后 `adb install -r` 覆盖即可，不需要卸载；

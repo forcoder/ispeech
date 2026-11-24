@@ -2,7 +2,7 @@
 
 智语是一款基于五笔输入法的 Android 输入法（IME），集成 csBaby 后端实现快捷短语查找、快速应用与云端同步。
 
-**当前版本 v1.6（内测）**：`versionCode 6` / `versionName 1.6`，分发包 `ispeech-internal-v1.6-final-20261119.apk`（139,258,185 B / sha256 `736236292856ada2…d1b430a6`）—— **该字节不在 git 树内，`dist/` 下没有这个文件**（超 GitHub 单文件 100,000,000 B 硬限）。取件 = 出包机 `git cat-file blob refs/archive/voca-186/v1.6-final-20261119`（blob `564911634317238d23493bee95dc2a548e2eab9c`），或装机现场 `adb install -r` 后把设备侧 `base.apk` 的 sha256 与 `dist/SHA256SUMS` 登记值双向核对；完整口径见 `dist/README.md`「取包方式」。
+**当前版本 v1.6（内测）**：`versionCode 6` / `versionName 1.6`，分发包 `ispeech-internal-v1.6-final-20261119.apk`（139,258,185 B / sha256 `736236292856ada2…d1b430a6`；**11-24 W-B 重打：该包已作废，新交付包 = 从 BUILD `f1d9124` 出包后由 `dist/README.md` 回写包名与 sha256**）—— **该字节不在 git 树内，`dist/` 下没有这个文件**（超 GitHub 单文件 100,000,000 B 硬限）。取件 = 出包机 `git cat-file blob refs/archive/voca-186/v1.6-final-20261119`（blob `564911634317238d23493bee95dc2a548e2eab9c`），或装机现场 `adb install -r` 后把设备侧 `base.apk` 的 sha256 与 `dist/SHA256SUMS` 登记值双向核对；完整口径见 `dist/README.md`「取包方式」。
 本版把离线语音模型源默认切到 OSS HTTPS（构建不再需要 `-PasrModelUrl`）、内置 arm64-v8a / armeabi-v7a / x86 / x86_64
 四套 FunASR（sherpa-onnx + Paraformer）运行时，并用 Android Debug 证书签名以覆盖安装既有内测包。
 门禁证据与重签步骤见 `dist/README.md`。
