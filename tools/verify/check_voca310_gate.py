@@ -56,7 +56,9 @@ GATE_REL = "tools/verify/check_crosscut.py"
 GATE_SRC = ROOT / GATE_REL
 DOCS_REL = "docs/voice-input.md"
 # 只用于 WARN：passed 数变了说明 8.2b 增删过断言，不是本脚本的失败判据
-CROSSCUT_BASE_PASSED = 171
+# 2026-11-24 同步：合并 main 后 13/14 两节（联想去重 / 词组自学习）带入 32 条断言，171 -> 203；
+# 8.2b 本身仍是 20 条，与 docs 的「共 20 向」一致。
+CROSSCUT_BASE_PASSED = 203
 
 SERVICE = "app/src/main/java/com/ispeech/input/IspeechImeService.kt"
 CONTROLLER = "app/src/main/java/com/ispeech/input/VoiceInputController.kt"
