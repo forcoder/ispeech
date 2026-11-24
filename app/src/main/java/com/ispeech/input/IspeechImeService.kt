@@ -215,8 +215,14 @@ class IspeechImeService : InputMethodService() {
     /** 最近一次上屏文本，用于撤销上屏 */
     private var lastCommit: String = ""
 
-    /** 快捷短语面板的筛选关键词（硬件键盘输入） */
-    private var panelKeyword: String = ""
+    /**
+     * 快捷短语面板的 `(keyword, cursor)` 双状态，唯一事实源（VOCA-65 条目 1 / VOCA-68 §3.2）。
+     *
+     * 光标单位是**码点**，与 [SearchCaret] 同一口径：emoji 等代理对算 1 个，任何持有方都不得
+     * 用 UTF-16 码元当下标（否则退格会拆半留孤立代理）。四条写入路径（软键 / 硬件键盘 /
+     * 候选上屏 / ✕）与 `◀ ▶` 全部汇到 [applyPanelState]，视图只读渲染，不得自己拼串（R1-15）。
+     */
+    private var panelKeyword: PanelKeywordState = PanelKeywordState.EMPTY
 
     // ── 视图 ──
 
@@ -374,7 +380,11 @@ class IspeechImeService : InputMethodService() {
         phrases.onInsert = { content -> insertFromPanel(content) }
         phrases.onClose = { closePanel() }
         phrases.onToggleStar = { entry -> togglePhraseStar(entry) }
+        // ✕ 清空：文本与光标一起归 0（R1-19 / AC-1.6）
         phrases.onClearKeyword = { setPanelKeyword("") }
+        // `◀ ▶`：面板只上报「要移」，位置仍由服务侧 (keyword, cursor) 决定（R1-15 单一事实源）
+        phrases.onMoveCursorLeft = { movePanelCursor(-1) }
+        phrases.onMoveCursorRight = { movePanelCursor(1) }
         quickPhrasePanel = phrases
 
         // 剪贴板面板
@@ -527,11 +537,29 @@ class IspeechImeService : InputMethodService() {
         if (panel == Panel.QUICK_PHRASE) {
             when (key.action) {
                 KeyAction.CHAR -> {
-                    setPanelKeyword(panelKeyword + key.output)
+                    // 写到光标处，不是追加到末尾（R1-12 / AC-1.9）。
+                    // **面板打开时字母一律直接进搜索框，不经过编码缓冲**（本分支 return，
+                    // 后面的 `buffer += lower` / `t9Digits += digit` 走不到）；只有九宫格态的
+                    // 数字键会 fall-through 进编码缓冲。所以 AC-1.7「组合中先删编码」在
+                    // 快捷短语面板内只对九宫格态可达——真机轮测 AC-1.7 必须先切九宫格。
+                    insertPanelText(key.output)
                     return
                 }
                 KeyAction.BACKSPACE -> {
-                    backspacePanelKeyword()
+                    // 组合中先删编码（R1-22 / AC-1.7），缓冲空后才编辑搜索词
+                    if (buffer.isNotEmpty() || t9Digits.isNotEmpty()) {
+                        handleBackspace()
+                    } else {
+                        backspacePanelKeyword()
+                    }
+                    return
+                }
+                KeyAction.MOVE_LEFT -> {
+                    movePanelCursor(-1)
+                    return
+                }
+                KeyAction.MOVE_RIGHT -> {
+                    movePanelCursor(1)
                     return
                 }
                 KeyAction.SPACE -> {
@@ -655,8 +683,37 @@ class IspeechImeService : InputMethodService() {
                     closePanel()
                     return true
                 }
+                // 以下键只在快捷短语面板内消费（R1-38~R1-44）；其余面板维持原样。
+                // 顺序有讲究：DPAD / FORWARD_DEL / MOVE_HOME / MOVE_END 必须在块末
+                // `return false` 之前，否则会落到面板分支之后的宿主方向键分支（R1-38）。
+                panel == Panel.QUICK_PHRASE && keyCode == KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    movePanelCursor(-1)
+                    return true
+                }
+                panel == Panel.QUICK_PHRASE && keyCode == KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    movePanelCursor(1)
+                    return true
+                }
+                // 注意用的是 MOVE_HOME / MOVE_END，不是 KEYCODE_HOME（系统桌面键）/ KEYCODE_END（不存在）
+                panel == Panel.QUICK_PHRASE && keyCode == KeyEvent.KEYCODE_MOVE_HOME -> {
+                    setPanelKeyword(panelKeyword.keyword, 0)
+                    return true
+                }
+                panel == Panel.QUICK_PHRASE && keyCode == KeyEvent.KEYCODE_MOVE_END -> {
+                    setPanelKeyword(panelKeyword.keyword, SearchCaret.length(panelKeyword.keyword))
+                    return true
+                }
+                panel == Panel.QUICK_PHRASE && keyCode == KeyEvent.KEYCODE_FORWARD_DEL -> {
+                    forwardDeletePanelKeyword()
+                    return true
+                }
+                // 组合中先删编码，缓冲空后才编辑搜索词（R1-42 / R1-25，与软键盘同口径）
                 panel == Panel.QUICK_PHRASE && keyCode == KeyEvent.KEYCODE_DEL -> {
-                    backspacePanelKeyword()
+                    if (buffer.isNotEmpty() || t9Digits.isNotEmpty()) {
+                        handleBackspace()
+                    } else {
+                        backspacePanelKeyword()
+                    }
                     return true
                 }
                 panel == Panel.QUICK_PHRASE && keyCode == KeyEvent.KEYCODE_SPACE -> {
@@ -669,7 +726,8 @@ class IspeechImeService : InputMethodService() {
                 }
                 panel == Panel.QUICK_PHRASE && keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> {
                     val letter = 'a' + (keyCode - KeyEvent.KEYCODE_A)
-                    setPanelKeyword(panelKeyword + letter)
+                    // 写到光标处，不再追加到末尾（R1-44 修掉原 `panelKeyword + letter` 的绕过）
+                    insertPanelText(letter.toString())
                     return true
                 }
             }
@@ -1336,6 +1394,21 @@ class IspeechImeService : InputMethodService() {
             return
         }
         val candidate = candidates.getOrNull(index) ?: return
+        // 快捷短语面板内选候选：上屏目标是搜索框而不是宿主输入框（R1-11 / AC-1.9）。
+        // 整段插入光标处、光标前移该文本的码点数；缓冲清空但不 commitText，
+        // 否则字符会同时漏进聊天框（AC-1.5「不向宿主上屏任何字符」的同一类缺陷）。
+        if (panel == Panel.QUICK_PHRASE) {
+            insertPanelText(candidate.insertText)
+            buffer = ""
+            t9Digits = ""
+            t9Seq++
+            candidates = emptyList()
+            associationActive = false
+            codeOverride = null
+            runCatching { currentInputConnection?.setComposingText("", 0) }
+            renderCandidateView()
+            return
+        }
         val wasAssociation = associationActive
         if (!wasAssociation) {
             learn(candidate)
@@ -1425,11 +1498,13 @@ class IspeechImeService : InputMethodService() {
         commitPending()
         clearAssociation()
         panel = target
-        panelKeyword = ""
+        // 开面板即复位 `(keyword, cursor)`：AC-1.10 / R1-31 要求「收起重开光标回末尾」，
+        // 而这里是「重开」的唯一入口。绕过 setPanelKeyword 的四处之一，光标必须一起清。
+        panelKeyword = PanelKeywordState.EMPTY
         updatePanelVisibility()
         when (target) {
             Panel.QUICK_PHRASE -> {
-                quickPhrasePanel?.setKeyword("")
+                quickPhrasePanel?.setKeyword("", 0)
                 quickPhrasePanel?.submit(emptyList())
                 // 搜索框复用键盘左下角「中/英」键的当前输入状态，并把输入焦点落在搜索框
                 quickPhrasePanel?.setInputLanguage(mode == InputMode.ENGLISH)
@@ -1463,8 +1538,10 @@ class IspeechImeService : InputMethodService() {
         if (panel == Panel.NONE) return
         phraseTracker.onInterrupt()
         panel = Panel.NONE
-        panelKeyword = ""
-        quickPhrasePanel?.setKeyword("")
+        // 关面板同样复位光标：AC-1.10「收起重开光标回末尾」依赖「关闭即清」，
+        // 不能让光标停在上次的中间位置（否则 R1-31 的「不记忆」不成立）。
+        panelKeyword = PanelKeywordState.EMPTY
+        quickPhrasePanel?.setKeyword("", 0)
         statusText = null
         updatePanelVisibility()
         renderCandidateView()
@@ -1522,17 +1599,47 @@ class IspeechImeService : InputMethodService() {
         closePanel()
     }
 
-    /** 面板筛选关键词（硬件键盘打字） */
-    private fun setPanelKeyword(keyword: String) {
-        panelKeyword = keyword
-        quickPhrasePanel?.setKeyword(keyword)
-        statusText = if (keyword.isEmpty()) "快捷短语" else "筛选：$keyword"
+    /**
+     * 面板 `(keyword, cursor)` 的**唯一写入口**（VOCA-68 §3.3 R1-15）。
+     *
+     * 四条写入路径（软键、硬件键盘、候选上屏、✕）与 `◀ ▶` 全部汇到这里，视图不得自行拼串；
+     * 也正因如此，光标复位只需在这一个函数和三个「整串置空」处各写一次。
+     * 入参 [state] 已由 [PanelKeywordState] 的纯变换夹紧过，这里只负同步视图与候选条。
+     */
+    private fun applyPanelState(state: PanelKeywordState) {
+        panelKeyword = state
+        quickPhrasePanel?.setKeyword(state.keyword, state.safeCursor)
+        statusText = if (state.keyword.isEmpty()) "快捷短语" else "筛选：${state.keyword}"
         renderCandidateView()
     }
 
+    /** 整体替换（`✕` 清空 / 硬件 Home、End / Esc 共用）。 */
+    private fun setPanelKeyword(keyword: String, cursor: Int = SearchCaret.length(keyword)) {
+        applyPanelState(panelKeyword.replace(keyword, cursor))
+    }
+
+    /** 在光标处插入 [text]（软键字母 / 硬件键盘 / 候选整段上屏共用，R1-11 / R1-12 / R1-13）。 */
+    private fun insertPanelText(text: String) {
+        if (text.isEmpty()) return
+        applyPanelState(panelKeyword.insert(text))
+    }
+
+    /** 删除光标前一个码点；光标在 0 时无变化、不向宿主上屏任何字符（AC-1.2 / AC-1.5 / R1-5）。 */
     private fun backspacePanelKeyword() {
-        if (panelKeyword.isEmpty()) return
-        setPanelKeyword(panelKeyword.substring(0, panelKeyword.length - 1))
+        applyPanelState(panelKeyword.backspace())
+    }
+
+    /** 删除光标后一个码点（硬件键盘 `FORWARD_DEL`，R1-43）；空词 / 末尾时无变化。 */
+    private fun forwardDeletePanelKeyword() {
+        applyPanelState(panelKeyword.deleteAfter())
+    }
+
+    /** 光标左 / 右移 [delta] 个码点（`◀ ▶` 与硬件方向键共用，R1-6 / R1-7 / R1-38 / R1-39）。 */
+    private fun movePanelCursor(delta: Int) {
+        val next = panelKeyword.moveBy(delta)
+        // 到头不动时直接返回：不重渲染、不发键盘连发、不改变任何可见状态（R1-17）
+        if (next == panelKeyword) return
+        applyPanelState(next)
     }
 
     /** 面板内空格：上屏第一条匹配的短语 */
@@ -2400,7 +2507,9 @@ class IspeechImeService : InputMethodService() {
         candidates = emptyList()
         associationActive = false
         lastCommit = ""
-        panelKeyword = ""
+        // 旋转 / 宿主切换 / 换输入框都走到这里：AC-1.10 / R1-33 / R1-34 要求光标回末尾，
+        // 因此 `(keyword, cursor)` 必须一起复位，不能只清文本留下旧的中间位置。
+        panelKeyword = PanelKeywordState.EMPTY
         panel = Panel.NONE
         softKeyboard?.resetShift()
         dismissAiState()

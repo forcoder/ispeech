@@ -737,6 +737,115 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 离线断言覆盖到「输入 `dtwsl` 的候选首位是泡池须知、插入文本与源文件 sha256 一致」；
 真实候选条截图 / 真机记录需要在装有输入法的设备上补（离线环境没有 Android SDK）。
 
+### 12.7 搜索框的「文本 + 光标」双状态（VOCA-627 / VOCA-65 条目 1 前置 D-2）
+
+`07214d6`（Vosk 离线语音引擎那次提交）把搜索框从 `EditText` + 自绘 `caret` 退化成 `TextView`，
+光标只剩「文本末尾拼一个 `|` 字符」的假渲染面，条目 1 的「光标处插入 / 删除」因此无处落地。
+本单只恢复渲染面：
+
+| 关注点 | 实现 |
+|---|---|
+| 不抢 Android 焦点（唯一硬约束） | `searchText`：`isCursorVisible=false` / `isFocusable=false` / `isFocusableInTouchMode=false` / `showSoftInputOnFocus=false`；`searchRow` 两个 focusable 同样关掉。**不调 `requestFocus()`**，只需「面板进入输入态」= `isSelected` 描边 + 光标闪烁 |
+| 光标由谁画 | 独立 `caret` 视图（2dp×18dp，`caretBlinkMs=500`），位置由新增的 `CaretField` 按「光标前子串的实测宽度」算 x；不再往文本里塞 `|` |
+| 位置怎么算 | 新增 `input/SearchCaret.kt`（纯函数，零 Android 依赖）：`clamp / insert / backspace / moveBy`，越界一律夹紧到 `0..length` |
+| 读取点 | `QuickPhrasePanel.cursor()` 返回当前索引（空词恒 0）；`setKeyword(keyword, cursor)` 供条目 1 的服务侧接线 |
+| 闪烁生命周期 | 面板 `onVisibilityChanged` / `onDetachedFromWindow` 自己停表，不依赖服务在关闭时回调 |
+| 触摸不吞事件 | `isClickable=false` **且** `isLongClickable=false`，并摘掉 `movementMethod`，统一收在 `pinDisplayOnly()` 里，且必须调用在 `inputType` / `isSingleLine` **之后** |
+
+**为什么标志位必须放在 `inputType` 之后**（VOCA-627 质检打回项）：`isSingleLine` 与 `inputType`
+都会走 `setKeyListener → fixFocusableAndClickableSettings()`；`EditText` 的 `mKeyListener`
+恒非空（`ArrowKeyMovementMethod`），该函数会把 `focusable / clickable / longClickable`
+**强制改回 true**。写在 `inputType` 之前的 `isClickable = false` 等于白写：控件仍可点可长按，
+`View.onTouchEvent` 把 `LONG_CLICKABLE` 也算作可点、吞掉 `ACTION_DOWN` 并 `return true`，
+父行 `searchRow` 的「点搜索框回到输入态」在文本区（`weight=1f`，占整行大部分）**整段失效**，
+这是相对 `main`（普通 `TextView` 不吞事件）的退步；OEM 上还会长按弹系统选区手柄。
+本文件对应的顺序与标志集合由 `tools/verify/check_static.py` 静态门禁锁住。
+
+**没有恢复的部分**：`904a98d` 的 `render()` 里恒 `setSelection(length)` 把光标钉在末尾——那正是条目 1 要修的缺陷，
+本单恢复渲染面时不带它。`◀ ▶` 键位、服务侧 `(keyword, cursor)` 状态机、四条写入路径已由
+**VOCA-631**（条目 1 本体）补齐，见 §12.8。
+
+验证分两层：
+
+- JVM：`SearchCaretTest`（VOCA-627 时 11 例，覆盖 AC-1.1~1.4 / 1.9 与空词边界；
+  VOCA-631 补码点口径后为 **18 例**，见 §12.8）；
+- 设备侧：`app/src/androidTest/java/com/ispeech/input/QuickPhrasePanelSearchBoxTest.kt`（VOCA-627 时 11 例，
+  VOCA-631 补 `◀ ▶` / 40dp / emoji caret 后为 **15 例**）——
+  真实 View 的 `isFocusable / isCursorVisible / isClickable / isLongClickable / movementMethod`、
+  `dispatchTouchEvent(ACTION_DOWN)` 在多个纵向落点上的返回值（证明文本区不吞事件）、
+  `cursor()` 与 caret 实际 x 偏移、✕ 清空回到空态。
+  跑法：`./gradlew :app:assembleDebugAndroidTest` 后
+  `adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`，
+  再 `adb shell am instrument -w -e class com.ispeech.input.QuickPhrasePanelSearchBoxTest com.ispeech.ime.test/androidx.test.runner.AndroidJUnitRunner`。
+
+为什么不做截图取证：本机模拟器与并行任务共用，Chrome / 联系人会抢前台，多步 UI 流程
+（打开面板 → 点搜索框 → 打字 → 长按）实测两次结果不同，无法作为可复核证据。
+断言同一进程内的 View 属性才是这个单可靠的设备侧证据。
+
+### 12.8 条目 1 本体：`(keyword, cursor)` 双状态 + `◀ ▶` + 四条写入路径（VOCA-631）
+
+§12.7 只恢复了渲染面。本节是**条目 1 本体**：把光标位置变成服务侧可写、可移动的真实状态，
+并让所有输入汇入一个入口。
+
+**代码落点**
+
+| 关注点 | 落点 |
+|---|---|
+| 状态机（纯值对象，JVM 可测） | 新增 `input/PanelKeywordState.kt`：`keyword` + `cursor`，`insert / backspace / deleteAfter / moveBy / replace` 一律返回新实例 |
+| 索引单位 | **码点**（R1-1）。`SearchCaret` 的 `clamp` 上界取 `codePointCount`，`insert / backspace` 用 `offsetByCodePoints`，代理对不拆半 |
+| 服务侧唯一写入口 | `IspeechImeService.applyPanelState`；四条写入路径 + `◀ ▶` 全部只调它（R1-15） |
+| 四条写入路径 | 软键 `handleSoftKey`·``KeyAction.CHAR``、硬件键盘 `onKeyDown`·`A–Z`、候选上屏 `pickCandidate`（面板内整段插入光标处，**不 commit 到宿主**）、`✕` `onClearKeyword` |
+| 光标复位 4 处 | `openPanel` / `closePanel` / `resetState` 三处绕过 setter 的整串置空点，`panelKeyword` 与光标一起清（R1-31 / AC-1.10） |
+| `◀ ▶` 控件 | 搜索行内、40×40 dp；单击移 1 码点，长按 380 ms 后每 90 ms 连移；到头 `isEnabled=false` + 变灰 + `INVISIBLE` 槽位不跳（规格 §3.4） |
+| `◀ ▶` 连移停表 | 逻辑抽到 `input/CursorRepeater.kt`（纯 Kotlin + 注入 `Scheduler`，JVM 可测）。到边界那刻键被 `disable`，Android **不再派发触摸事件**，`ACTION_UP` 进不来 —— 因此不能只靠抬手停表，必须每步自查 `stillActive`，且 `applyCursorButtonState(enabled=false)` 主动停 |
+| `✕` 可点尺寸 | `minimumWidth/Height = 40dp`（原 30×28，AC-1.8 不满足） |
+| 几何理由 | `◀ ▶` **不并入字母行**：12 键会让字母键格宽落到 31.81 dp，违反 AC-4.6 的 ≥38 dp |
+| 硬件键盘编辑 | `DPAD_LEFT/RIGHT` / `MOVE_HOME` / `MOVE_END` / `FORWARD_DEL` 在面板分支内先行消费并 `return true`（R1-38~R1-43）；用 `MOVE_HOME` **不是** `KEYCODE_HOME` |
+| 组合中优先级 | 软键与硬件退格都先判断 `buffer / t9Digits` 非空 → 先删编码，缓冲空后才编辑搜索词（AC-1.7 / R1-22 / R1-42） |
+
+**D2-7 判据（VOCA-627 遗留，此前只活在评论里，本单落到文件）**
+
+> **D2-7**：打开面板 → 输入若干字符 → 关闭面板 → 重新打开 → 期望
+> **①搜索框描边不残留**（无输入态时 `searchRow` 不是 `isSelected` 描边态）、
+> **②caret 停闪**（关闭后不再翻转可见性，`onVisibilityChanged` 已停表）、
+> **③重开即显**（`requestSearchFocus()` 后 caret 立刻 `VISIBLE`，不等到下一个 500 ms 周期）。
+
+真机 / 模拟器判据（条目 1 本轮一起验，本机无真机时给可复制步骤，不伪称已验）：
+
+- **D2-3** 点搜索行不弹系统键盘、不切输入法、面板不关；
+- **D2-4** 字母不漏进宿主输入框；
+- `adb shell dumpsys input_method | grep -E "mInputShown|mIsVkSoftwareKeyboard"` 点搜索行前后不翻转；
+- 中文态连打 20 字符无丢键、无跳页；
+- 长按搜索框不出选区手柄；
+- 上面 **D2-7** 的三条。
+
+**验证分三层（本单实跑见 issue 评论）**
+
+- JVM：`PanelKeywordStateTest`（17 例，AC-1.1~1.6 / 1.9、R1-8 / 1-10 / 1-31 / 1-43、四条路径同算式、emoji 不拆半）
+  + `SearchCaretTest`（18 例，含 2 例新增：退格删整 emoji、插入落 emoji 之后，均断言无孤立代理）
+  + `CursorRepeaterTest`（8 例，`◀ ▶` 长按连移的停表：380/90 ms 节奏、抬手即停、
+    到边界被禁用当拍即停、「边界停住后再输入不得自行倒走」——VOCA-631 质检打回项 1 的回归）；
+- 设备侧：`QuickPhrasePanelSearchBoxTest`（**16 例**，D2-1~D2-6 的 View 级断言 + `◀ ▶` / 40dp /
+  emoji caret + 长按到边界抬手后不再移动的**真实窗口**回归）；
+- 门禁：`tools/verify/check_static.py` / `check_crosscut.py` / `check_input_logic.py` 等（见 §12.9）。
+
+**已知限制**：本机 `adb devices` 只有 `emulator-5554`，`FMR0224913042917` 未在线，
+所以上列真机项本轮**未验**，归属测试工程师条目 1 真机轮。
+
+### 12.9 条目 1 的静态门禁（`check_static.check_quick_search_cursor_controls`）
+
+静态门禁只拦「能可靠判定」的事，且**每一条都做过变异反向验证**（改坏 → 必须 FAIL）。
+VOCA-631 质检实测出三条逃逸，已修：
+
+| 逃逸方式 | 旧检查为何失效 | 现检查 |
+|---|---|---|
+| `fun length()` 改成 `= text.length` | 整文件 grep `codePointCount`，KDoc 注释里就有这个词 | 先 `strip_kotlin_comments()` 剥注释，再取 `length()` 的**表达式函数体**，断言体内含 `codePointCount` |
+| `applyPanelState(panelKeyword.replace(panelKeyword.keyword + text))` | 只查 `setPanelKeyword(...)` 的末尾追加 | `iter_call_args()` 取每个 `applyPanelState(...)` 实参，实参含 `+` 即 FAIL |
+| 删掉 `closePanel` 的光标复位 | 只查函数存在，不数复位点 | 数 `panelKeyword = PanelKeywordState.EMPTY` 出现次数，`< 3` 即 FAIL（openPanel / closePanel / resetState） |
+
+三条的变异复现命令与结果见本单 issue 评论「验证方式」。`length()` 那条尤其值得记：
+**拿注释里也会出现的关键字当判据，等于给「改坏也能过」留了后门**。
+
 ## 13. 导入「通用短语.csv」（2026-11-09 追加）
 
 来源：产品给的搜狗 / csBaby 导出文件 `通用短语.csv`（235 行、GBK、61 KB）。目标是「导进常用语，

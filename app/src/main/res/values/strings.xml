@@ -120,6 +120,12 @@
     <string name="sync_upload_conflict">%1$d 条与云端同码冲突，本轮未上传（新增 %2$d 条）</string>
     <string name="quick_panel_search_hint">输入关键词搜索短语（拼音首字母也行）</string>
     <string name="quick_panel_search_active">🔍 %1$s</string>
+    <!-- 搜索行 `◀ ▶ ✕` 的无障碍朗读名（规格 VOCA-68 §3.4 / §3.10） -->
+    <string name="quick_panel_cursor_left">光标左移</string>
+    <string name="quick_panel_cursor_right">光标右移</string>
+    <string name="quick_panel_cursor_at_start">已到开头</string>
+    <string name="quick_panel_cursor_at_end">已到结尾</string>
+    <string name="quick_panel_search_clear">清空搜索词</string>
     <string name="btn_add_cloud_shortcut">添加云端简写</string>
     <string name="quick_add_cloud_shortcut">添加新规则</string>
     <string name="quick_add_local_rule">添加本地快捷短语</string>
