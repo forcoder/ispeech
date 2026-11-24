@@ -356,6 +356,26 @@ I AsrTrace: session=v1 ev=ui_reset t=10872222 reason=engine_error ok=false ms=10
 `…AiAiSpeechRecognitionService`，看日志的人会以为桩没生效。原字段保留为 `first_queried`，
 两者不同时正好把「查询顺序 ≠ 实际绑定」这个坑暴露出来。
 
-**仍未覆盖**：①基线真机 `FMR0224913042917` / `23F0224224000950` 上的同一分支（设备未回线，`adb devices -l` 无该机）；
-②`stage=session`（60 秒硬上限）与 `stage=finish` 的运行时样本本机也没造到 —— 前者需要识别服务持续 60 秒
-既不回结果也不报错，后者需要「回了中间结果、收尾不回」。这三条按 §八 判读表在真机上一次采完即可闭环。
+### 12.1 覆盖边界：本轮装置只走到了 `engine=SYSTEM`
+
+本节日志的**装置前提必须先看清**，否则会把「已证」放大成「全路径已证」：
+
+- 装置跑的是 **`engine=SYSTEM`**（本分支默认：`AsrSettings.kt:54` `val engine: AsrEngine = AsrEngine.SYSTEM`）。
+  本分支 `AsrEngine` 只有 `SYSTEM / CUSTOM / VOSK` 三项（`AsrSettings.kt:6/14/22`），
+  **`FUNASR` 枚举不存在**，全树也找不到 `FunAsrSpeechEngine(` 的构造点（只有类自身与其内部引用）。
+  → 本 PR 给离线引擎补的 `stage=start` / `stage=finish` / `NO_AUDIO` 兜底，**在这棵树上不可达、运行时样本为 0**。
+- 比对对象：`origin/main` 才是 `AsrEngine { SYSTEM, CUSTOM, FUNASR, VOSK }`、默认 `FUNASR`
+  （`AsrSettings.kt:70`），并在 `IspeechImeService.kt:338` 构造 `FunAsrSpeechEngine`。
+  两边默认引擎不是同一个，本节的运行时结论**不能**直接搬到出厂默认路径上。
+
+| 分支 / 阶段 | 判据 | 结论 |
+| --- | --- | --- |
+| `engine=SYSTEM` + 识别服务零回调 | `ev=timeout stage=start` → `ev=ui_reset` ≤ 10.02 s | **已证**（本节实测原文） |
+| `engine=SYSTEM` + 回了中间结果、收尾不回 | `ev=timeout stage=finish` | 未证（`stage=finish` 零运行时样本） |
+| `engine=SYSTEM` + 60 s 硬上限 | `ev=timeout stage=session` | 未证（`stage=session` 零运行时样本） |
+| `engine=FUNASR`（出厂默认路径） | start / finish / `NO_AUDIO` 三条兜底 | **未证，且本树不可达**（见上） |
+| `engine=VOSK` | start / finish 两条兜底 | 未证（本树可达，本轮未跑） |
+| 真机 `FMR0224913042917` / `23F0224224000950` | 复位时间 + 可读文案 + `stage=session`/`stage=finish` | 未达成（`adb devices -l` 无该机） |
+
+要补的两件事（按 §八 判读表，真机接线后一次采完）：`stage=session` / `stage=finish` 两条运行时样本；
+以及合并到 `main` 后对 `engine=FUNASR` 这条**实际出厂默认路径**补一次 start 兜底样本 —— 只在那棵树上才走得到。
