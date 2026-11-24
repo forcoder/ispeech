@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.graphics.Paint
+import android.net.Uri
 import android.os.SystemClock
 import android.provider.Settings
 import android.text.SpannableString
@@ -33,15 +34,24 @@ import com.ispeech.data.Punctuation
 import com.ispeech.data.PunctuationConverter
 import com.ispeech.data.UserDictStore
 import com.ispeech.data.UserDictMode
+import com.ispeech.data.FunAsrModelStore
+import com.ispeech.data.codePointLength
 import com.ispeech.data.VoskModelStore
 import com.ispeech.di.AppContainer
+import com.ispeech.engine.AssociationCommit
 import com.ispeech.engine.CompositeEngine
+import com.ispeech.engine.CommitSource
 import com.ispeech.engine.LookupCandidate
 import com.ispeech.engine.LookupEngine
 import com.ispeech.engine.LookupKind
+import com.ispeech.engine.PhraseLearningDecision
+import com.ispeech.engine.PhraseLearningTracker
+import com.ispeech.engine.PhraseSkipReason
 import com.ispeech.engine.PinyinEngine
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickLocator
+import com.ispeech.engine.WubiEngine
+import com.ispeech.engine.isSelfCausedSelectionChange
 import com.ispeech.input.keyboard.KeyAction
 import com.ispeech.input.keyboard.KeyDef
 import com.ispeech.input.keyboard.KeyboardLayoutKind
@@ -117,6 +127,15 @@ class IspeechImeService : InputMethodService() {
         /** 九宫格（T9）数字串最长 9 位 */
         private const val T9_MAX_DIGITS = 9
 
+        /** 联想词去重兜底时回看的已上屏字数（与 AssociationCommit 的锚点窗口一致） */
+        private const val ASSOCIATION_ANCHOR_CHARS = 16
+
+        /**
+         * 本服务写完 InputConnection 后的光标宽限窗：窗内不带组合区的 `onUpdateSelection`
+         * 一律视为自因，不算「用户移动光标」（ADR-0001 §1、F1）。
+         */
+        private const val SELF_WRITE_GRACE_MILLIS = 300L
+
         /**
          * 九宫格一次最多展开的字母组合数。
          *
@@ -149,6 +168,15 @@ class IspeechImeService : InputMethodService() {
     private enum class Panel { NONE, QUICK_PHRASE, CLIPBOARD, SWITCH_IME, SETTINGS }
 
     private var engine: CompositeEngine? = null
+
+    /**
+     * 五笔词库引擎：词组学习的编码推导（[WubiEngine.fullCodeOf]）与「系统已有不学」都要用它。
+     *
+     * 跟着 [engine] 走而不是另存一份：引擎在 onCreate 同步建、设置变更时后台重建，
+     * 存副本会让学习链路在新引擎就绪前拿到旧词库或 null。
+     */
+    private val wubiEngine: WubiEngine?
+        get() = engine?.engines?.filterIsInstance<WubiEngine>()?.firstOrNull()
 
     /** 键盘设置（高度、候选数、标点、联想、学习…），随 DataStore 实时更新 */
     private var settings: KeyboardSettings = KeyboardSettings()
@@ -238,16 +266,50 @@ class IspeechImeService : InputMethodService() {
     /** 候选条编码区覆盖显示（如「AI回复」「联想」「语音」） */
     private var codeOverride: String? = null
 
+    /**
+     * 词组自学习状态机（ADR-0001）：只认「刚上屏了一段文本」，成词判定与编码推导全在这里。
+     * 服务侧只负责喂事件、写库与打日志，不含任何判定逻辑。
+     */
+    private val phraseTracker = PhraseLearningTracker(
+        codeOf = { char -> wubiEngine?.fullCodeOf(char) },
+        systemHasWord = { word -> wubiEngine?.hasWord(word) == true },
+    )
+
+    /** 本次进程内词组学习的跳过计数（只存内存，见 ADR-0001 §10）。 */
+    private val phraseSkips = java.util.concurrent.ConcurrentHashMap<PhraseSkipReason, Int>()
+
+    /**
+     * 自因过滤的容差：本服务每次写 InputConnection 都会触发一次 `onUpdateSelection`，
+     * 用「与上次已知光标的距离」判断是不是自己造成的。默认 0 即只比 `newSelStart`；
+     * 真机若发现同一 commit 会连着回多次且位置有偏移，再调大（ADR-0001 §1 降级口径）。
+     */
+    private var selectionTolerance: Int = 0
+
+    /** 最近一次已知的宿主光标位置；-1 表示尚未观测到（此时不判中断）。 */
+    private var lastKnownCursor: Int = -1
+
+    /**
+     * 本服务上一次写 InputConnection 的时刻（`SystemClock.uptimeMillis()`）。
+     *
+     * 上屏后光标必然前移、组合区被替换成汉字时光标还可能后移（`klge` → `喂`），
+     * 只比位置会把每一次正常上屏都误判成「用户移动光标」，于是词组永远学不到（ADR-0001 F1）。
+     * 因此自己的写操作后留一个短宽限窗：窗内不带组合区的回调一律视为自因。
+     */
+    private var selfWriteAt: Long = 0
+
     // ── 语音输入状态 ──
 
     /** 系统语音识别封装（onCreate 主线程创建，onDestroy 释放） */
     private var voiceController: VoiceInputController? = null
 
-    /** 端侧离线识别（Vosk）引擎，与 [voiceController] 按「识别引擎」设置二选一 */
+    /** 内置 FunASR 离线识别引擎，与 [voskVoice] / [voiceController] 按「识别引擎」设置三选一 */
+    private var funasrVoice: FunAsrSpeechEngine? = null
+
+    /** 端侧离线识别（Vosk）引擎，与 [funasrVoice] / [voiceController] 按「识别引擎」设置三选一 */
     private var voskVoice: VoskSpeechEngine? = null
 
-    /** 离线模型是否正在下载（避免重复触发下载任务） */
-    private var voskDownloading: Boolean = false
+    /** 离线模型是否正在下载（FunASR / Vosk 共用同一把闸门，避免重复触发下载任务） */
+    private var offlineModelDownloading: Boolean = false
 
     /** 当前候选是否为语音识别结果（空格 / 点选上屏后复位） */
     private var voiceActive = false
@@ -363,12 +425,27 @@ class IspeechImeService : InputMethodService() {
         )
         if (!occupied && voiceSessionGuardJob == null) return
         if (voiceController?.isListening == true) voiceController?.stop()
+        if (funasrVoice?.isListening == true) funasrVoice?.cancel()
         if (voskVoice?.isListening == true) voskVoice?.cancel()
         voiceActive = false
         disarmVoiceSessionGuard()
         if (codeOverride == "语音") codeOverride = null
         traceVoiceUiReset(reason, ok)
     }
+    /**
+     * 挂在候选条上的麦克风授权提示文本（VOCA-166）。
+     *
+     * 只有它仍是候选条第 1 行文本时才显示「去授权」按钮：任何按键 / 上屏 / 切面板都会改写
+     * [statusText]，提示与按钮因此一起消失，不需要额外的清除钩子，也不靠「文本非空」推断
+     * （常态那一行是用户正在打的组合码）。
+     */
+    private var micPromptText: String? = null
+
+    /** 麦克风权限是否被永久拒绝（设置页授权回调写入）；只影响文案与跳转目标，不作为权限门禁 */
+    private var micPermanentlyDenied = false
+
+    /** 授权跳转在途：连点两次会弹两个授权框，返回输入法（onWindowShown）后复位 */
+    private var micJumpInFlight = false
 
     override fun onCreate() {
         super.onCreate()
@@ -379,6 +456,7 @@ class IspeechImeService : InputMethodService() {
         chineseInputMethod = SettingsStore.chineseInputMethod(this)
         // SpeechRecognizer 必须在主线程创建，onCreate 即在主线程
         voiceController = VoiceInputController(applicationContext)
+        funasrVoice = FunAsrSpeechEngine(applicationContext)
         voskVoice = VoskSpeechEngine(applicationContext)
         // 预热拼音引擎：切到拼音态后首键即用，避免首次上屏时在主线程加载拼音词表造成卡顿
         serviceScope.launch(Dispatchers.Default) {
@@ -394,6 +472,9 @@ class IspeechImeService : InputMethodService() {
         val bar = root.findViewById<CandidateView>(R.id.candidate_bar)
         bar.onCandidatePicked = { index -> pickCandidate(index) }
         bar.onCandidateLongPressed = { index -> rememberCandidate(index) }
+        bar.vibrate = settings.vibrate
+        // 授权跳转只由这一次点击发起：语音键本身不再改前台 Activity（VOCA-166 AC-1/AC-6）
+        bar.onMicActionClicked = { openMicAuthorization() }
         candidateView = bar
 
         // 软键盘
@@ -456,6 +537,24 @@ class IspeechImeService : InputMethodService() {
     /** 候选条 + 软键盘始终随输入法窗口展示 */
     override fun onEvaluateInputViewShown(): Boolean = true
 
+    /**
+     * 输入法窗口重新可见（从授权页 / 系统框回到键盘）：复位「跳转在途」，按钮重新可点，
+     * 权限已开好则直接撤掉提示 —— 不该让用户再按一次语音键才发现权限已经生效（AC-4）。
+     */
+    override fun onWindowShown() {
+        super.onWindowShown()
+        micJumpInFlight = false
+        if (micPromptText == null) return
+        if (isMicPermissionGranted()) {
+            // S8 授权成功回场：ADR-001 决策 4 不承诺宿主自动重显键盘，「回来该干什么」全靠这一句
+            // 一次性指引兜着，否则用户回到输入框却没有下一步（BA 反向风险 #5）。
+            // 任何一次按键都会经 dismissAiState() 改写 statusText，所以它天然只出现一次。
+            clearMicPrompt()
+            statusText = getString(R.string.voice_permission_granted)
+        }
+        renderCandidateView()
+    }
+
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         refreshEngineIfStale()
@@ -488,6 +587,8 @@ class IspeechImeService : InputMethodService() {
     override fun onDestroy() {
         voiceController?.destroy()
         voiceController = null
+        funasrVoice?.destroy()
+        funasrVoice = null
         voskVoice?.destroy()
         voskVoice = null
         serviceScope.cancel()
@@ -501,6 +602,7 @@ class IspeechImeService : InputMethodService() {
                 settings = latest
                 softKeyboard?.keyHeightDp = latest.keyHeightDp
                 softKeyboard?.vibrate = latest.vibrate
+                candidateView?.vibrate = latest.vibrate
                 if (panel == Panel.SETTINGS) settingsPanel?.submit(latest, asr, chineseInputMethod)
                 refreshCandidates()
             }
@@ -509,6 +611,14 @@ class IspeechImeService : InputMethodService() {
             SettingsStore.asrSettingsFlow(this@IspeechImeService).collect { latest ->
                 asr = latest
                 if (panel == Panel.SETTINGS) settingsPanel?.submit(settings, latest, chineseInputMethod)
+            }
+        }
+        serviceScope.launch {
+            SettingsStore.micPermanentlyDeniedFlow(this@IspeechImeService).collect { denied ->
+                micPermanentlyDenied = denied
+                // 提示还挂着时立刻换按钮文案：刚被标记成永久拒绝，「去授权」已经问不出系统框，
+                // 要马上变成「去设置」，而不是等用户再按一次语音键
+                if (micPromptText != null) renderCandidateView()
             }
         }
         serviceScope.launch {
@@ -594,12 +704,17 @@ class IspeechImeService : InputMethodService() {
     /**
      * 按住说话：按下开始收音（空格长按进语音走这里）。
      *
-     * 引擎选择沿用 [toggleVoiceInput] 的既有判定：离线识别（[AsrEngine.VOSK]）与系统识别
-     * 是两条完全不同的链路，这里只负责「开始」，结束交给 [onVoicePressUp]。
+     * 引擎选择沿用 [toggleVoiceInput] 的既有判定：内置离线识别（[AsrEngine.FUNASR] /
+     * [AsrEngine.VOSK]）与系统识别是完全不同的链路，这里只负责「开始」，结束交给 [onVoicePressUp]。
      */
     private fun onVoicePressDown() {
-        // 会话 id 由 toggle* 开立（两条入口共用一套判定），这里只标来源
+        // 会话 id 由 toggle* 开立（三条入口共用一套判定），这里只标来源
         voiceTraceVia = "press_down"
+        if (asr.engine == AsrEngine.FUNASR) {
+            if (funasrVoice?.isListening == true) return
+            toggleFunAsrVoice()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             if (voskVoice?.isListening == true) {
                 // 卡住的典型表现：上一会话没复位，这一按被静默吞掉（打在上一条会话 id 上）
@@ -620,11 +735,16 @@ class IspeechImeService : InputMethodService() {
      * 按住说话：松手结束收音并上屏。
      *
      * 系统识别走 [VoiceInputController.finish]（保留回调，收尾结果仍经 onFinal 上屏）；
-     * Vosk 走 [VoskSpeechEngine.finish]（工作线程读 finalResult 后回调）。
+     * FunASR 走 [FunAsrSpeechEngine.finish]、Vosk 走 [VoskSpeechEngine.finish]
+     * （工作线程读最终结果后回调）。
      */
     private fun onVoicePressUp() {
         // 只有按下（`begin`）没有抬起（这条）= 手势没回来，收尾根本没被触发
         AsrTrace.i(voiceSessionId, AsrTrace.EV_PRESS, "up" to true, "engine" to asr.engine.name)
+        if (asr.engine == AsrEngine.FUNASR) {
+            funasrVoice?.finish()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             voskVoice?.finish()
             return
@@ -724,7 +844,8 @@ class IspeechImeService : InputMethodService() {
             val index = keyCode - KeyEvent.KEYCODE_1
             when {
                 index < candidates.size -> pickCandidate(index)
-                candidates.isEmpty() && buffer.isNotEmpty() -> commit(buffer, allowAssociation = false)
+                candidates.isEmpty() && buffer.isNotEmpty() ->
+                    commit(buffer, allowAssociation = false, source = CommitSource.DIRECT)
             }
             return true
         }
@@ -882,6 +1003,8 @@ class IspeechImeService : InputMethodService() {
     /** 落到指定输入态：落定未完成的组合，刷新键面 / 面板 / 状态。 */
     private fun enterMode(target: InputMode) {
         if (buffer.isNotEmpty()) commitTop()
+        // 换输入态后上一跳与下一跳不再同属一套编码空间，词组学习状态作废
+        phraseTracker.reset()
         mode = target
         softKeyboard?.resetShift()
         softKeyboard?.setEnglishMode(mode == InputMode.ENGLISH)
@@ -1033,11 +1156,12 @@ class IspeechImeService : InputMethodService() {
         if (buffer.isEmpty()) return
         val top = candidates.firstOrNull()
         if (top == null) {
-            commit(buffer, allowAssociation = false)
+            // 无候选时上屏的是 `klge` 这样的原始编码，不是「选了一个单字」——按中断处理
+            commit(buffer, allowAssociation = false, source = CommitSource.DIRECT)
             return
         }
         learn(top)
-        commit(top.insertText)
+        commit(top.insertText, source = sourceOf(top))
     }
 
     /**
@@ -1048,9 +1172,16 @@ class IspeechImeService : InputMethodService() {
      * `voiceActive`，识别器与兜底表都留着，于是一次已经成功的上屏会在 66 秒后被
      * 判成「还卡在识别中」。
      */
-    private fun commit(text: String, allowAssociation: Boolean = true) {
+    private fun commit(
+        text: String,
+        allowAssociation: Boolean = true,
+        source: CommitSource = CommitSource.WORD_CANDIDATE,
+    ) {
         if (text.isEmpty()) return
         endVoiceSession("candidate_commit", ok = true)
+        // 只有「单字候选上屏」可能参与词组学习；两跳之间出现任何其它上屏都算中断
+        onPhraseCommit(text, source)
+        markSelfWrite()
         val out = convertHan(text)
         currentInputConnection?.commitText(out, 1)
         buffer = ""
@@ -1068,6 +1199,9 @@ class IspeechImeService : InputMethodService() {
     /** 直接上屏（不经过组合），用于英文、标点、符号、emoji、空格、换行 */
     private fun commitDirect(text: String, type: CommitType = CommitType.PUNCTUATION) {
         if (text.isEmpty()) return
+        // 标点 / 空格 / 换行 / 英文 / emoji / 语音与「拼」无关，出现即让词组学习失效（AC-3.3）
+        phraseTracker.onInterrupt()
+        markSelfWrite()
         val out = convertHan(text)
         currentInputConnection?.commitText(out, 1)
         lastCommit = out
@@ -1170,6 +1304,93 @@ class IspeechImeService : InputMethodService() {
         LookupKind.QUICKAPPLY -> null
     }
 
+    /** 候选 → 词组学习的上屏来源：只有「五笔单字候选」算 [CommitSource.SINGLE_CHAR]（ADR-0001 §1）。 */
+    private fun sourceOf(candidate: LookupCandidate): CommitSource =
+        if (candidate.kind == LookupKind.WUBI && codePointLength(candidate.insertText) == 1) {
+            CommitSource.SINGLE_CHAR
+        } else {
+            CommitSource.WORD_CANDIDATE
+        }
+
+    // ──────────────────────────────────────────────
+    //  词组自学习（VOCA-65 条目 3 / ADR-0001）
+    // ──────────────────────────────────────────────
+
+    /** 把一次上屏喂给 tracker；成词则由 [learnPhrase] 写库。判定逻辑全在 tracker 内。 */
+    private fun onPhraseCommit(text: String, source: CommitSource) {
+        val decision = phraseTracker.onCommit(text, source)
+        if (decision != null) {
+            learnPhrase(decision)
+            return
+        }
+        val skipped = phraseTracker.lastSkip ?: return
+        val count = phraseSkips.merge(skipped.reason, 1, Int::plus) ?: 1
+        // 推导不出是 ADR §9 A3 风险的早期信号（推导规则与词库口径漂移），用 WARN
+        if (skipped.reason == PhraseSkipReason.UNDECIDABLE) {
+            Log.w(TAG, "phrase_learn undecidable first=${skipped.first} second=${skipped.second} count=$count")
+        } else {
+            Log.d(TAG, "phrase_learn skipped reason=${skipped.reason.name.lowercase()} count=$count")
+        }
+    }
+
+    /**
+     * 成词写库：复用 [UserDictStore.record]，写 `code<TAB>text<TAB>count<TAB>mode` 4 列（count 从 1 起；
+     * 历史 3 列行读入时按 `wb` 模式回退）。
+     *
+     * 学习开关只在「决定写库」这一刻检查——开关语义是「要不要落盘」，不是「要不要识别」，
+     * 在事件入口短路会让切换瞬间的状态不自洽（ADR-0001 §1 失败分支）。
+     * 写盘必须走 `Dispatchers.IO`：这是 AC-3.11「连续 10 次学习无 ANR」的实现前提。
+     */
+    private fun learnPhrase(decision: PhraseLearningDecision) {
+        if (!settings.learning) {
+            Log.d(TAG, "phrase_learn skipped reason=disabled")
+            return
+        }
+        Log.i(TAG, "phrase_learn commit code=${decision.code} text=${decision.text}")
+        val store: UserDictStore = AppContainer.userDict(this)
+        serviceScope.launch(Dispatchers.IO) {
+            store.record(decision.code, decision.text, UserDictMode.WUBI)
+        }
+    }
+
+    /**
+     * 宿主光标移动：非本服务自因的变化一律让词组学习失效（AC-3.4 后半）。
+     *
+     * 本服务每次 commit / setComposingText 都会触发一次回调，所以不能「收到回调就中断」，
+     * 必须用 [lastKnownCursor] 区分自因与他因；判定本身抽在纯函数
+     * [isSelfCausedSelectionChange] 里，可 JVM 表驱动单测。
+     */
+    override fun onUpdateSelection(
+        oldSelStart: Int,
+        oldSelEnd: Int,
+        newSelStart: Int,
+        newSelEnd: Int,
+        candidatesStart: Int,
+        candidatesEnd: Int,
+    ) {
+        super.onUpdateSelection(
+            oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd,
+        )
+        // 带组合区（candidatesStart >= 0）的回调必然是本服务自己 setComposingText 造成的：
+        // 用户正在打下一个字的编码，不能当成「移动光标」把上一跳清掉。
+        // 刚写完 InputConnection 的宽限窗内同理——那是上屏本身的光标前移，不是用户操作。
+        val composing = candidatesStart >= 0
+        val withinSelfWrite =
+            android.os.SystemClock.uptimeMillis() - selfWriteAt <= SELF_WRITE_GRACE_MILLIS
+        if (!composing && !withinSelfWrite &&
+            !isSelfCausedSelectionChange(newSelStart, lastKnownCursor, selectionTolerance)
+        ) {
+            phraseTracker.onInterrupt()
+            Log.d(TAG, "phrase_learn skipped reason=interrupt")
+        }
+        lastKnownCursor = newSelStart
+    }
+
+    /** 记下「刚写了一笔」，供 [onUpdateSelection] 的自因判定使用。 */
+    private fun markSelfWrite() {
+        selfWriteAt = android.os.SystemClock.uptimeMillis()
+    }
+
     /** 词库编码长度上限：五笔码 4 位、拼音串最多 12 位（与 [MAX_PINYIN_LENGTH] 一致）。 */
     private fun maxCodeLengthOf(mode: UserDictMode): Int =
         if (mode == UserDictMode.PINYIN) MAX_PINYIN_LENGTH else MAX_CODE_LENGTH
@@ -1255,8 +1476,25 @@ class IspeechImeService : InputMethodService() {
         }
         val candidate = candidates.getOrNull(index) ?: return
         val wasAssociation = associationActive
-        if (!wasAssociation) learn(candidate)
-        commit(candidate.insertText, allowAssociation = !wasAssociation)
+        if (!wasAssociation) {
+            learn(candidate)
+            val source = sourceOf(candidate)
+            commit(candidate.insertText, allowAssociation = false, source = source)
+            return
+        }
+        // 联想词按已上屏的末字查出来，开头就是这个字，整词上屏会把它重复一遍：
+        // 「你」+「你好」→「你你好」，「指导老师」+「师专」→「指导老师师专」。
+        // 只上屏与已上屏文本不相重的部分，靠已上屏的字接续
+        val beforeCursor = runCatching {
+            currentInputConnection?.getTextBeforeCursor(ASSOCIATION_ANCHOR_CHARS, 0)?.toString().orEmpty()
+        }.getOrDefault("")
+        val text = AssociationCommit.textToCommit(lastCommit, candidate.insertText, beforeCursor)
+        if (text.isEmpty()) {
+            clearAssociation()
+            renderCandidateView()
+            return
+        }
+        commit(text, allowAssociation = false, source = CommitSource.ASSOCIATION)
     }
 
     /** 组合码带下划线，等价于 macOS 版的 marked text 样式 */
@@ -1271,8 +1509,33 @@ class IspeechImeService : InputMethodService() {
         // codeOverride（「联想」「语音」「快捷短语」「AI回复」等）仍作为状态机参与上屏判断，
         // 但不再渲染到候选条左侧，避免候选区出现来源标识。
         val code = statusText ?: buffer
-        candidateView?.update(code, candidates)
+        // 按钮可用性与 in-flight 同一个真相源：任何一次渲染都按当前状态决定，
+        // 不存在「看着能点、点了没反应」的第二条写入通道
+        candidateView?.update(code, candidates, micActionLabel(), actionEnabled = !micJumpInFlight)
     }
+
+    /**
+     * 未授权提示态下「去授权 / 去设置」按钮的文案；不在提示态时返回 null（按钮隐藏）。
+     *
+     * 判断条件是「授权提示仍是候选条那一行文本」：其它状态（组合码、别的通知）一律不带按钮，
+     * 因此不会把用户正在打的码读成授权态。
+     */
+    private fun micActionLabel(): String? {
+        val action = MicGrantAction.resolve(
+            prompt = micPromptText,
+            line = statusText,
+            granted = isMicPermissionGranted(),
+            permanentlyDenied = micPermanentlyDenied,
+        )
+        return when (action) {
+            MicGrantAction.NONE -> null
+            MicGrantAction.REQUEST -> getString(R.string.voice_action_grant)
+            MicGrantAction.OPEN_SETTINGS -> getString(R.string.voice_action_open_settings)
+        }
+    }
+
+    private fun isMicPermissionGranted(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     /** 清掉联想候选（用户继续输入时调用） */
     private fun clearAssociation() {
@@ -1291,12 +1554,13 @@ class IspeechImeService : InputMethodService() {
     //  面板：快捷短语 / 剪贴板
     // ──────────────────────────────────────────────
 
-    /** 打开 / 关闭面板（重复点击同一面板即关闭） */
+    /** openPanel 前先让词组学习失效：面板切换算中断（AC-3.4） */
     private fun openPanel(target: Panel) {
         if (panel == target) {
             closePanel()
             return
         }
+        phraseTracker.onInterrupt()
         commitPending()
         clearAssociation()
         panel = target
@@ -1336,6 +1600,7 @@ class IspeechImeService : InputMethodService() {
 
     private fun closePanel() {
         if (panel == Panel.NONE) return
+        phraseTracker.onInterrupt()
         panel = Panel.NONE
         panelKeyword = ""
         quickPhrasePanel?.setKeyword("")
@@ -1596,14 +1861,18 @@ class IspeechImeService : InputMethodService() {
     // ──────────────────────────────────────────────
 
     /**
-     * 点击语音键：未授权则引导授权 → 识别中则取消 → 否则开始识别。
+     * 点击语音键：未授权则在候选条提示（不跳页）→ 识别中则取消 → 否则开始识别。
      *
      * 识别文本**说完即上屏**（最终结果直接提交到输入框）：语音是一次到位的整句，
      * 不像五笔 / 拼音还要从候选里挑，若只放进候选条等用户再按空格，就会显得「说完不出字」。
      * 中间结果（partial）仍先作为候选实时展示。
      */
     private fun toggleVoiceInput() {
-        // 离线识别（Vosk）与系统识别是完全不同的链路，分开处理
+        // 内置离线识别（FunASR / Vosk）与系统识别是完全不同的链路，分开处理
+        if (asr.engine == AsrEngine.FUNASR) {
+            toggleFunAsrVoice()
+            return
+        }
         if (asr.engine == AsrEngine.VOSK) {
             toggleVoskVoice()
             return
@@ -1626,11 +1895,9 @@ class IspeechImeService : InputMethodService() {
             renderCandidateView()
             return
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (!isMicPermissionGranted()) {
             AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "no_mic_permission", "engine" to asr.engine.name)
-            statusText = getString(R.string.voice_need_permission)
-            renderCandidateView()
-            requestMicPermission()
+            showMicPermissionPrompt()
             return
         }
         if (controller.isListening) {
@@ -1729,10 +1996,61 @@ class IspeechImeService : InputMethodService() {
         commitDirect(text, CommitType.VOICE)
     }
 
-    // ── 离线识别（Vosk 端侧引擎）──
+    // ── 内置离线识别（FunASR / Vosk 端侧引擎）──
 
     /**
-     * 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
+     * FunASR 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
+     *
+     * FunASR 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
+     * 与 [FunAsrSpeechEngine] 的 [FunAsrSpeechEngine.finish] 语义一致。下载与就绪判定复用
+     * [FunAsrModelStore]（本 issue 只恢复接线，不改其下载 / 校验逻辑）。
+     */
+    private fun toggleFunAsrVoice() {
+        val engine = funasrVoice ?: return
+        if (!engine.isReady) {
+            AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "model_not_ready", "engine" to "FUNASR")
+            startFunAsrModelDownload()
+            return
+        }
+        if (!isMicPermissionGranted()) {
+            AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "no_mic_permission", "engine" to "FUNASR")
+            showMicPermissionPrompt()
+            return
+        }
+        if (engine.isListening) {
+            // 第二次按键 = 结束收音，收尾由引擎自己打 `ev=end engine=FUNASR`
+            engine.finish()
+            return
+        }
+        if (panel != Panel.NONE) closePanel()
+        commitPending()
+        clearAssociation()
+        dismissAiState()
+        startVoiceTrace()
+        voiceActive = true
+        armVoiceSessionGuard()
+        statusText = getString(R.string.voice_listening)
+        codeOverride = "语音"
+        candidates = emptyList()
+        renderCandidateView()
+        engine.start(
+            sessionId = voiceSessionId,
+            onPartial = { text -> showVoiceCandidate(text) },
+            onFinal = { text ->
+                statusText = null
+                commitVoiceText(text)
+            },
+            onError = { message ->
+                endVoiceSession("engine_error", ok = false)
+                statusText = message
+                candidates = emptyList()
+                renderCandidateView()
+            },
+        )
+    }
+
+    /**
+     * Vosk 离线识别开关：模型未就绪先下载；收音中再点一次即「结束并上屏」。
      *
      * Vosk 不做端点检测（没有「说完自动结束」），所以交互是「点一次开始、再点一次结束」，
      * 与 [VoskSpeechEngine] 的 [VoskSpeechEngine.finish] 语义一致。
@@ -1744,11 +2062,9 @@ class IspeechImeService : InputMethodService() {
             startVoskModelDownload()
             return
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (!isMicPermissionGranted()) {
             AsrTrace.w(voiceSessionId, AsrTrace.EV_BLOCKED, "reason" to "no_mic_permission", "engine" to "VOSK")
-            statusText = getString(R.string.voice_need_permission)
-            renderCandidateView()
-            requestMicPermission()
+            showMicPermissionPrompt()
             return
         }
         if (engine.isListening) {
@@ -1783,10 +2099,27 @@ class IspeechImeService : InputMethodService() {
         )
     }
 
-    /** 首次使用离线识别时下载模型（约 42MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
+    /** 首次使用 FunASR 离线识别时下载模型（约 74MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
+    private fun startFunAsrModelDownload() {
+        if (offlineModelDownloading) return
+        offlineModelDownloading = true
+        statusText = getString(R.string.voice_model_downloading, 0)
+        renderCandidateView()
+        serviceScope.launch {
+            val ok = FunAsrModelStore.ensureModel(this@IspeechImeService) { percent ->
+                statusText = getString(R.string.voice_model_downloading, percent)
+                renderCandidateView()
+            }
+            offlineModelDownloading = false
+            statusText = getString(if (ok) R.string.voice_model_ready else R.string.voice_model_failed)
+            renderCandidateView()
+        }
+    }
+
+    /** 首次使用 Vosk 离线识别时下载模型（约 42MB）：进度显示在候选条，完成后提示再点一次麦克风。 */
     private fun startVoskModelDownload() {
-        if (voskDownloading) return
-        voskDownloading = true
+        if (offlineModelDownloading) return
+        offlineModelDownloading = true
         AsrTrace.i(voiceSessionId, AsrTrace.EV_START, "engine" to "VOSK", "stage" to "model_download", "ms" to voiceElapsedMs())
         statusText = getString(R.string.voice_model_downloading, 0)
         renderCandidateView()
@@ -1795,7 +2128,7 @@ class IspeechImeService : InputMethodService() {
                 statusText = getString(R.string.voice_model_downloading, percent)
                 renderCandidateView()
             }
-            voskDownloading = false
+            offlineModelDownloading = false
             AsrTrace.i(
                 voiceSessionId,
                 if (ok) AsrTrace.EV_RESULT else AsrTrace.EV_ERROR,
@@ -1813,23 +2146,109 @@ class IspeechImeService : InputMethodService() {
         AsrTrace.i(voiceSessionId, AsrTrace.EV_CANCEL, "stage" to "service", "ms" to voiceElapsedMs())
         endVoiceSession(reason, ok = false)
         // 无条件再摘一次离线引擎：isListening 可能已被看门狗置回 false，但工作线程仍卡在 read() 占着麦克风
+        funasrVoice?.cancel()
         voskVoice?.cancel()
         candidates = emptyList()
         statusText = null
     }
 
-    /** 未授予 RECORD_AUDIO 时拉起设置页触发系统权限申请（extra 键见 [REQUEST_MIC_EXTRA]）。 */
+    /**
+     * 未授权提示态（VOCA-166 AC-1 / AC-5）：只写候选条文本与「去授权」按钮，**不改前台 Activity**。
+     *
+     * 旧实现在这里直接拉设置页，用户刚碰到语音键（还没说话）键盘就被顶掉、宿主退后台，
+     * 正在打的字回不去。跳转改由按钮点击发起（[openMicAuthorization]）；提示之前先按其它
+     * 语音入口的既有语义上屏未完成的组合，免得提示盖住已经打出来的字。
+     */
+    private fun showMicPermissionPrompt() {
+        commitPending()
+        codeOverride = null
+        candidates = emptyList()
+        val prompt = getString(R.string.voice_need_permission)
+        micPromptText = prompt
+        statusText = prompt
+        renderCandidateView()
+    }
+
+    /**
+     * 兼容旧调用点：FunASR 接线（VOCA-190 / PR #6）的未授权分支仍按 main 旧名调用
+     * `requestMicPermission()`。语义已并入提示流——只出候选条提示，跳转仍仅由
+     * [openMicAuthorization] 的用户点击发起；不得在这里恢复自动跳页。
+     */
     private fun requestMicPermission() {
-        val intent = Intent().apply {
-            setClassName(this@IspeechImeService, SETTINGS_ACTIVITY)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(REQUEST_MIC_EXTRA, true)
+        showMicPermissionPrompt()
+    }
+
+    /**
+     * 用户点「去授权 / 去设置」才发起的唯一一次跳转（AC-6：从按语音键起 ≤2 步可达授权界面）。
+     *
+     * - 非永久拒绝：走设置页代申请桥（extra 键见 [REQUEST_MIC_EXTRA]），由设置页弹系统授权框；
+     * - 永久拒绝（USER_FIXED）：系统不再弹框，直达「系统设置 → 应用 → 智语 iSpeech → 权限」。
+     *
+     * 权限实时判定优先：已经授予就只撤提示，不跳页（ADR-001 决策 2「flag 是提示、不是门禁」）。
+     */
+    private fun openMicAuthorization() {
+        if (isMicPermissionGranted()) {
+            clearMicPrompt()
+            renderCandidateView()
+            return
         }
-        try {
-            startActivity(intent)
-        } catch (e: ActivityNotFoundException) {
-            Log.w(TAG, "未找到设置页 $SETTINGS_ACTIVITY", e)
-        }
+        if (micJumpInFlight) return
+        micJumpInFlight = true
+        // 按钮立刻转灰：可见状态与 micJumpInFlight 同源，不给 UI 开第二条写入通道
+        renderCandidateView()
+        // 首个成功即止：一次点击最多把前台切走一次
+        val jumped = MicGrantAction.jumpPlan(micPermanentlyDenied).firstOrNull { launchMicIntent(it) }
+        if (jumped == null) showMicJumpFailure()
+    }
+
+    /** 撤掉授权提示；那一行文本只在仍是提示时清，不覆盖用户之后打出的组合码。 */
+    private fun clearMicPrompt() {
+        val prompt = micPromptText ?: return
+        micPromptText = null
+        if (statusText == prompt) statusText = null
+    }
+
+    /**
+     * 发起一次跳转尝试，返回是否已交给系统。
+     *
+     * 跳转目标是跨进程系统组件，ROM（EMUI「后台弹出界面」拦截等）可抛 SecurityException /
+     * IllegalArgumentException，而这里跑在**输入法进程**的点击回调里：未捕获就是 IME 崩溃、
+     * 键盘整个消失——正是本 issue 要修的 P1 症状本身。因此按 ADR-001 决策 3 兜到 Throwable：
+     * 记一条带异常类型的日志（保留栈）后交给 [showMicJumpFailure]，绝不外抛。
+     * 只包跳转，识别链路有它自己的错误边界，不在这里动。
+     */
+    private fun launchMicIntent(target: MicJumpTarget): Boolean = try {
+        startActivity(
+            when (target) {
+                MicJumpTarget.APP_DETAILS -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+
+                MicJumpTarget.SETTINGS_BRIDGE -> Intent().apply {
+                    setClassName(this@IspeechImeService, SETTINGS_ACTIVITY)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(REQUEST_MIC_EXTRA, true)
+                }
+            },
+        )
+        true
+    } catch (t: Throwable) {
+        Log.w(TAG, "mic_auth_jump_failed target=$target type=${t.javaClass.name} msg=${t.message}", t)
+        false
+    }
+
+    /**
+     * 跳转全部失败的兜底（X1）。旧实现只 `Log.w` 一行，用户面对的是一次彻底静默的点击。
+     *
+     * 提示换成失败文案、按钮保留可重试（下一次点击同样最多跳一次）；不自动重试、不循环弹。
+     */
+    private fun showMicJumpFailure() {
+        micJumpInFlight = false
+        val message = getString(R.string.voice_permission_open_failed)
+        micPromptText = message
+        statusText = message
+        renderCandidateView()
     }
 
     // ──────────────────────────────────────────────
@@ -2023,6 +2442,9 @@ class IspeechImeService : InputMethodService() {
     /** 上屏 AI 回复（或第 [index] 条快捷短语候选）；若输入框仍是生成前原文，先删除原文（替换语义）。 */
     private fun commitAiReply(index: Int = 0) {
         val candidate = candidates.getOrNull(index) ?: return
+        // AI 回复是整段文本上屏，且不经过 [commit]：显式中断，避免它与上一跳单字凑成词
+        phraseTracker.onInterrupt()
+        markSelfWrite()
         val ic = currentInputConnection
         if (ic != null && aiSourceLen > 0) {
             val before = ic.getTextBeforeCursor(aiSourceLen, 0)?.toString().orEmpty()
@@ -2142,6 +2564,10 @@ class IspeechImeService : InputMethodService() {
         if (isEmpty()) this else filter { renderable(it.insertText) }
 
     private fun resetState() {
+        // 换输入框 / 换输入态：上一跳作废，且光标基线要重新观测
+        phraseTracker.reset()
+        lastKnownCursor = -1
+        selfWriteAt = 0
         buffer = ""
         t9Digits = ""
         t9Seq++

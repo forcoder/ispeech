@@ -33,6 +33,7 @@ build-voca30/
 .pi/
 .dsh/
 AGENTS.md
+.qoder/
 
 # 临时 worktree / 本地运行时
 .claude/worktrees/
@@ -49,6 +50,9 @@ dist/emulator-*.log
 
 # Python 校验脚本的字节码缓存
 __pycache__/
+
+# 133 MB，超过 GitHub 单文件 100 MB 硬限制，推上去会被 pre-receive 拒（GH001）
+dist/ispeech-release-1.5-20261115-1004.apk
 
 # 短语数据导出
 通用短语.csv

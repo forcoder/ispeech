@@ -15,15 +15,24 @@
   5. 输入统计：InputStats -> 服务埋点 -> StatsViewModel/StatsScreen -> 导航 STATS ->
      首页卡片
   6. 短语使用记录 PhraseUsageStore：是否只从 AppContainer 单例获取、面板是否零 IO
-  7. 口径一致性：版本号常量 vs build.gradle、注释 vs 枚举、校验脚本 vs 源码
+  7. 口径一致性：版本号唯一来源（build.gradle -> BuildConfig -> 两处展示）、注释 vs 枚举、
+     校验脚本 vs 源码
   8. 语音输入（VOICE / ASR）全链路：KeyDef -> 工具栏 -> 服务状态机 -> VoiceInputController
+     -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风授权提示
+     （VOCA-166：未授权跳转只由用户点候选条「去授权」触发，语音键路径不再自动跳页）
   8b. 语音「识别中」超时收敛（VOCA-231）：时限集中定义 -> 三段兜底 -> 超时必复位 + 可读文案
-     -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风代申请
+     -> 三种引擎（系统 / FunASR / Vosk）都接线 + 服务侧单一收尾出口
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
 11. 中文输入法（默认拼音 / 五笔 + 中英切换）：枚举 -> 持久化 -> 设置页 / 内置面板 -> 服务两态切换
 12. 候选条字重（VOCA-56）：候选词常规字重、首选靠颜色 / 底色区分、类注释口径一致
+13. 联想词上屏去重（VOCA-121）：AssociationCommit 规则 -> 服务 pickCandidate 联想分支接线 ->
+    规则本身用 Python 复刻跑用例（「你」+「你好」不能变「你你好」；
+    多字候选「指导老师」+「师专」不能变「指导老师师专」）
+14. 词组自学习（VOCA-65 条目 3 / ADR-0001）：PhraseCodeDeriver / PhraseLearningTracker 纯函数
+     -> WubiEngine 反向索引 -> 服务接线（onCommit / onInterrupt / reset / onUpdateSelection）
+     -> 写盘线程与学习开关
 
 输出：每条检查一行 `PASS` / `FAIL` / `WARN` 前缀；末尾 `SUMMARY: ...`。
 任一 FAIL 时退出码为 1，否则为 0。
@@ -50,6 +59,7 @@ SERVICE = JAVA / "input" / "IspeechImeService.kt"
 PANEL = JAVA / "input" / "InputMethodPanel.kt"
 QUICK_PANEL = JAVA / "input" / "QuickPhrasePanel.kt"
 CANDIDATE_VIEW = JAVA / "input" / "CandidateView.kt"
+CANDIDATE_VIEW_XML = RES / "layout" / "candidate_view.xml"
 LAYOUT_XML = RES / "layout" / "ime_input_view.xml"
 STRINGS = RES / "values" / "strings.xml"
 STRINGS_EN = RES / "values-en" / "strings.xml"
@@ -80,6 +90,7 @@ CELL_DICT_ENGINE = JAVA / "engine" / "CellDictEngine.kt"
 CHINESE_INPUT_METHOD = JAVA / "settings" / "store" / "ChineseInputMethod.kt"
 INPUT_MODE = JAVA / "input" / "InputMode.kt"
 INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "InputModePolicyTest.kt"
+ASSOCIATION_COMMIT = JAVA / "engine" / "AssociationCommit.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
 ASR_TIMING = JAVA / "input" / "AsrTiming.kt"
@@ -97,6 +108,7 @@ STATS_SCREEN = JAVA / "settings" / "StatsScreen.kt"
 STATS_VM = JAVA / "settings" / "stats" / "StatsViewModel.kt"
 NAV_GRAPH = JAVA / "settings" / "nav" / "IspeechNavGraph.kt"
 HOME_SCREEN = JAVA / "settings" / "HomeScreen.kt"
+ABOUT_SCREEN = JAVA / "settings" / "AboutScreen.kt"
 MAIN_ACTIVITY = JAVA / "settings" / "MainActivity.kt"
 BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
 
@@ -735,18 +747,38 @@ def check_phrase_usage_singleton() -> None:
 # ═════════════════════════════════════════════════════════════
 
 def check_consistency() -> None:
-    # 7.1 版本号：代码常量 vs build.gradle
+    # 7.1 版本号唯一来源：app/build.gradle.kts 的 versionName -> BuildConfig.VERSION_NAME
+    #     （VOCA-233：原先 MainActivity 另存一份 ISPEECH_VERSION="1.5"，出 1.6 包后
+    #      主页 / 关于页仍显示 1.5，用户可见面的「凭版本号分辨包」失效）
     gradle = read(BUILD_GRADLE)
     m = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
     gradle_ver = m.group(1) if m else "?"
-    m2 = re.search(r'const val ISPEECH_VERSION\s*=\s*"([^"]+)"', read(MAIN_ACTIVITY))
-    const_ver = m2.group(1) if m2 else "?"
+    hardcoded = sorted(
+        rel(p) for p in JAVA.rglob("*.kt")
+        if re.search(r'const val\s+\w*VERSION\w*\s*=\s*"[0-9][^"]*"', read(p))
+    )
     check(
-        gradle_ver == const_ver and gradle_ver != "?",
-        f"版本号一致：gradle versionName={gradle_ver} == ISPEECH_VERSION={const_ver}",
-        f"版本号不一致：app/build.gradle.kts versionName={gradle_ver} 但 "
-        f"{rel(MAIN_ACTIVITY)} ISPEECH_VERSION={const_ver}"
-        "（设置页「关于 / 首页」会显示旧版本号）",
+        gradle_ver != "?",
+        f"版本号来源存在：app/build.gradle.kts versionName={gradle_ver}",
+        "app/build.gradle.kts 未解析出 versionName（BuildConfig.VERSION_NAME 会是空串）",
+    )
+    check(
+        not hardcoded,
+        "版本号无第二处硬编码常量（唯一来源 = build.gradle versionName）",
+        f"以下文件又写了版本常量，会和包版本脱节：{hardcoded}",
+    )
+    display_offenders = []
+    for name, path, marker in (
+        ("HomeScreen", HOME_SCREEN, '"版本 v${BuildConfig.VERSION_NAME}"'),
+        ("AboutScreen", ABOUT_SCREEN, "R.string.about_version, BuildConfig.VERSION_NAME"),
+    ):
+        text = read(path)
+        if "import com.ispeech.BuildConfig" not in text or marker not in text:
+            display_offenders.append(name)
+    check(
+        not display_offenders,
+        "主页「版本 v*」与关于页「版本 *」都读 BuildConfig.VERSION_NAME",
+        f"版本展示未改读 BuildConfig（会显示旧版本号）：{display_offenders}",
     )
 
     # 7.2 排序注释口径：CandidateRanking / CompositeEngine 的注释是否提到新档位
@@ -838,6 +870,7 @@ def check_voice_chain() -> None:
     nav = read(NAV_GRAPH)
     home = read(HOME_SCREEN)
     activity = read(MAIN_ACTIVITY)
+    candidate_view = read(CANDIDATE_VIEW)
 
     # 8.1 语音键：声明 -> 工具栏 -> 服务分支
     check(
@@ -856,17 +889,22 @@ def check_voice_chain() -> None:
         f"{rel(SERVICE)} handleSoftKey 未把 VOICE 接到 toggleVoiceInput()",
     )
 
-    # 8.1b 按住说话：两种引擎都要接线（系统引擎曾因早退直接失效）
-    #       引擎已由 FunASR 换成 VOSK（07214d6）：按下按 asr.engine 分派到
-    #       VoskSpeechEngine / VoiceInputController，松手由各自 finish() 收尾。
+    # 8.1b 按住说话：三种引擎都要接线（系统引擎曾因早退直接失效）。
+    #       引擎由 FunASR 切换（临时切换到 VOSK/VOCA-190 前的断线）恢复为 FunASR 默认并保留
+    #       VOSK：按下按 asr.engine 分派到 FunAsrSpeechEngine / VoskSpeechEngine /
+    #       VoiceInputController，松手由各自 finish() 收尾。
     down = function_region(service, r"private fun onVoicePressDown\(")
     up = function_region(service, r"private fun onVoicePressUp\(")
     down_tokens = (
+        "if (asr.engine == AsrEngine.FUNASR)",
+        "toggleFunAsrVoice()",
         "if (asr.engine == AsrEngine.VOSK)",
         "toggleVoskVoice()",
         "toggleVoiceInput()",
     )
     up_tokens = (
+        "if (asr.engine == AsrEngine.FUNASR)",
+        "funasrVoice?.finish()",
         "if (asr.engine == AsrEngine.VOSK)",
         "voskVoice?.finish()",
         "voiceController?.finish()",
@@ -875,7 +913,7 @@ def check_voice_chain() -> None:
     missing += [f"松手缺 {t}" for t in up_tokens if t not in up]
     check(
         not missing,
-        "按住说话对两种引擎都接线（VOSK / 系统识别）：按下开始收音、抬起收尾上屏",
+        "按住说话对三种引擎都接线（FunASR / VOSK / 系统识别）：按下开始收音、抬起收尾上屏",
         f"{rel(SERVICE)} 按住说话接线缺项：{missing}",
     )
     check(
@@ -917,7 +955,7 @@ def check_voice_chain() -> None:
         f"{rel(SERVICE)} 语音接线缺项：{missing}",
     )
 
-    # 8.4 权限：Manifest 声明 + 包可见性 + 设置页代申请
+    # 8.4 麦克风授权（VOCA-166）：Manifest 声明 + 包可见性 + 「点击才跳」桥
     check(
         "android.permission.RECORD_AUDIO" in manifest
         and "android.speech.RecognitionService" in manifest
@@ -925,17 +963,137 @@ def check_voice_chain() -> None:
         "Manifest 声明 RECORD_AUDIO 且 queries 暴露 RecognitionService（targetSdk 34 包可见性）",
         f"{rel(MANIFEST)} 缺 RECORD_AUDIO 或 queries/RecognitionService",
     )
+    # 根因：语音键自己 startActivity 抢前台 -> 宿主退后台、mInputShown=false、整个键盘消失。
+    # 现在未授权只挂候选条提示，跳转只由用户点按钮发起（两处语音入口都不许再直接跳页）。
+    sys_entry = function_region(service, r"private fun toggleVoiceInput\(")
+    vosk_entry = function_region(service, r"private fun toggleVoskVoice\(")
+    auto_jump = [
+        name
+        for name, region in (("toggleVoiceInput", sys_entry), ("toggleVoskVoice", vosk_entry))
+        if "requestMicPermission" in region or "startActivity" in region
+        or "openMicAuthorization" in region
+    ]
     check(
-        "REQUEST_MIC_EXTRA" in service and "requestMicPermission()" in service,
-        "输入法服务未授权时请求麦克风（requestMicPermission -> 设置页 extra）",
-        f"{rel(SERVICE)} 未实现麦克风代申请请求",
+        bool(sys_entry) and bool(vosk_entry) and not auto_jump
+        and "showMicPermissionPrompt()" in service,
+        "语音键未授权只出候选条提示，不再自动跳页（toggleVoiceInput / toggleVoskVoice）",
+        f"{rel(SERVICE)} 仍在语音键路径上自动跳页（键盘会随宿主退后台）：{auto_jump}",
+    )
+    # 语义断言而不是「调用点数 == N」：将来接第三条语音链路（E3 设置页入口）时，
+    # 计数断言会以门禁失败的形式误伤，而按函数名逐条要求只会在真的漏改时红。
+    wired = [name for name, region in (("toggleVoiceInput", sys_entry), ("toggleVoskVoice", vosk_entry))
+             if "showMicPermissionPrompt()" in region]
+    check(
+        len(wired) == 2,
+        "两条语音链路（系统识别 / VOSK）各自都接到同一个授权提示入口",
+        f"{rel(SERVICE)} 有语音入口没走 showMicPermissionPrompt：漏 {sorted({'toggleVoiceInput', 'toggleVoskVoice'} - set(wired))}",
+    )
+    # 第三条语音链路（FunASR，VOCA-190 / PR #6）只在与 166 提示流并存时约束：
+    # ① 单独树上旧 requestMicPermission 定义仍在、本节不触发；④ 合入后旧名必须是
+    # 指向提示流的兼容 helper，FunASR 未授权分支同样不许自动跳页。
+    funasr_entry = function_region(service, r"private fun toggleFunAsrVoice\(")
+    if funasr_entry and "showMicPermissionPrompt()" in service:
+        helper = function_region(service, r"private fun requestMicPermission\(")
+        check(
+            ("showMicPermissionPrompt()" in funasr_entry or "requestMicPermission()" in funasr_entry)
+            and "startActivity" not in funasr_entry
+            and "openMicAuthorization" not in funasr_entry
+            and bool(helper)
+            and "showMicPermissionPrompt()" in helper
+            and "startActivity" not in helper,
+            "FunASR 语音入口未授权分支同样只出候选条提示（旧名 requestMicPermission 为兼容 helper，不自动跳页）",
+            f"{rel(SERVICE)} toggleFunAsrVoice / requestMicPermission 兼容层未接入 showMicPermissionPrompt 提示流",
+        )
+    jump_region = function_region(service, r"private fun launchMicIntent\(")
+    check(
+        "onMicActionClicked = { openMicAuthorization() }" in service
+        and "micActionLabel()" in service
+        and "MicGrantAction.jumpPlan(micPermanentlyDenied)" in service
+        and "firstOrNull { launchMicIntent(it) }" in service
+        and "Settings.ACTION_APPLICATION_DETAILS_SETTINGS" in service,
+        "授权跳转只由候选条按钮点击发起：永久拒绝直达应用权限页、逐项尝试且首个成功即止（一次点击最多切一次前台）",
+        f"{rel(SERVICE)} 缺「按钮 -> 跳转」闭环，或跳转不再受 jumpPlan 约束",
+    )
+    # 跳转目标是跨进程系统组件，EMUI 等 ROM 可抛 SecurityException / IllegalArgumentException；
+    # 这些调用在输入法进程的点击回调里，未捕获 = IME 崩、键盘整个消失（就是本 issue 的 P1 症状）。
+    check(
+        bool(jump_region) and "catch (t: Throwable)" in jump_region
+        and "mic_auth_jump_failed" in jump_region and "t.javaClass.name" in jump_region
+        and ", t)" in jump_region,
+        "跳转按 Throwable 兜底，并记一条含异常类型、带栈的 mic_auth_jump_failed（ADR-001 决策 3）",
+        f"{rel(SERVICE)} launchMicIntent 的异常边界不合规，跳转失败会变成输入法崩溃",
+    )
+    failure_region = function_region(service, r"private fun showMicJumpFailure\(")
+    check(
+        "voice_permission_open_failed" in service
+        and "micJumpInFlight = false" in failure_region
+        and "renderCandidateView()" in failure_region,
+        "跳转失败有可读兜底文案 + 复位在途状态并保留按钮可重试（不静默、不自动循环弹）",
+        f"{rel(SERVICE)} 跳转失败兜底缺文案或未复位 micJumpInFlight（按钮会永久灰着）",
+    )
+    # 授权按钮必须是候选区的「兄弟控件」：做成候选项会被空格 / 数字键按上屏语义误触发，
+    # 放进 itemContainer 会被每次刷新的 removeAllViews() 清掉（UX 硬约束）
+    bar_xml = read(CANDIDATE_VIEW_XML)
+    idx_items = bar_xml.find("@+id/candidate_items")
+    idx_scroll_close = bar_xml.find("</HorizontalScrollView>")
+    idx_mic = bar_xml.find("@+id/candidate_mic_action")
+    check(
+        -1 not in (idx_items, idx_scroll_close, idx_mic)
+        and idx_items < idx_scroll_close < idx_mic
+        and 'android:minHeight="44dp"' in bar_xml[idx_mic:]
+        and "R.id.candidate_mic_action" in candidate_view,
+        "候选条授权按钮在候选区之外（兄弟控件）且触摸目标 ≥44dp",
+        f"{rel(CANDIDATE_VIEW_XML)} 授权按钮位置 / 尺寸不合规（不能是候选项）",
+    )
+    check(
+        "actionLabel: String? = null" in candidate_view
+        and "actionEnabled: Boolean = true" in candidate_view
+        and "private fun renderMicAction(actionLabel: String?, enabled: Boolean)" in candidate_view
+        and "onMicActionClicked" in candidate_view
+        # 按钮状态若另开一条公开写入通道，任何一次 update() 都会把它恢复成可点，
+        # 于是「点了没反应」的在途态在界面上仍显示可用（UX 硬约束①同源）
+        and "fun setMicActionEnabled" not in candidate_view
+        and "actionEnabled = !micJumpInFlight" in service,
+        "候选条按钮的文案与可用性只从 update() 一个入口渲染（服务侧按实时状态传参）",
+        f"{rel(CANDIDATE_VIEW)} 又开了一条按钮状态写入通道，或未把在途状态接进 update()",
+    )
+    # 设置页 finish() 后宿主不一定重显键盘（ADR-001 决策 4 不承诺平台行为），
+    # 「回来该干什么」全靠 S8 这句一次性指引兜着，缺它就是「修完比现状更像故障」。
+    shown_region = function_region(service, r"override fun onWindowShown\(")
+    check(
+        "R.string.voice_permission_granted" in shown_region
+        and "micJumpInFlight = false" in shown_region,
+        "授权成功回场补一次性指引（S8），同时复位在途状态让按钮重新可点",
+        f"{rel(SERVICE)} onWindowShown 缺 S8 一次性提示（用户回到输入框却没有下一步）",
+    )
+    check(
+        "micPermanentlyDeniedFlow" in service
+        and "micPermanentlyDeniedFlow" in store
+        and "setMicPermanentlyDenied" in store,
+        "「永久拒绝」标志：设置页写、输入法订阅（跨组件同一 DataStore）",
+        f"{rel(SERVICE)} / {rel(SETTINGS_STORE)} 永久拒绝标志链路断裂",
     )
     check(
         "REQUEST_MIC_EXTRA" in activity
-        and "requestMicrophonePermissionIfNeeded" in activity
-        and "Manifest.permission.RECORD_AUDIO" in activity,
-        "设置页按 REQUEST_MIC_EXTRA 拉起系统麦克风授权（输入法无法自弹对话框）",
-        f"{rel(MAIN_ACTIVITY)} 未实现 REQUEST_MIC_EXTRA 代申请",
+        and "beginMicSession" in activity
+        and "onNewIntent" in activity
+        and "micPermissionLauncher.launch" in activity
+        and "Manifest.permission.RECORD_AUDIO" in activity
+        and "shouldShowRequestPermissionRationale" in activity
+        and "setMicPermanentlyDenied" in activity
+        and "finish()" in activity,
+        "设置页代申请系统授权（新建 + 复用实例 onNewIntent 两条路都要认会话）+ 落「永久拒绝」标志 + 会话结束 finish() 回输入框（ADR-001 决策 2/4）",
+        f"{rel(MAIN_ACTIVITY)} 代申请 / 标志落库 / finish 回场缺项",
+    )
+    main_activity_decl = re.search(
+        r'<activity\s+android:name="com\.ispeech\.settings\.MainActivity"[^>]*>',
+        manifest,
+    )
+    check(
+        main_activity_decl is not None
+        and 'android:launchMode="singleTask"' in main_activity_decl.group(0),
+        "设置页 singleTask：输入法复用实例时才能收到 onNewIntent，否则授权框不弹、用户被丢在设置页",
+        f"{rel(MANIFEST)} MainActivity 未声明 singleTask（ADR-001 决策 4 回场链路会断）",
     )
 
     # 8.5 ASR 设置模型 + DataStore 读写
@@ -943,6 +1101,18 @@ def check_voice_chain() -> None:
         {"SYSTEM", "CUSTOM"} <= set(enum_members(asr, "AsrEngine") or []),
         "AsrEngine 含 SYSTEM / CUSTOM（系统识别器 / 指定服务组件）",
         f"{rel(ASR_SETTINGS)} 的 AsrEngine 缺 SYSTEM / CUSTOM",
+    )
+    check(
+        {"FUNASR", "VOSK"} <= set(enum_members(asr, "AsrEngine") or []),
+        "AsrEngine 含 FUNASR / VOSK（两种内置离线识别引擎都保留）",
+        f"{rel(ASR_SETTINGS)} 的 AsrEngine 缺 FUNASR / VOSK",
+    )
+    check(
+        "val engine: AsrEngine = AsrEngine.FUNASR" in asr
+        and "?:" in asr
+        and "FUNASR" in asr,
+        "AsrSettings 默认引擎为 FUNASR（parse() 未存过 / 不识别时也回落 FUNASR）",
+        f"{rel(ASR_SETTINGS)} 默认引擎未设为 FUNASR 或 parse() 未回落 FUNASR",
     )
     check(
         "ASR_MODEL_EXTRA" in asr and "ZH_CN" in asr and '"zh-CN"' in asr,
@@ -1007,7 +1177,9 @@ def check_voice_chain() -> None:
     required = {
         "voice_listening", "voice_need_permission", "voice_no_match",
         "voice_error", "voice_cancel", "voice_unavailable",
+        "voice_action_grant", "voice_action_open_settings", "voice_permission_open_failed",
         "asr_title", "asr_description", "asr_engine_system", "asr_engine_custom",
+        "asr_engine_funasr", "asr_engine_vosk",
         "asr_partial_desc", "asr_offline_desc", "asr_saved", "asr_save_failed",
     }
     missing = sorted(k for k in required if k not in zh or k not in en)
@@ -1612,10 +1784,19 @@ def check_cell_dict_chain() -> None:
     )
     check(
         "internal const val CELL_DICT_WEIGHT = 80_000" in cell_engine
-        and "UserDictMode.WUBI -> if (text.length == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE" in cell_engine
+        and "UserDictMode.WUBI -> entryKindOf(text)" in cell_engine
         and "UserDictMode.PINYIN -> LookupKind.PINYIN" in cell_engine,
-        "权重 8 万（让位用户词 / 压过系统词），多字条目走 WUBIPHRASE（不混入快捷短语组）",
+        "权重 8 万（让位用户词 / 压过系统词），档位与用户词库共用 entryKindOf",
         f"{rel(CELL_DICT_ENGINE)} 权重或档位映射缺失",
+    )
+    # 共用判定的落点在 UserDictStore.entryKindOf：按码点判定，多字走 WUBIPHRASE。
+    # 候选条按「快捷短语 → 单字 → 词组 / 句子」分组（CandidateRanking.tier），档位写错
+    # 会让学到的词混进快捷短语组，所以这条必须与 VOCA-185 的分组口径一起守住。
+    check(
+        "if (codePointLength(text) == 1) LookupKind.WUBI else LookupKind.WUBIPHRASE"
+        in read(USER_DICT_STORE),
+        "entryKindOf 按码点把多字条目归 WUBIPHRASE（候选条分组前提）",
+        f"{rel(USER_DICT_STORE)} entryKindOf 档位与候选条分组不一致",
     )
     check(
         100_000 > 80_000 > 65_535 > 9_999,
@@ -1848,6 +2029,165 @@ def check_candidate_style() -> None:
     )
 
 
+# ═════════════════════════════════════════════════════════════
+# 13. 联想词上屏去重（VOCA-121）
+# ═════════════════════════════════════════════════════════════
+
+def check_association_commit() -> None:
+    """13. 联想词上屏去重（VOCA-121）：「你」上屏后点联想词「你好」不能得到「你你好」."""
+    commit = read(ASSOCIATION_COMMIT)
+    service = read(SERVICE)
+    check(
+        "object AssociationCommit" in commit,
+        "AssociationCommit 规则存在",
+        f"{rel(ASSOCIATION_COMMIT)} 缺失或没有 AssociationCommit",
+    )
+    check(
+        "suffixPrefixOverlap" in commit and "regionMatches" in commit,
+        "规则：按「已上屏后缀 / 候选前缀」最长重合裁剪",
+        "AssociationCommit.textToCommit 未实现最长重合裁剪（多字候选会出现重复字）",
+    )
+    check(
+        "candidate.startsWith(lastCommit)" not in commit,
+        "规则不再只认「整段前缀」重合（多字候选漏裁剪的根因）",
+        "AssociationCommit 仍只处理整段前缀，多字候选上屏后点联想词会重复末字",
+    )
+    pick = re.search(r"private fun pickCandidate\(.*?\n    \}", service, re.S)
+    body = pick.group(0) if pick else ""
+    check(
+        "AssociationCommit.textToCommit" in body,
+        "pickCandidate 的联想分支走 AssociationCommit",
+        "pickCandidate 未调用 AssociationCommit.textToCommit（联想词仍会整词上屏）",
+    )
+    check(
+        "getTextBeforeCursor" in body,
+        "pickCandidate 用光标前实际文本兜底（lastCommit 被宿主清空时不重复）",
+        "pickCandidate 未把光标前文本作为兜底锚点，宿主重启输入连接后仍可能重复",
+    )
+    check(
+        "allowAssociation = false" in body and "CommitSource.ASSOCIATION" in body,
+        "联想词上屏后不再接续联想，并标注 ASSOCIATION 来源（沿用原语义，只改上屏文本）",
+        "pickCandidate 联想分支的上屏调用被改动，需人工确认",
+    )
+
+    def text_to_commit(last_commit: str, candidate: str, before_cursor: str = "") -> str:
+        """Python 复刻 AssociationCommit.textToCommit（改 Kotlin 时同步改这里）."""
+        if not candidate:
+            return candidate
+        anchor = last_commit or before_cursor
+        if not anchor:
+            return candidate
+        if candidate == anchor:
+            return ""
+        window = anchor[-16:]
+        for length in range(min(len(window), len(candidate)), 0, -1):
+            if candidate.startswith(window[-length:]):
+                return candidate[length:]
+        return candidate
+
+    cases = [
+        # 末字单字上屏 -> 联想词只补后半截
+        (("你", "你好"), "好"),
+        (("你", "你们"), "们"),
+        # 多字候选：联想按末字查，候选开头就是这个字 -> 裁掉重复的那个字
+        (("指导老师", "师专"), "专"),
+        (("指导老师", "师傅"), "傅"),
+        (("知道", "道理"), "理"),
+        (("指导老师", "老师好"), "好"),
+        # 词组整词前缀重合 -> 只补多出来的部分
+        (("你好", "你好吗"), "吗"),
+        (("天气", "天气预报"), "预报"),
+        # 无重合 -> 整词上屏（用户词库「包含」联想）
+        (("气", "天气"), "天气"),
+        (("知", "认知"), "认知"),
+        # 与已上屏内容相同 -> 不重复写
+        (("天气", "天气"), ""),
+        (("指导老师", "指导老师"), ""),
+        # 无已上屏文本 -> 原样
+        (("", "你好"), "你好"),
+        # lastCommit 被宿主清空 -> 退回光标前实际文本
+        (("", "师专", "指导老师"), "专"),
+        (("", "师专", "师专"), ""),
+    ]
+    bad = [(args, want, text_to_commit(*args)) for args, want in cases if text_to_commit(*args) != want]
+    check(
+        not bad,
+        f"去重规则用例全过（{len(cases)} 组：单字接续 / 多字重复字 / 整词重合 / 无重合 / 完全相同）",
+        f"去重规则用例不符：{bad}",
+    )
+
+    matrix = read(ROOT / "docs" / "sogou-feature-matrix.md")
+    check(
+        "联想" in matrix and "重复" in matrix,
+        "功能矩阵同步「联想词上屏不重复已上屏文字」口径",
+        "docs/sogou-feature-matrix.md 未写联想词去重口径",
+    )
+
+
+
+# ═════════════════════════════════════════════════════════════
+# 13. 词组自学习（VOCA-65 条目 3 / ADR-0001）：纯函数 + 接线 + 写盘线程
+# ═════════════════════════════════════════════════════════════
+
+def check_phrase_learning() -> None:
+    service = read(SERVICE)
+    deriver = read(JAVA / "engine" / "PhraseCodeDeriver.kt")
+    tracker = read(JAVA / "engine" / "PhraseLearningTracker.kt")
+    wubi = read(JAVA / "engine" / "WubiEngine.kt")
+    check(
+        "internal object PhraseCodeDeriver" in deriver
+        and "fun derive(first: String, second: String" in deriver
+        and "fun isSingleCjk(text: String)" in deriver,
+        "PhraseCodeDeriver 为纯函数对象（无 Android 依赖）",
+        f"{rel(JAVA / 'engine' / 'PhraseCodeDeriver.kt')} 缺少纯函数判定入口",
+    )
+    check(
+        "android." not in tracker and "import com.ispeech.data.codePointLength" in tracker,
+        "PhraseLearningTracker 零 Android 依赖（可 JVM 单测）",
+        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 引入了 Android 依赖",
+    )
+    check(
+        "const val LEARN_WINDOW_MILLIS = 5_000L" in tracker
+        and "private val windowMillis: Long = LEARN_WINDOW_MILLIS" in tracker,
+        "时间窗 W 是构造参数（默认 5 s），非写死",
+        f"{rel(JAVA / 'engine' / 'PhraseLearningTracker.kt')} 时间窗未参数化",
+    )
+    check(
+        "fun fullCodeOf(char: String): String?" in wubi and "fun hasWord(word: String): Boolean" in wubi,
+        "WubiEngine 提供 fullCodeOf / hasWord（推导与「系统已有不学」）",
+        f"{rel(JAVA / 'engine' / 'WubiEngine.kt')} 缺少反向索引接口",
+    )
+    check(
+        "phraseTracker.onCommit(text, source)" in service
+        and "phraseTracker.onInterrupt()" in service
+        and "phraseTracker.reset()" in service,
+        "服务侧三个 tracker 调用点（onCommit / onInterrupt / reset）齐全",
+        f"{rel(SERVICE)} 词组学习接线不全",
+    )
+    check(
+        "override fun onUpdateSelection(" in service
+        and "isSelfCausedSelectionChange(newSelStart, lastKnownCursor, selectionTolerance)" in service,
+        "AC-3.4 光标分支：新增 onUpdateSelection 并走自因过滤",
+        f"{rel(SERVICE)} 缺少 onUpdateSelection 覆写或自因过滤",
+    )
+    phrase_region = function_region(service, r"private fun learnPhrase\(decision: PhraseLearningDecision\)")
+    check(
+        "serviceScope.launch(Dispatchers.IO)" in phrase_region,
+        "AC-3.11 词组写盘走 Dispatchers.IO",
+        f"{rel(SERVICE)} learnPhrase 未走 IO 线程（主线程会 ANR）",
+    )
+    check(
+        "if (!settings.learning)" in phrase_region,
+        "AC-3.8 复用「用户词频学习」开关，未新增设置项",
+        f"{rel(SERVICE)} learnPhrase 未检查 settings.learning",
+    )
+    check(
+        "store.record(decision.code, decision.text, UserDictMode.WUBI)" in phrase_region,
+        "词组写入 wb 用户词库（复用 record，格式不变）",
+        f"{rel(SERVICE)} 词组未写入 wb 库",
+    )
+
+
 def main() -> int:
     print(f"== check_crosscut.py == 仓库根：{ROOT}")
     print("-- 1. LookupKind（WUBIPHRASE / PINYIN）--")
@@ -1876,6 +2216,10 @@ def main() -> int:
     check_chinese_input_method()
     print("-- 12. 候选条字重（VOCA-56）--")
     check_candidate_style()
+    print("-- 13. 联想词上屏去重（VOCA-121）--")
+    check_association_commit()
+    print("-- 14. 词组自学习（VOCA-65 条目 3）--")
+    check_phrase_learning()
     print(f"SUMMARY: passed={_passed} failed={_failed} warned={_warned}")
     return 1 if _failed else 0
 

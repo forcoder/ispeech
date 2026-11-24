@@ -23,7 +23,10 @@
        └─ IspeechImeService.onVoicePressDown / onVoicePressUp
             ├─ FunASR：startFunAsrListening() / funasrVoice.finish()
             └─ 系统引擎：toggleVoiceInput() / VoiceInputController.finish()
-                 ├─ 未授权：requestMicPermission() -> 设置页 MainActivity（extra REQUEST_MIC_EXTRA）弹系统授权
+                 ├─ 未授权：showMicPermissionPrompt() 只出候选条提示，不跳页；用户点「去授权」才 openMicAuthorization()
+                 │    ├─ 系统还会弹框：拉起设置页 MainActivity（extra REQUEST_MIC_EXTRA）代弹授权框
+                 │    └─ 已永久拒绝：拉起本应用「系统设置 → 应用 → 智语 iSpeech → 权限」页
+                 │         └─ 会话结束 MainActivity.finish() 回到原输入框（不停在设置页）
                  ├─ 开始收音：Panel.VOICE（VoicePanelView：实时文字 + 音量波形）
                  ├─ onPartialResults -> voicePanel.setListeningText()（只进面板，不占候选条）
                  ├─ onResults       -> closeVoicePanel() + commitVoiceText()（松手即上屏）
@@ -39,7 +42,7 @@
 | 持久化 | `SettingsStore`（`asrSettingsFlow` / `asrSettings` / `setAsrSettings`） |
 | 设置页 | `settings/asr/AsrSettingsScreen.kt` + `AsrSettingsViewModel.kt`（导航路由 `IspeechRoutes.ASR`，首页 ASR 卡片） |
 | 输入法内面板 | `input/SettingsPanel.kt`（引擎 / 语言 / 参数分项，`onAsrChange -> applyAsrChange`） |
-| 权限 | `AndroidManifest.xml`（`RECORD_AUDIO` + `queries/RecognitionService`）、`settings/MainActivity.kt`（`REQUEST_MIC_EXTRA` 代申请） |
+| 权限 | `AndroidManifest.xml`（`RECORD_AUDIO` + `queries/RecognitionService`，`MainActivity` 需 `singleTask`）、`input/MicGrantAction.kt`（提示态该显示哪个动作：纯决策，可单测）、`settings/MainActivity.kt`（`REQUEST_MIC_EXTRA` 代申请 + 会话结束 `finish()` 回场）、`SettingsStore.micPermanentlyDeniedFlow`（永久拒绝提示，仅作文案提示，是否可授权一律以 `checkSelfPermission` 实时结果为准） |
 | 文案 | `res/values/strings.xml` / `values-en/strings.xml`（`voice_*` 6 项 + `asr_*` 19 项，中英同名） |
 
 健壮性（真机踩坑后加）：
@@ -77,6 +80,32 @@
 - **识别能力**：取决于设备上的 `RecognitionService`；设备无识别服务时入口直接提示「设备不支持语音输入」；离线能力取决于该服务是否支持 `EXTRA_PREFER_OFFLINE`。
 - **模型名**：走应用自有 extra `com.ispeech.extra.ASR_MODEL`（非 Android 标准常量），仅识别服务主动读取时生效。
 - **待补验收**：真机朗读一段话，验证转写文本与准确率（O-09）。
+
+### 麦克风授权入口（VOCA-166）
+
+按语音键时**没有录音权限**，过去的做法是立刻 `startActivity` 拉起设置页，宿主随之被切到后台、
+整个输入法消失，用户还没说话就断了输入场景。现在的规则：
+
+| 场景 | 行为 | 代码位置 |
+| --- | --- | --- |
+| 未授权（系统还会弹框） | 候选条显示合并提示文案 + 右侧「去授权」，**不跳页**；用户点按钮才代申请 | `IspeechImeService.showMicPermissionPrompt` / `openMicAuthorization` |
+| 永久拒绝（不再弹框） | 同一提示补「系统设置 → 应用 → 智语 iSpeech → 权限」路径，按钮转「去设置」，跳本应用应用信息页；该页起不来才回落设置页代申请桥 | `MicGrantAction.jumpPlan` + `launchMicIntent` + `SettingsStore.micPermanentlyDeniedFlow` |
+| 授权结束（允许 / 拒绝 / 返回） | `MainActivity.finish()` 回到原输入框，不停在设置页；输入法重新显示时按实时权限清提示 | `MainActivity.finishMicSession` / `IspeechImeService.onWindowShown` |
+| 授权成功后回到键盘（S8） | 候选条给一次性指引「麦克风权限已开启，点击麦克风开始说话」，任何按键即清；ADR-001 决策 4 不承诺宿主重显键盘，这一句是用户回来后的下一步 | `onWindowShown` + `voice_permission_granted` |
+| 提示期间用户打字 / 切面板 / 上屏 | 提示与按钮立即消失（提示文案与 `statusText` 同生命周期，无需额外清理钩子） | `CandidateView.update` |
+| 跳转失败（ROM 拦截 / 无应用信息页） | 提示改为「打不开授权页面…」并保留按钮可再点，同时打一条含异常类型、带栈的 `mic_auth_jump_failed` | `launchMicIntent` 的 `catch (Throwable)` → `showMicJumpFailure` |
+
+跳转的三条不变量：① **只由用户点击发起**，语音键本身永不改前台（AC-1）；② 一次点击**最多成功跳一次**
+——按 `jumpPlan` 逐项尝试、首个成功即止，且 in-flight 期间按钮转灰，连点不会叠出两个授权框（AC-8）；
+③ 跳转包在 `catch (Throwable)` 里——这些调用跑在**输入法进程**的点击回调上，未捕获的 `SecurityException` /
+`IllegalArgumentException`（EMUI 后台弹窗拦截）就是一次 IME 崩溃、键盘整个消失，正是本 issue 要修的症状。
+按钮的文案与可用性只从 `CandidateView.update()` 一个入口渲染，视图侧不另开状态写入通道。
+
+「永久拒绝」标志只是**文案提示**，不作为能否授权的门槛：能不能录音每次都以
+`checkSelfPermission` 实时结果为准，标志写错也不会挡住已经授权好的用户。
+
+未覆盖（另议，不在本 issue 范围）：键盘内设置面板的常驻权限行（E2）、设置页语音识别处的
+「开启麦克风」入口（E3）。
 
 ## 六、中文输入法（拼音 / 五笔）
 
@@ -347,7 +376,7 @@ I AsrTrace: session=v1 ev=ui_reset t=10872222 reason=engine_error ok=false ms=10
 **`ui_reset reason=` 的口径**（判错会把人带去改错地方；本节初稿写成 `session_timeout`，已订正）：
 上面那次复位走的是 **`engine_error`** —— 超时文案经 `VoiceInputController.resetOnTimeout() → onError` 上抛，
 `IspeechImeService` 的 `onError` 打 `endVoiceSession("engine_error", ok = false)`。
-`session_timeout` 只属于 `IspeechImeService.armVoiceSessionGuard` 那条 66 秒 UI 兜底（`IspeechImeService.kt:333` 的
+`session_timeout` 只属于 `IspeechImeService.armVoiceSessionGuard` 那条 66 秒 UI 兜底（`IspeechImeService.kt:395` 的
 `cancelVoice("session_timeout")`）；本装置 10 秒就复位，永远走不到它。两条路径的区别就是「谁先到点」。
 
 **`ev=bind` 的 `effective=`**（同一轮订正）：探针现在打**实际生效**的识别服务 —— `CUSTOM` 取配置里的组件，
@@ -356,29 +385,30 @@ I AsrTrace: session=v1 ev=ui_reset t=10872222 reason=engine_error ok=false ms=10
 `…AiAiSpeechRecognitionService`，看日志的人会以为桩没生效。原字段保留为 `first_queried`，
 两者不同时正好把「查询顺序 ≠ 实际绑定」这个坑暴露出来。
 
-### 12.1 覆盖边界：本轮装置只走到了 `engine=SYSTEM`
+### 12.1 覆盖边界：装置日志产出在 rebase 前的树上
 
-本节日志的**装置前提必须先看清**，否则会把「已证」放大成「全路径已证」：
+本节日志是 **2026-11-24 10:14 CST 在 `emulator-5554` 上、rebase 前的分支树**（`13bd530`）采的，
+判读前必须先看清这一点，否则会把「已证」放大成「全路径已证」：
 
-- 装置跑的是 **`engine=SYSTEM`**（本分支默认：`AsrSettings.kt:54` `val engine: AsrEngine = AsrEngine.SYSTEM`）。
-  本分支 `AsrEngine` 只有 `SYSTEM / CUSTOM / VOSK` 三项（`AsrSettings.kt:6/14/22`），
-  **`FUNASR` 枚举不存在**，全树也找不到 `FunAsrSpeechEngine(` 的构造点（只有类自身与其内部引用）。
-  → 本 PR 给离线引擎补的 `stage=start` / `stage=finish` / `NO_AUDIO` 兜底，**在这棵树上不可达、运行时样本为 0**。
-- 比对对象：`origin/main` 才是 `AsrEngine { SYSTEM, CUSTOM, FUNASR, VOSK }`、默认 `FUNASR`
-  （`AsrSettings.kt:70`），并在 `IspeechImeService.kt:338` 构造 `FunAsrSpeechEngine`。
-  两边默认引擎不是同一个，本节的运行时结论**不能**直接搬到出厂默认路径上。
+- 采日志的那棵树 `AsrEngine` 只有 `SYSTEM / CUSTOM / VOSK`，默认 `SYSTEM`，全树没有 `FunAsrSpeechEngine(` 构造点。
+  所以那次跑到的只有 **`engine=SYSTEM`** 一条链路；本 PR 给离线引擎补的
+  `stage=start` / `stage=finish` / `NO_AUDIO` 兜底在那棵树上**不可达、运行时样本为 0**。
+- 本分支已 rebase 到 `origin/main@0168e59`（PR #6 的 FunASR 接线在内），现在这棵树上
+  `AsrEngine { SYSTEM, CUSTOM, FUNASR, VOSK }`、默认 `FUNASR`（`AsrSettings.kt:70`），
+  并且 `IspeechImeService.kt:459` 构造 `FunAsrSpeechEngine` —— **`engine=FUNASR` 已是本树实际出厂默认路径**，
+  但仍**没有**它的运行时样本。合并后必须在这棵新树上补一次。
 
 | 分支 / 阶段 | 判据 | 结论 |
 | --- | --- | --- |
-| `engine=SYSTEM` + 识别服务零回调 | `ev=timeout stage=start` → `ev=ui_reset` ≤ 10.02 s | **已证**（本节实测原文） |
+| `engine=SYSTEM` + 识别服务零回调 | `ev=timeout stage=start` → `ev=ui_reset` ≤ 10.02 s | **已证**（本节实测原文，rebase 前树） |
 | `engine=SYSTEM` + 回了中间结果、收尾不回 | `ev=timeout stage=finish` | 未证（`stage=finish` 零运行时样本） |
 | `engine=SYSTEM` + 60 s 硬上限 | `ev=timeout stage=session` | 未证（`stage=session` 零运行时样本） |
-| `engine=FUNASR`（出厂默认路径） | start / finish / `NO_AUDIO` 三条兜底 | **未证，且本树不可达**（见上） |
+| `engine=FUNASR`（rebase 后本树出厂默认路径） | start / finish / `NO_AUDIO` 三条兜底 | 未证（本树可达，运行时样本为 0；旧树不可达） |
 | `engine=VOSK` | start / finish 两条兜底 | 未证（本树可达，本轮未跑） |
 | 真机 `FMR0224913042917` / `23F0224224000950` | 复位时间 + 可读文案 + `stage=session`/`stage=finish` | 未达成（`adb devices -l` 无该机） |
 
-要补的两件事（按 §八 判读表，真机接线后一次采完）：`stage=session` / `stage=finish` 两条运行时样本；
-以及合并到 `main` 后对 `engine=FUNASR` 这条**实际出厂默认路径**补一次 start 兜底样本 —— 只在那棵树上才走得到。
+要补的三件事（按 §八 判读表，真机 / rebase 后树上各采一次）：`stage=session` / `stage=finish`
+两条运行时样本；`engine=FUNASR` 这条**实际出厂默认路径**的 start 兜底样本；以及真机三类产物。
 
 ### 12.2 真机回线后的采集步骤（未执行，设备当前不可达）
 

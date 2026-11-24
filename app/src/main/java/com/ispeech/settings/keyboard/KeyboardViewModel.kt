@@ -1,6 +1,7 @@
 package com.ispeech.settings.keyboard
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ispeech.data.UserDictEntry
@@ -25,6 +26,14 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
 
     private val _userWords = MutableStateFlow<List<UserDictEntry>>(emptyList())
     val userWords: StateFlow<List<UserDictEntry>> = _userWords.asStateFlow()
+
+    // 必须在 init{} 之前声明：Kotlin 按声明顺序执行属性初始化与 init 块，
+    // 而 viewModelScope 走 Dispatchers.Main.immediate，构造期首个 flow 会同步发射。
+    private val _chineseInputMethod = MutableStateFlow(ChineseInputMethod.PINYIN)
+    val chineseInputMethod: StateFlow<ChineseInputMethod> = _chineseInputMethod.asStateFlow()
+
+    private val _spaceLongPressMs = MutableStateFlow(500)
+    val spaceLongPressMs: StateFlow<Int> = _spaceLongPressMs.asStateFlow()
 
     init {
         // 订阅持久化数据，启动时同步一次
@@ -99,12 +108,6 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { SettingsStore.setTraditionalOutput(app, enabled) }
     }
 
-    private val _chineseInputMethod = MutableStateFlow(ChineseInputMethod.PINYIN)
-    val chineseInputMethod: StateFlow<ChineseInputMethod> = _chineseInputMethod.asStateFlow()
-
-    private val _spaceLongPressMs = MutableStateFlow(500)
-    val spaceLongPressMs: StateFlow<Int> = _spaceLongPressMs.asStateFlow()
-
     fun setChineseInputMethod(method: ChineseInputMethod) {
         _chineseInputMethod.value = method
         viewModelScope.launch { SettingsStore.setChineseInputMethod(app, method) }
@@ -131,6 +134,9 @@ class KeyboardViewModel(application: Application) : AndroidViewModel(application
             runCatching {
                 val store = AppContainer.userDict(app)
                 store.remove(entry.code, entry.text, entry.mode)
+                // 误学率（7 天内被删除的词组 / 写入总数）目前不落盘统计，只留一条日志供
+                // `adb logcat` 抽样（ADR-0001 §10 已知缺口）；需要量化时另立 issue 加计数
+                Log.i("UserDictStore", "phrase_remove code=${entry.code} text=${entry.text}")
                 AppContainer.invalidateUserDict()
                 store.all()
             }.onSuccess { _userWords.value = it }

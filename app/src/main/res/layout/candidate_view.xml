@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 候选条：静态骨架在此声明，候选项由 com.ispeech.input.CandidateView 按查询结果动态创建。
-     一行横排：组合码 + 候选词（横向滑动）。不放假翻页箭头 / 页码器 / 设置齿轮，
+     一行横排：组合码 + 候选词（横向滑动）+ 可选的麦克风授权按钮。不放假翻页箭头 / 页码器 / 设置齿轮，
      左右拖动即可浏览候选，横向空间全部留给候选词。 -->
 <com.ispeech.input.CandidateView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/candidate_bar"
@@ -47,4 +47,21 @@
             android:gravity="center_vertical"
             android:orientation="horizontal" />
     </HorizontalScrollView>
+
+    <!-- 麦克风授权入口（VOCA-166）：候选条右侧独立动作按钮，仅未授权提示态可见。
+         必须是 candidate_items 之外的兄弟控件——CandidateView.update() 每次刷新只清空候选区，
+         放进候选区会随候选消失；做成候选项会被空格 / 数字键上屏语义误触发。
+         尺寸与颜色在 com.ispeech.input.CandidateView 里按令牌设置（触摸目标 ≥44dp×64dp）。 -->
+    <TextView
+        android:id="@+id/candidate_mic_action"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:minWidth="64dp"
+        android:minHeight="44dp"
+        android:gravity="center"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:textSize="14sp"
+        android:visibility="gone" />
 </com.ispeech.input.CandidateView>
