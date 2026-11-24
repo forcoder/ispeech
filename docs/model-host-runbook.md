@@ -305,7 +305,7 @@ jobs:
 > - **R-3 语音上屏**：需真机麦克风（序列号后 4 位 `2917`），AVD 无音频输入；
 > - §8 检查表第 5 项「真机走通下载 100% → 解压 → 识别一句话」**仍未达成**。
 
-### 2026-11-24 · `main d9690f9` 本树重建 · AVD 覆盖（R-1 / R-2 / R-5）
+### 2026-11-24/25 · `main d9690f9` 本树重建 · AVD 覆盖（R-1 / R-2 / R-4 / R-5）
 
 > **为什么不是 dist 里的 v1.6 包**：`dist/ispeech-internal-v1.6.apk` 经独立复核，dex 内无
 > `AsrModelInstall` / `VoskModelStore` / `AsrModelDownloader`，构建窗口落在 11-09~11-14，
@@ -324,7 +324,7 @@ jobs:
 
 | 用例 | 结果 | 本轮实测证据 |
 |---|---|---|
-| **R-1** 全新状态（`pm clear` 后 `files/funasr` 不存在）触发 | 行为通过、**字面判据不满足** | 日志 `funasr category=ARCHIVE_MISSING 就绪标记缺失且本地无整包，需重新下载（预期 77920048 字节）`；产物 `files/funasr/model` = 80 MB、无 `.part` |
+| **R-1** 全新状态（`pm clear`/`rm -rf` 后 `files/funasr` 不存在）触发 | 行为通过、**字面判据不满足** | 第 5 轮实测（`FUNASR` 引擎）：日志 `funasr category=ARCHIVE_MISSING …（预期 77920048 字节）`；`files/funasr/model` 落盘 **8 条目**（含就绪哨兵 `.ready-b77920048-sda92b3db5218`、`model.int8.onnx` 81,828,675 B），完整 `ls -laR` 见 `R1-lsR-full.txt`；`netstats` 本段 **净增 80,777,337 B ≈ 1.037× 整包**（45,567,856 → 126,345,193） |
 | **R-2** 预置坏 `.part`（**33 B** HTML 假包）后重触发 | ✅ 自愈成功，**未卸载重装** | `断点续传：从 0KB 继续，共 76093KB` → `下载失败（第 1/3 次）: DIGEST_MISMATCH: sha256=664f15e169c9…，预期 da92b3db5218…` → 删 `.part` 重下 → `model` 重建 80 MB；`netstats` Δ=**161,538,786 B ≈ 154.06 MB（2.073× 整包）** |
 | **R-5** 断网（飞行模式，`NET_FAIL`）触发 | ✅ 失败可读、不留脏 `.part` | `下载失败（第 1/3 次）: timeout` → `Unable to resolve host "delivery-service-smzk…"` ×2 → `funasr category=PREPARE_FAILED … 期望完成标记=.ready-b77920048-sda92b3db5218`；随后 `files/funasr` 目录为空 |
 
@@ -350,10 +350,23 @@ jobs:
 ⇒ 语义已覆盖，**字面 tag 名不成立**。是把判据改成按 `FunAsrModelStore` 取，还是要求后端新增
 `AsrDownload` tag，需人类/后端定；**在裁决前本表 R-1 记「行为通过、字面判据不满足」**。
 
-**为什么 R-2 的 Δ 是 2.073× 而不是 1×（说明）**：R-2 用例先在**已有整包**状态下注入坏 `.part`，
-自愈要「先删坏 `.part` → 整包重下 → 解压」，即一次完整 77,920,048 B；而该 bucket 起点的 `rb`
-恰好落在 R-1 完成后的位置，因此这一段 delta 覆盖「R-1 尾段 + R-2 整包」，合计约两包。
-`files/funasr/model` 的 mtime 为 23:19（R-2 完成时刻）也印证 R-2 确实重新解压了一次。
+**R-2 的 Δ 为何是 2.073×（按代码归因，两次传输都属 R-2 自身）**
+
+坏 `.part` 只有 33 B，续传请求是 `Range: bytes=33-`，但响应的 33 字节内容其实是 HTML 拦截页，
+摘要校验必然失败（`DIGEST_MISMATCH`）→ 触发 `RETRY_FROM_START` 整包重下。所以 R-2 一次用例里
+有**两次完整量级的传输**：
+
+| 段 | 字节 | 说明 |
+|---|---|---|
+| ① 续传残段 | 77,920,015 | `77,920,048 − 33`，服务端回剩余部分 |
+| ② 整包重下 | 77,920,048 | 摘要失配后 `RETRY_FROM_START` |
+| 合计 payload | 155,840,063（148.62 MiB） | |
+| 实测 Δ | 161,538,786（154.06 MiB） | |
+| 差额 | 5,698,723（**+3.66%**） | TCP/IP + TLS/HTTP 头 + 重传 |
+
+⇒ **不是来源不明的第二次传输**：`161,538,786` 就是「续传一遍 + 整包一遍」的实测成本，
+`MAX_ATTEMPTS=3` 的失败重试在本例中未触发（日志只出现「第 1/3 次」即成功）。因此该数字
+**可以作为「坏 `.part` 自愈的实际下行成本」结论**：约为单包的 2.07 倍。
 
 **R-2 下行字节口径**：用 `dumpsys netstats --uid 10196` 在触发前后各取一次 `rb` 原始读数。
 **留档实况**：`R2-netstats-before.txt` / `R2-netstats-after.txt` 两份均非空、已随证据包提交；
@@ -384,15 +397,17 @@ jobs:
 | 项 | 值 |
 |---|---|
 | 源码基线 | `main` @ `d9690f9c7d22141013b904643b83b584c0381799`（同 §11 首节） |
-| 被测包 | 与 §11 首节同一个 `assembleRelease` 产物；本轮重建 sha256 `f02f3eeb0ac20b2a648aded05b0d0516adcc9a5979504914faf86a00f3c0b002`（139,229,278 B） |
-| **可复算性说明** | 同一棵树两次 `assembleRelease` 得到**不同 sha256**（`15541ef7…` vs `f02f3eeb…`），但 **`classes*.dex` 逐字节相同**（47,213,896 B，符号计数 11/5/1/1/1/9/6 全同）⇒ APK 整体不可字节级复现（签名/元数据带时间），**dex 可复现**。复核请以 `dex-strings.txt` 的符号计数为准，或以 `d9690f9` 重跑同一命令后比 dex |
+| 被测包 | **同一棵 `d9690f9` 的另一次构建**（非 §11 首节那个产物）。第 5 轮重建 sha256 `41f0659435fad741fb21cd0a1a6339ae161e9420382b42a2900857dc983e079a`（139,229,278 B）；第 4 轮为 `f02f3eeb…`、第 3 轮为 `15541ef7…` |
+| **为何不登记进 `dist/SHA256SUMS`** | 该 apk **139,229,278 B > GitHub 单文件 100 MB 硬限**，未跟踪时仓库自带门禁 `tools/verify/check_dist_manifest.py` 直接判 **FAIL**（原话「先进不了仓库，清单记了就是假答案」）。故不写入清单，改用下方 dex 口径复算 |
+| **可复算性口径（dex）** | `classes.dex` sha256 `199ffc59ff365d48abbc101915992f971ca62c86a28a6a2939118ca08ccc611d`(30,886,992 B) / `classes2.dex` `630bc14d8bde5d84a6fae615eb401f65e9ba52c2521f7651df3c61fb110e28ad`(7,906,032 B) / `classes3.dex` `d276f6188ec900ab6f0ac168d3415317776acd28be8a51fe205fdd0a60f432d1`(8,420,872 B)。按 `d9690f9` 重跑同一命令后比这三个 sha，即知是否同一份被测代码 |
+| **可复算性说明** | 同一棵树三次 `assembleRelease` 得到**三个不同 sha256**（`15541ef7…` / `f02f3eeb…` / `41f0659…`），但每次 **`classes*.dex` 逐字节相同**（47,213,896 B，符号计数 11/5/1/1/1/9/6 全同）⇒ APK 整体**不可**字节级复现（签名/zip 元数据带时间），**dex 可复现**。复核口径：`d9690f9` 重跑同一命令后比 dex 计数，不要追 apk sha |
 | 包内取证 | `VoskModelStore` 9 / `AsrModelDownloader` 5 / `AsrModelInstall` 11 / `AsrDownloadPolicy` 6 ⇒ 加固代码确在包内 |
 | 设备 | AVD `emulator-5554` / Android 14 / `sdk_gphone64_arm64` / uid `10196`；`versionName=1.5`（`main` 的 `build.gradle.kts` 未前进，仅版本标签） |
 | 引擎 | `asr_engine=VOSK`（写入 `files/datastore/ispeech_settings.preferences_pb`，因 ASR 设置页在 UI 上无入口） |
 
 | 用例 | 结果 | 关键证据 |
 |---|---|---|
-| **R-4** 切到 VOSK 引擎，走 `VoskModelStore` 下载 | ✅ 通过 | 触发后 `files/vosk/model` **65 MB** 落盘，`ls -laR` 原件见证据包 `R4-vosk-lsR.txt`：`model/README`、`model/am/final.mdl`(15,901,896 B)、`model/conf/mfcc.conf`+`model.conf`、`model/graph/Gr.fst`(26,082,259 B)+`HCLr.fst`+`disambig_tid.int`+`phones/`、`model/ivector/`；**无 `model.zip`、无 `.part` 残留** |
+| **R-4** 切到 VOSK 引擎，走 `VoskModelStore` 下载 | ✅ 通过 | 第 5 轮实测：触发 16:03:57 → `model.zip.part` 出现（2,277,123 B@20s）→ 16:04:55 落成 `model`，**耗时 ≈58 s**；完整 `ls -laR` 见 `R4-vosk-lsR-full.txt`（54 行、14 个常规文件、**逐项求和 68,292,271 B**，与 `du -sb` 68,320,943 B 一致）；含 `model/am/final.mdl`(15,901,896)、`model/graph/Gr.fst`(26,082,259)、`graph/phones/word_boundary.int`(7,161)、`model/ivector/`（`final.dubm`/`final.ie`/`final.mat`/`global_cmvn.stats`/`online_cmvn.conf`）、`model/conf/model.conf`(289 B，就绪哨兵)；**无 `model.zip`、无 `.part` 残留**。`netstats` 本 bucket `rb` 45,567,856 ≈ 1.038× `EXPECTED_BYTES`(43,898,754) |
 
 **R-4 的判据已知差异**：§10 记载该源在「断点恰在整包长度处」会回 `416` + `text/html`，走
 `RETRY_FROM_START` 自愈。本轮是全新下载（无历史 `.part`），未复现该分支；该分支由
@@ -401,7 +416,7 @@ jobs:
 **未覆盖（如实声明）**：
 - **R-3 语音上屏**：需真机麦克风（AVD 无音频输入），本轮未跑，**不得据此判定语音链路可用**。
 - **R-5 的 UI 文案**：仅取到 logcat 与文件系统证据，候选条提示文案未截图取证。
-- **VOSK 下载耗时**：约 6 分钟（43.9 MB，境外单源），未做带宽归因。
+- **VOSK 下载耗时**：第 5 轮实测 **≈58 s**（43.9 MB，境外单源；从触发到 `model` 落成）。早前版本写的「约 6 分钟」属 `bb1bf2b` 那轮，**不是本轮**，已更正。未做带宽归因。
 
 ## 变更记录
 
