@@ -61,6 +61,23 @@ AI 键的结果同时进两处，**同一份 `candidates`**，所以两条上屏
 
 真机判定：点行后输入框出现该条原文且面板收起、长按进详情、改了输入框再点不吞字。
 
+### adb 复现（AC-5a.1~5a.5）
+
+```bash
+# 设备先装 debug 包
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# 短语模式：3 条短语命中，离线可跑（验 5a.1 / 5a.2 / 5a.3 / 5a.4）
+python3 tools/verify/voca628_ai_one_tap_adb.py --serial emulator-5554
+
+# 模型模式：本机起 OpenAI 兼容假端点，adb reverse 进设备，验 5a.5 采纳率与 few-shot
+python3 tools/verify/voca628_ai_one_tap_adb.py --serial emulator-5554 --mock-llm
+```
+
+脚本按截图色块定位输入法窗口（`uiautomator` 导不出 IME 窗口层级），逐条打印 `PASS`/`FAIL`
+与判定依据（输入框文本 + `ai_adopt` 日志 + IME 窗口高度变化）。`--strict-device` 强制要求
+真机（AC-5a.3 要真机时序，模拟器证据只作补充）。模型模式不用真 Key、不出站访问外部厂商。
+
 ## 学习与采纳率
 
 - 存储：`filesDir/ai_learning.txt`（`次数 <TAB> 输入 <TAB> 采纳的回复`，转义规则与 `quick_phrases_user.txt` 一致）；
@@ -81,6 +98,9 @@ AI 键的结果同时进两处，**同一份 `candidates`**，所以两条上屏
 ## 验证
 
 ```bash
-python3 tools/verify/check_ai_suggest.py   # 34 项：预设 / 存储 / 生成链路 / 学习链路 / 设置入口
-python3 tools/verify/check_quick_trigger.py # 39 项：快捷短语与空格长按
+python3 tools/verify/check_ai_suggest.py   # 51 项：预设 / 存储 / 生成链路 / 学习链路 / 设置入口
+python3 tools/verify/check_quick_trigger.py # 65 项：快捷短语与空格长按
+
+# 真机 / 模拟器黑盒复现（AC-5a.1~5a.5），需设备 + debug 包
+python3 tools/verify/voca628_ai_one_tap_adb.py --serial <device>
 ```
