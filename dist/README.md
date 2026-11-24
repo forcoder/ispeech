@@ -18,7 +18,7 @@
 
 ## 取包方式（产物必须可被他人取到）
 
-**最终包字节既不在 git 树内，也不在 issue 附件**（11-19 三次实测：单包 413、双包 413、278 MB 上传超时未建评论；>139 MB 超平台单请求上限。PM 11-19 05:23 裁定「不裁剪、不分卷」，按交付计划六·四第 5 条走 adb 直传退路）。本批次（11-24）已实测**装机通道成立**：`adb install -r` 成功后设备侧 `base.apk` sha256 = 构建侧 `88062bdb…0d820`，逐字节一致。字节另存两处：出包机 `~/ispeech-artifacts/`（仓库外，符合 cfg_gate 放行条件 1）+ 本机 git 对象库 ref（未推远端）：
+**最终包字节既不在 git 树内，也不在 issue 附件**（11-19 三次实测：单包 413、双包 413、278 MB 上传超时未建评论；>139 MB 超平台单请求上限。PM 11-19 05:23 裁定「不裁剪、不分卷」，按交付计划六·四第 5 条走 adb 直传退路）。本批次（11-24）已实测**装机通道成立**：`adb install` 后设备侧 `base.apk` sha256 = 构建侧 `88062bdb…0d820`，逐字节一致（**在模拟器 `emulator-5554` 上取的读数；AC-DIST 要求真机，此项仍未达成**）。字节另存两处：出包机 `~/ispeech-artifacts/`（仓库外，符合 cfg_gate 放行条件 1）+ 本机 git 对象库 ref（未推远端）：
 
 | 包 | ref | git blob（40 位 object id） | sha256 | 字节 |
 | --- | --- | --- | --- | --- |
@@ -75,7 +75,7 @@ cd voca-186-v1.6/dist && shasum -a 256 ispeech-internal-v1.6.apk
 | 模型源在 dex | 命中 `delivery-service-smzk`；`cvm.agentai0.com` = **0** |
 | 签名证书 | `apksigner verify --print-certs` → `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`（Android Debug） |
 | 版本元数据 | `aapt2 dump badging` → `versionCode='6'` / `versionName='1.6'` |
-| 装机双向核对（AC-DIST） | `adb install -r` Success → `dumpsys package com.ispeech.ime` = `versionName=1.6` / `versionCode=6`；设备 `base.apk` sha256 = `88062bdb…0d820` = 构建侧（两向一致） |
+| 装机双向核对（AC-DIST，**仅模拟器**） | `adb install` Success → `dumpsys package com.ispeech.ime` = `versionName=1.6` / `versionCode=6`；设备 `base.apk` sha256 = `88062bdb…0d820` = 构建侧（两向一致）。设备为 `emulator-5554`（`ro.kernel.qemu=1`），**AC-DIST 要求 ≥1 台真机，该项仍未达成** |
 | dex 字节断言（本批次） | `AssociationCommit`=23 / `textToCommit`=6 / `suffixPrefixOverlap`=3 / `ASSOCIATION_ANCHOR_CHARS`=1 / `FUNASR`=12 / `delivery-service-smzk`=2 / `cvm.agentai0.com`=0 |
 | 模型源可用 | `HEAD` 200 / `Content-Length: 77920048` / `Range: 0-1023` → 206（11-19 复测） |
 
