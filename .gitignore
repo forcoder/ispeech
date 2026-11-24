@@ -42,6 +42,13 @@ dist/deploy-*.log
 dist/screenshots/
 dist/ispeech-debug-*.apk
 dist/app-debug.apk
+# 带时间戳的临时出包 / 模拟器日志（正式包是 dist/ispeech-release-v<major>.<minor>.apk）
+dist/ispeech-release-*-2*.apk
+dist/emulator-*.log
+
+# Python 静态检查脚本的字节码缓存（tools/verify 会被反复执行）
+__pycache__/
+*.pyc
 
 # 短语数据导出
 通用短语.csv
