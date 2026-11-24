@@ -713,6 +713,16 @@ REMOTE_THEN_BRANCH_UNGUARDED_RE = re.compile(
 FIRST_PARSE_AFTER_OPEN_REMOTE_RE = re.compile(
     r"openRemote\([^)]*\)[\s\S]{0,400}?QuickPhraseEngine\.from(Remote)?Text\("
 )
+# 展示侧接线（C1-6b 的另半边，VOCA-207 质检打回项 1）：面板卡片的 mode 出自 QuickPhraseCodec.parse，
+# 它得有一个云端专用开关，开关为真时调用引擎侧那个返回 QuickMatchMode 的守卫函数。
+CODEC_PARSE_GUARD_PARAM_RE = re.compile(r"fun parse\(\s*text:\s*String\s*,\s*(\w+)\s*:\s*Boolean")
+# 两种读盘调用形态：来源文件写在参数里，开关按名字面传（具名实参可省略）。
+REMOTE_FILE_PARSE_FLAG_RE = re.compile(
+    r"parseFile\(\s*AppContainer\.quickPhrasesRemoteFile\([^)]*\)\s*,\s*(?:\w+\s*=\s*)?(true|false)"
+)
+USER_FILE_PARSE_FLAG_RE = re.compile(
+    r"parseFile\(\s*AppContainer\.quickPhrasesUserFile\([^)]*\)\s*,\s*(?:\w+\s*=\s*)?(true|false)"
+)
 # 接线断言的求值面（VOCA-454 质检打回项 1）：注释（含**嵌套**块注释）与字符串（含原始串）都不算代码。
 # 这一面由 code_only() 单遍词法扫描产出，不用正则 —— 正则抠不对嵌套块注释与原始串这两类。
 
@@ -967,6 +977,77 @@ def remote_read_wiring(engine_src: str, locator_src: str) -> list[str]:
     return bad
 
 
+def _true_branch(text: str, cond: re.Pattern) -> str:
+    """取 `if (<cond>)` 的真分支文本：带花括号按配平收，不带就到第一个 `else` 为止。
+
+    不这么收口的话，`if (flag) guarded(...) else declared` 这种合法写法会被漏判成「守卫不在开关里」，
+    而把守卫调用挪到开关外面（永远不成立 / 结果被丢掉）又正好是该锁住的形态。
+    """
+    m = cond.search(text)
+    if not m:
+        return ""
+    rest = text[m.end():].lstrip()
+    if rest.startswith("{"):
+        depth = 0
+        out: list[str] = []
+        for ch in rest:
+            out.append(ch)
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+        return "".join(out)
+    e = re.search(r"\belse\b", rest)
+    return rest[: e.start()] if e else rest
+
+
+def display_mode_guard_wiring(vm_src: str, engine_src: str) -> list[str]:
+    """C1-6b 的展示半边（VOCA-207 质检打回项 1）：面板卡片的 mode 必须与引擎生效的 mode 同源。
+
+    引擎侧的守卫早就接在 `fromRemoteText` 上了（`remote_read_wiring` 锁那段），但设置页卡片读的是
+    `QuickPhraseCodec.parse`，它直取磁盘声明值 —— 于是「>4 位云端条目卡片显示 PREFIX、引擎按 EXACT 生效」，
+    用户在面板上看到的和实际命中的不是一套口径；卡片编辑按钮还会把这个未收严的 mode 继承进编辑器
+    （QuickPhrasesScreen 的 from(entry)），保存进用户文件后 `fromText` 不带守卫，误弹路径又回来了。
+    这里锁三段：① parse 有一个云端专用的 Boolean 开关；② 开关为真的分支里调用引擎侧返回
+    QuickMatchMode 的守卫函数（按返回类型认名字，守卫改名不红）；③ 两份 read 调用把开关传对 ——
+    云端传 true、用户文件传 false（C1-6b 作用域仅限云端落盘文件）。
+    与 `remote_read_wiring` 同边界：都在 `code_only()` 上求值，注释与字符串里的守卫名不算调用点；
+    锁不住「调用点在、结果被丢掉」那一层，归 `QuickDisplayMergeTest` 的行为断言。
+    """
+    bad: list[str] = []
+    vm_code, engine_code = code_only(vm_src), code_only(engine_src)
+    guard_calls = {n + "(" for n in mode_guard_names(engine_code)}
+    codec_obj = function_body(vm_code, "internal object QuickPhraseCodec")
+    if not codec_obj:
+        return ["QuickPhrasesViewModel.kt 取不到 internal object QuickPhraseCodec —— 展示侧接线断言失去落点"]
+    parse_body = function_body(codec_obj, "fun parse(")
+    if not parse_body:
+        return ["QuickPhraseCodec 里取不到 parse 函数体 —— 展示侧接线断言失去落点"]
+    pm = CODEC_PARSE_GUARD_PARAM_RE.search(parse_body)
+    if not pm:
+        return ["QuickPhraseCodec.parse 没有云端专用的 Boolean 开关参数 —— 展示侧无法只对云端行收严 mode"]
+    param = pm.group(1)
+    true_branch = _true_branch(parse_body, re.compile(rf"\bif\s*\(\s*{param}\s*\)"))
+    if not true_branch or not any(g in true_branch for g in guard_calls):
+        bad.append(
+            f"QuickPhraseCodec.parse 的 `if ({param})` 真分支里没有调用引擎侧返回 QuickMatchMode 的守卫函数 —— "
+            f"设置页卡片仍按磁盘声明的 mode 展示，与 fromRemoteText 的生效口径分裂（C1-6b 已知偏差复发）"
+        )
+    remote_flag = REMOTE_FILE_PARSE_FLAG_RE.search(vm_code)
+    if not remote_flag:
+        bad.append("找不到 parseFile(AppContainer.quickPhrasesRemoteFile(...), <开关>) —— 展示侧云端链路没把守卫开关传下来")
+    elif remote_flag.group(1) != "true":
+        bad.append("云端落盘文件的 parseFile 调用把守卫开关传成 false —— >4 位存量行在面板上仍显示 PREFIX / CONTAINS")
+    user_flag = USER_FILE_PARSE_FLAG_RE.search(vm_code)
+    if not user_flag:
+        bad.append("parseFile(AppContainer.quickPhrasesUserFile(...)) 没显式传开关 —— C1-6b 的作用域边界要靠显式实参锁住")
+    elif user_flag.group(1) != "false":
+        bad.append("用户文件也走了读盘守卫 —— C1-6b 作用域仅限云端落盘文件，用户选的 mode 受 C1-4 / C1-9 保护")
+    return bad
+
+
 def check_existing_contract_unchanged() -> None:
     """导入路径不放宽**读取侧**（不按长度丢弃 / 截断条目，C1-5；云端文件按长度收严匹配方式属 C1-6b），
     手动录入口径与 QuickTrigger 同源。"""
@@ -1001,7 +1082,7 @@ def check_existing_contract_unchanged() -> None:
     codec_at = vm_text.find("internal object QuickPhraseCodec")
     codec_first = vm_text[:codec_at].count("\n") + 1 if codec_at >= 0 else 1
     read_side = " ".join((engine_src, locator_src, codec_obj))
-    codec_present = "QuickPhraseCodec.parse(" in vm_text and "fun parse(text: String)" in codec_obj
+    codec_present = "QuickPhraseCodec.parse(" in vm_text and "fun parse(text: String" in codec_obj
     check(
         codec_present and "isValidShortcutTrigger" not in read_side,
         "读取侧（QuickPhraseCodec 整个 object / QuickPhraseEngine / QuickLocator）不调用编辑器校验器（C1-5）",
@@ -1029,6 +1110,15 @@ def check_existing_contract_unchanged() -> None:
         "云端读取链路接在 fromRemoteText 上、parse 真的调用返回 QuickMatchMode 的守卫函数（C1-6b 接线，REMOTE 分支 / openRemote 两种形态都认，守卫改名不红）",
         "C1-6b 的读盘守卫失去调用点，升级前落盘的 >4 位 CONTAINS / PREFIX 行按原样生效，DEF-3 静默复发："
         + "；".join(wiring),
+    )
+    # ④b 展示侧接线（C1-6b 的另半边，VOCA-207 质检打回项 1）：设置页卡片的 mode 走 QuickPhraseCodec.parse，
+    #     它必须与 fromRemoteText 同口径收严，否则「面板显示 PREFIX、引擎按 EXACT 生效」两套口径分裂，
+    #     而且卡片编辑器继承未收严的 mode 后写回用户文件，>4 位 PREFIX 的误弹会沿「用户没选过 mode」的路径回来。
+    display_wiring = display_mode_guard_wiring(vm_text, engine_src)
+    check(
+        not display_wiring,
+        "展示侧 QuickPhraseCodec.parse 的云端分支接在同一守卫上、用户 / 云端两份读取的开关取值正确（C1-6b 展示半边）",
+        "C1-6b 的展示侧半边失去接线，面板卡片的 mode 与引擎生效口径分裂：" + "；".join(display_wiring),
     )
     entry = read(QUICK_ENTRY)
     check("fun matchesAny(" in entry and "QuickTrigger.normalize" in entry,
