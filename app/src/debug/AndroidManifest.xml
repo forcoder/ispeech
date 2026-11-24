@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      仪器化测试用的空宿主 Activity。**只在 debug 变体**（release 包不含此类与声明）。
+
+      为什么必须放在产品侧的 debug source set 而不是 androidTest：`ActivityScenario` 用
+      `Instrumentation.startActivitySync` 拉起 Activity，而 instrumentation 的 targetPackage
+      是 `com.ispeech.ime`；声明在 test APK（`com.ispeech.ime.test`）里的 Activity 会解析到
+      另一个进程，直接抛
+      「Intent resolved to different process com.ispeech.ime.test」。
+      — VOCA-631 打回项 1 的设备侧回归需要它把面板挂进真实窗口。
+    -->
+    <application>
+        <activity
+            android:name="com.ispeech.input.EmptyHostActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    </application>
+
+</manifest>

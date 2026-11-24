@@ -769,7 +769,8 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 
 - JVM：`SearchCaretTest`（VOCA-627 时 11 例，覆盖 AC-1.1~1.4 / 1.9 与空词边界；
   VOCA-631 补码点口径后为 **18 例**，见 §12.8）；
-- 设备侧：`app/src/androidTest/java/com/ispeech/input/QuickPhrasePanelSearchBoxTest.kt`（11 例）——
+- 设备侧：`app/src/androidTest/java/com/ispeech/input/QuickPhrasePanelSearchBoxTest.kt`（VOCA-627 时 11 例，
+  VOCA-631 补 `◀ ▶` / 40dp / emoji caret 后为 **15 例**）——
   真实 View 的 `isFocusable / isCursorVisible / isClickable / isLongClickable / movementMethod`、
   `dispatchTouchEvent(ACTION_DOWN)` 在多个纵向落点上的返回值（证明文本区不吞事件）、
   `cursor()` 与 caret 实际 x 偏移、✕ 清空回到空态。
@@ -796,6 +797,7 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 | 四条写入路径 | 软键 `handleSoftKey`·``KeyAction.CHAR``、硬件键盘 `onKeyDown`·`A–Z`、候选上屏 `pickCandidate`（面板内整段插入光标处，**不 commit 到宿主**）、`✕` `onClearKeyword` |
 | 光标复位 4 处 | `openPanel` / `closePanel` / `resetState` 三处绕过 setter 的整串置空点，`panelKeyword` 与光标一起清（R1-31 / AC-1.10） |
 | `◀ ▶` 控件 | 搜索行内、40×40 dp；单击移 1 码点，长按 380 ms 后每 90 ms 连移；到头 `isEnabled=false` + 变灰 + `INVISIBLE` 槽位不跳（规格 §3.4） |
+| `◀ ▶` 连移停表 | 逻辑抽到 `input/CursorRepeater.kt`（纯 Kotlin + 注入 `Scheduler`，JVM 可测）。到边界那刻键被 `disable`，Android **不再派发触摸事件**，`ACTION_UP` 进不来 —— 因此不能只靠抬手停表，必须每步自查 `stillActive`，且 `applyCursorButtonState(enabled=false)` 主动停 |
 | `✕` 可点尺寸 | `minimumWidth/Height = 40dp`（原 30×28，AC-1.8 不满足） |
 | 几何理由 | `◀ ▶` **不并入字母行**：12 键会让字母键格宽落到 31.81 dp，违反 AC-4.6 的 ≥38 dp |
 | 硬件键盘编辑 | `DPAD_LEFT/RIGHT` / `MOVE_HOME` / `MOVE_END` / `FORWARD_DEL` 在面板分支内先行消费并 `return true`（R1-38~R1-43）；用 `MOVE_HOME` **不是** `KEYCODE_HOME` |
@@ -820,12 +822,29 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 **验证分三层（本单实跑见 issue 评论）**
 
 - JVM：`PanelKeywordStateTest`（17 例，AC-1.1~1.6 / 1.9、R1-8 / 1-10 / 1-31 / 1-43、四条路径同算式、emoji 不拆半）
-  + `SearchCaretTest`（18 例，含 2 例新增：退格删整 emoji、插入落 emoji 之后，均断言无孤立代理）；
-- 设备侧：`QuickPhrasePanelSearchBoxTest`（11 例，D2-1~D2-6 的 View 级断言）；
+  + `SearchCaretTest`（18 例，含 2 例新增：退格删整 emoji、插入落 emoji 之后，均断言无孤立代理）
+  + `CursorRepeaterTest`（8 例，`◀ ▶` 长按连移的停表：380/90 ms 节奏、抬手即停、
+    到边界被禁用当拍即停、「边界停住后再输入不得自行倒走」——VOCA-631 质检打回项 1 的回归）；
+- 设备侧：`QuickPhrasePanelSearchBoxTest`（**16 例**，D2-1~D2-6 的 View 级断言 + `◀ ▶` / 40dp /
+  emoji caret + 长按到边界抬手后不再移动的**真实窗口**回归）；
 - 门禁：`tools/verify/check_static.py` / `check_crosscut.py` / `check_input_logic.py` 等（见 §12.9）。
 
 **已知限制**：本机 `adb devices` 只有 `emulator-5554`，`FMR0224913042917` 未在线，
 所以上列真机项本轮**未验**，归属测试工程师条目 1 真机轮。
+
+### 12.9 条目 1 的静态门禁（`check_static.check_quick_search_cursor_controls`）
+
+静态门禁只拦「能可靠判定」的事，且**每一条都做过变异反向验证**（改坏 → 必须 FAIL）。
+VOCA-631 质检实测出三条逃逸，已修：
+
+| 逃逸方式 | 旧检查为何失效 | 现检查 |
+|---|---|---|
+| `fun length()` 改成 `= text.length` | 整文件 grep `codePointCount`，KDoc 注释里就有这个词 | 先 `strip_kotlin_comments()` 剥注释，再取 `length()` 的**表达式函数体**，断言体内含 `codePointCount` |
+| `applyPanelState(panelKeyword.replace(panelKeyword.keyword + text))` | 只查 `setPanelKeyword(...)` 的末尾追加 | `iter_call_args()` 取每个 `applyPanelState(...)` 实参，实参含 `+` 即 FAIL |
+| 删掉 `closePanel` 的光标复位 | 只查函数存在，不数复位点 | 数 `panelKeyword = PanelKeywordState.EMPTY` 出现次数，`< 3` 即 FAIL（openPanel / closePanel / resetState） |
+
+三条的变异复现命令与结果见本单 issue 评论「验证方式」。`length()` 那条尤其值得记：
+**拿注释里也会出现的关键字当判据，等于给「改坏也能过」留了后门**。
 
 ## 13. 导入「通用短语.csv」（2026-11-09 追加）
 

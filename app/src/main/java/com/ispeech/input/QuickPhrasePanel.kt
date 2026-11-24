@@ -164,6 +164,30 @@ class QuickPhrasePanel @JvmOverloads constructor(
     /** 光标闪烁周期（与系统默认节奏一致）。 */
     private val caretBlinkMs = 500L
     private val caretHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * `◀ ▶` 长按连移的调度器（主线程 Handler）。
+     *
+     * 不用 `view.postDelayed`：视图未 attach 时它把任务塞进 `HandlerActionQueue`，
+     * `removeCallbacks` 撤不掉已排队的那份，attach 前后行为还不一样。连移是纯时间语义，
+     * 走主线程 Handler 才可预测、才能在仪器化测试里不依赖窗口挂载。
+     */
+    private val cursorHandler = Handler(Looper.getMainLooper())
+
+    /** 把主线程 `Handler` 适配成 [CursorRepeater.Scheduler]（生产实现；测试用假时钟）。 */
+    private val cursorScheduler = object : CursorRepeater.Scheduler {
+        override fun postDelayed(task: Runnable, delayMs: Long) {
+            cursorHandler.postDelayed(task, delayMs)
+        }
+
+        override fun removeCallbacks(task: Runnable) {
+            cursorHandler.removeCallbacks(task)
+        }
+    }
+
+    /** 每个 `◀ ▶` 键的连移定时器：禁用 / 抬手 / 脱离窗口时都要能停（见 [CursorRepeater]）。 */
+    private val cursorRepeaters = HashMap<ImageView, CursorRepeater>()
+
     private val caretBlink = object : Runnable {
         override fun run() {
             if (!::caret.isInitialized) return
@@ -311,11 +335,15 @@ class QuickPhrasePanel @JvmOverloads constructor(
      */
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
-        if (changedView === this && visibility != View.VISIBLE) stopCaretBlink()
+        if (changedView === this && visibility != View.VISIBLE) {
+            stopCaretBlink()
+            stopCursorRepeats()
+        }
     }
 
     override fun onDetachedFromWindow() {
         stopCaretBlink()
+        stopCursorRepeats()
         super.onDetachedFromWindow()
     }
 
@@ -430,6 +458,14 @@ class QuickPhrasePanel @JvmOverloads constructor(
         view.isClickable = enabled
         view.alpha = if (enabled) 1f else 0.35f
         view.contentDescription = if (enabled) name else edge
+        // 到头的这一刻必须主动停表（VOCA-631 打回项 1）：View 一旦 disabled，Android 就不再
+        // 把 ACTION_UP 派发进来，靠抬手停连移的路径会整条失效。
+        if (!enabled) cursorRepeaters[view]?.stop()
+    }
+
+    /** 停掉所有 `◀ ▶` 连移（面板隐藏 / 脱离窗口 / 可见性变化时调用，防止后台自走）。 */
+    private fun stopCursorRepeats() {
+        for (repeater in cursorRepeaters.values) repeater.stop()
     }
 
     /** 开始闪烁；重复调用不会叠多个 runnable（先移除再排队）。 */
@@ -913,6 +949,11 @@ class QuickPhrasePanel @JvmOverloads constructor(
      * 触屏路径 `return true` 吃掉事件，避免框架再走一遍 `performClick()` 造成双步；
      * 而 `setOnClickListener` 保留给 TalkBack / 键盘可达（辅助服务调 `performClick`）。
      * 禁用态（到头）直接不消费，也不触发键盘连发 / 上屏 / 关面板（R1-17）。
+     *
+     * **到边界必须停表**（VOCA-631 质检打回项 1）：光标到边界那一刻
+     * [renderCursorButtons] 会把该键 `isEnabled = false`，而 Android 对 disabled 的 View
+     * 不再派发触摸事件 —— `ACTION_UP` 根本进不来。停表逻辑因此收进 [CursorRepeater]：
+     * 它每步自查 [stillActive]，[applyCursorButtonState] 禁用时也主动停。
      */
     private fun buildCursorButton(iconRes: Int, desc: String, onStep: () -> Unit): ImageView {
         val view = ImageView(context).apply {
@@ -924,37 +965,30 @@ class QuickPhrasePanel @JvmOverloads constructor(
             minimumWidth = dp(touchTargetDp)
             minimumHeight = dp(touchTargetDp)
         }
-        // 连移 runnable 必须**随视图建一次**：每次事件都 new 一个的话，
-        // ACTION_UP 里的 removeCallbacks 拿到的是新对象，撤不掉 ACTION_DOWN 排进去的那个，
-        // 松手后光标还会继续走（真机上表现为「按一下跑半行」）。
-        var repeating = false
-        val repeat = object : Runnable {
-            override fun run() {
-                repeating = true
-                onStep()
-                view.postDelayed(this, cursorRepeatIntervalMs)
-            }
-        }
+        val repeater = CursorRepeater(
+            delayMs = cursorRepeatDelayMs,
+            intervalMs = cursorRepeatIntervalMs,
+            scheduler = cursorScheduler,
+            stillActive = { view.isEnabled && view.isAttachedToWindow },
+            onStep = onStep,
+        )
+        cursorRepeaters[view] = repeater
         view.setOnClickListener { onStep() }
         view.setOnTouchListener { v, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     if (!v.isEnabled) return@setOnTouchListener false
-                    repeating = false
-                    v.postDelayed(repeat, cursorRepeatDelayMs)
+                    repeater.start()
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    v.removeCallbacks(repeat)
-                    // 还没进入连移 = 这就是一次点按，补最后一步；
-                    // 已经在连移则抬手不再额外走一格（连移期间每 90 ms 已各走一步）。
-                    if (!repeating) onStep()
-                    repeating = false
+                    // 抬手时停表；若还没进入连移，这就是一次点按，补最后一步。
+                    val wasRepeating = repeater.stop()
+                    if (!wasRepeating) onStep()
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    v.removeCallbacks(repeat)
-                    repeating = false
+                    repeater.stop()
                     true
                 }
                 else -> false

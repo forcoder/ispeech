@@ -537,7 +537,11 @@ class IspeechImeService : InputMethodService() {
         if (panel == Panel.QUICK_PHRASE) {
             when (key.action) {
                 KeyAction.CHAR -> {
-                    // 写到光标处，不是追加到末尾（R1-12 / AC-1.9）；组合中仍先进编码缓冲（R1-22）
+                    // 写到光标处，不是追加到末尾（R1-12 / AC-1.9）。
+                    // **面板打开时字母一律直接进搜索框，不经过编码缓冲**（本分支 return，
+                    // 后面的 `buffer += lower` / `t9Digits += digit` 走不到）；只有九宫格态的
+                    // 数字键会 fall-through 进编码缓冲。所以 AC-1.7「组合中先删编码」在
+                    // 快捷短语面板内只对九宫格态可达——真机轮测 AC-1.7 必须先切九宫格。
                     insertPanelText(key.output)
                     return
                 }

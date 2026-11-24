@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -378,5 +379,91 @@ class QuickPhrasePanelSearchBoxTest {
         assertTrue("emoji 之后的 caret x=${afterEmoji[0]} 必须严格小于末尾 x=${atEnd[0]}",
             afterEmoji[0] < atEnd[0])
         assertTrue("emoji 是 1 个码点，caret 不能落回 0 位置", afterEmoji[0] > 0)
+    }
+
+    // ── VOCA-631 打回项 1：长按连移到边界后必须停表（真实 View + 真实窗口 + 真实触摸派发） ──
+
+    /**
+     * 到边界后按键被 `disable`，Android 不再把它的事件交给 `OnTouchListener`，
+     * `ACTION_UP` 于是永远进不来。这里把面板**挂进真实 Activity 的窗口**（`isAttachedToWindow`
+     * 为真，与生产一致），派发 DOWN → 长按越过 380 ms 首拍 → 派发 UP，然后确认抬手之后
+     * 不再有任何新的移动回调。
+     *
+     * 为什么必须挂窗口：`stillActive` 判的是 `view.isEnabled && view.isAttachedToWindow`。
+     * 面板不挂窗口时它恒为 false，连移根本起不来 —— 那样这条用例会**空转通过**，
+     * 对缺陷没有任何鉴别力（本轮实测：未挂窗口时把停表逻辑整个删掉，用例依然 OK）。
+     *
+     * 与 `CursorRepeaterTest` 的分工：那边用假时钟证明**算法**停表；这边证明**接线**停表
+     * ——`applyCursorButtonState` 的禁用回调确实接到了 repeater，且真实 Handler 也不漏拍。
+     */
+    @Test
+    fun long_press_stops_repeating_after_reaching_edge_and_lifting() {
+        val inst = InstrumentationRegistry.getInstrumentation()
+        val scenario = ActivityScenario.launch(EmptyHostActivity::class.java)
+        try {
+            val leftCalls = java.util.concurrent.atomic.AtomicInteger(0)
+            lateinit var hosted: QuickPhrasePanel
+            scenario.onActivity { activity ->
+                hosted = QuickPhrasePanel(activity)
+                activity.setContentView(hosted)
+                // 复刻真实链路：面板只上报「要左移」，服务侧改 (keyword, cursor) 再写回，
+                // 面板 render 后在边界把该键 disable（这正是打回项 1 成立的前提）。
+                hosted.onMoveCursorLeft = {
+                    leftCalls.incrementAndGet()
+                    hosted.setKeyword(hosted.keyword(), (hosted.cursor() - 1).coerceAtLeast(0))
+                }
+                // 光标在 2：长按 ◀ 两步就到 0，之后键被 disable 而手指还没抬起。
+                hosted.setKeyword("abcd", 2)
+            }
+            inst.waitForIdleSync()
+            scenario.onActivity { it.findViewById<View>(android.R.id.content).requestLayout() }
+            inst.waitForIdleSync()
+
+            // 找到 ◀ 键（初始可用 → 描述是「光标左移」）
+            fun findLeft(): View? {
+                var found: View? = null
+                fun walk(v: View) {
+                    val d = v.contentDescription?.toString()
+                    if (d == "光标左移" || d == "已到开头") found = v
+                    if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+                }
+                scenario.onActivity { walk(it.findViewById(android.R.id.content)) }
+                return found
+            }
+
+            val left = findLeft()
+            assertNotNull("挂进窗口后应能定位 ◀ 键", left)
+            assertTrue("前提：面板已经真的挂上窗口（否则本用例会空转通过）",
+                left!!.isAttachedToWindow)
+
+            // 真实触摸：按下去，别松手
+            scenario.onActivity {
+                val now = SystemClock.uptimeMillis()
+                val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 20f, 20f, 0)
+                left.dispatchTouchEvent(down)
+                down.recycle()
+            }
+            // 越过 380 ms 首拍 + 若干 90 ms 拍；面板挂窗口后仍应停在边界，不得自己走回来
+            SystemClock.sleep(900)
+            val beforeUp = leftCalls.get()
+            assertTrue("长按应至少触发一次移动（否则连移没起来，用例空转）：$beforeUp", beforeUp >= 1)
+
+            // 抬手 —— 关键：光标已在边界，键此时可能已 disable，Android 未必还会把 UP 派进来，
+            // 这正是缺陷成立的条件；无论如何都尝试补一次 UP。
+            scenario.onActivity {
+                val now = SystemClock.uptimeMillis()
+                val up = MotionEvent.obtain(now, now, MotionEvent.ACTION_UP, 20f, 20f, 0)
+                left.dispatchTouchEvent(up)
+                up.recycle()
+            }
+            val afterUp = leftCalls.get()
+            SystemClock.sleep(800)
+            assertEquals(
+                "抬手后 ◀ 不得再上报任何左移（原缺陷：泄漏的 90 ms 循环会继续走）",
+                afterUp, leftCalls.get()
+            )
+        } finally {
+            scenario.close()
+        }
     }
 }

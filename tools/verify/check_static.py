@@ -487,15 +487,133 @@ def check_quick_search_box_flags() -> None:
     report("PASS", "搜索框交互标志齐全（含 isLongClickable = false），且 pinDisplayOnly() 在 inputType 之后生效")
 
 
+def strip_kotlin_comments(text: str) -> str:
+    """去掉 Kotlin 注释（`//` 与可嵌套的 `/* */`），保留字符串字面量原样。
+
+    为什么需要：先前的码点检查在整个文件里 grep `codePointCount`，而 KDoc 注释里就有这个词，
+    于是「把 `fun length()` 改成 `= text.length`」这个真实回归被注释白白骗过
+    （VOCA-631 质检实测：改完 `check_static` 仍报 failed=0）。查代码就得先剥掉注释。
+    """
+    out = []
+    i = 0
+    n = len(text)
+    state = "normal"
+    depth = 0
+    while i < n:
+        c = text[i]
+        two = text[i:i + 2]
+        if state == "normal":
+            if two == "//":
+                state = "line"
+                i += 2
+                continue
+            if two == "/*":
+                state = "block"
+                depth = 1
+                i += 2
+                continue
+            if c == '"':
+                state = "string"
+                out.append(c)
+                i += 1
+                continue
+            out.append(c)
+            i += 1
+            continue
+        if state == "line":
+            if c == "\n":
+                state = "normal"
+                out.append(c)
+            i += 1
+            continue
+        if state == "block":
+            if two == "/*":
+                depth += 1
+                i += 2
+                continue
+            if two == "*/":
+                depth -= 1
+                i += 2
+                if depth == 0:
+                    state = "normal"
+                continue
+            if c == "\n":
+                out.append(c)
+            i += 1
+            continue
+        # state == "string"：转义与原始字符串都按最小必要处理，避免把 // 当注释切掉
+        if c == "\\":
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        out.append(c)
+        if c == '"':
+            state = "normal"
+        i += 1
+    return "".join(out)
+
+
+def find_expression_function_body(code: str, name: str):
+    """取 `fun <name>(...) = <expr>` 的表达式体文本；不是表达式形式时返回 None。
+
+    只用来核对「函数体里到底用了哪个 API」，不做通用 Kotlin 解析：表达式体到下一个空行 /
+    下一个声明 / 定义体结束为止，足够区分 `= text.codePointCount(...)` 与 `= text.length`。
+    """
+    m = re.search(
+        rf"fun\s+{re.escape(name)}\s*\([^)]*\)\s*(?::\s*[A-Za-z_][\w<>?., ]*\s*)?=",
+        code,
+    )
+    if not m:
+        return None
+    rest = code[m.end():]
+    end = re.search(r"\n\s*\n|\n\s*(?:fun |private |internal |public |@)", rest)
+    return rest[: end.start()] if end else rest
+
+
+def _balanced_call_args(code: str, open_paren: int):
+    """从 `(` 之后开始，返回括号配平的实参文本（处理嵌套括号与字符串）。"""
+    depth = 1
+    i = open_paren + 1
+    start = i
+    while i < len(code) and depth > 0:
+        c = code[i]
+        if c == '"':
+            i += 1
+            while i < len(code):
+                if code[i] == "\\":
+                    i += 2
+                    continue
+                if code[i] == '"':
+                    break
+                i += 1
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return code[start:i]
+        i += 1
+    return code[start:]
+
+
+def iter_call_args(code: str, function: str):
+    """逐个产出 `function(...)` 的实参文本（含嵌套调用的完整文本）。"""
+    for m in re.finditer(rf"\b{re.escape(function)}\s*\(", code):
+        yield _balanced_call_args(code, m.end() - 1)
+
+
 def check_quick_search_cursor_controls() -> None:
     """条目 1（VOCA-631）：`◀ ▶` 的尺寸 / 连移常量、码点口径、单一写入口必须同时成立。
 
     卡住四件事，全是「改错一行就静默退化」的：
       1. `◀ ▶ ✕` 可点边长 ≥ 40 dp（规格 §3.4 / AC-1.8，现状曾是 30×28）；
       2. 长按连移用 380 ms 延迟 + 90 ms 间隔（规格 §3.4 的定值，散落魔法值会漂）；
-      3. `SearchCaret` **不得**再用 `text.length`（码元数）当边界——R1-1 要求码点；
-      4. 四条写入路径与 `◀ ▶` 只经 `applyPanelState` 一个入口改状态（R1-15），
-         服务里不得再出现 `setPanelKeyword(panelKeyword + …)` 这种末尾追加。
+      3. `SearchCaret.length()` 的**函数体**必须走 `codePointCount`——R1-1 要求码点。
+         只在整个文件里 grep 字符串不够：KDoc 注释里也有 `codePointCount`，
+         把 `fun length()` 改成 `= text.length` 后仍会命中（VOCA-631 质检实测的逃逸路径）。
+      4. 四条写入路径与 `◀ ▶` 只经 `applyPanelState` 一个入口改状态（R1-15）：
+         服务里不得出现 `setPanelKeyword(panelKeyword + …)`、不得在视图侧拼串、
+         `applyPanelState(…)` 的实参不得现场 `+` 拼串，且三处整串置空必须都在。
     """
     panel = JAVA / "com" / "ispeech" / "input" / "QuickPhrasePanel.kt"
     caret = JAVA / "com" / "ispeech" / "input" / "SearchCaret.kt"
@@ -524,16 +642,26 @@ def check_quick_search_cursor_controls() -> None:
         report("FAIL", "`◀ ▶` 连移参数应为 380 ms 后每 90 ms，实际 "
                        f"{delay.group(1)}/{interval.group(1)}（规格 §3.4 定值）")
         return
-    # ③ 码点口径：SearchCaret 不得拿 UTF-16 长度当边界
+    # ③ 码点口径：查 length() 的**函数体**，不看注释、不用「排除含 fun length 的行」自我豁免
     caret_text = caret.read_text(encoding="utf-8", errors="replace")
-    if "codePointCount" not in caret_text or "offsetByCodePoints" not in caret_text:
-        report("FAIL", f"{rel(caret)} 未按码点实现（R1-1）：缺 codePointCount / offsetByCodePoints")
+    caret_code = strip_kotlin_comments(caret_text)
+    if "codePointCount" not in caret_code or "offsetByCodePoints" not in caret_code:
+        report("FAIL", f"{rel(caret)} 未按码点实现（R1-1）：代码里（注释不算）缺 "
+                       "codePointCount / offsetByCodePoints")
         return
-    # `text.length` 只允许出现在 `fun length(...)` 那一行（它本来就是把码元数换成码点数）；
-    # 出现在 clamps / substring / coerceIn 的边界上就说明退回码元口径，emoji 会被拆半。
+    length_body = find_expression_function_body(caret_code, "length")
+    if length_body is None:
+        report("FAIL", f"{rel(caret)} 里找不到 `fun length(` 的表达式函数体，无法核对码点口径")
+        return
+    if "codePointCount" not in length_body:
+        report("FAIL", f"{rel(caret)} 的 `length()` 函数体没用 `codePointCount`："
+                       "把码元数当码点数会让 clamp 上界超出、emoji 被拆半（R1-1）")
+        return
+    # 码元数只允许出现在 length() 那一行（它本来就是码元→码点的换算点）；
+    # clamps / substring / coerceIn 的边界上出现就说明退回码元口径。
     offenders = [
         (i, line.strip())
-        for i, line in enumerate(caret_text.splitlines(), 1)
+        for i, line in enumerate(caret_code.splitlines(), 1)
         if "text.length" in line and "fun length(" not in line
     ]
     if offenders:
@@ -542,19 +670,35 @@ def check_quick_search_cursor_controls() -> None:
         return
     # ④ 单一写入口
     service_text = service.read_text(encoding="utf-8", errors="replace")
-    if "private fun applyPanelState(" not in service_text:
+    service_code = strip_kotlin_comments(service_text)
+    if "private fun applyPanelState(" not in service_code:
         report("FAIL", f"{rel(service)} 缺少 `applyPanelState`（面板 (keyword,cursor) 唯一写入口，R1-15）")
         return
-    if re.search(r"setPanelKeyword\(\s*panelKeyword(?:\.keyword)?\s*\+", service_text):
+    if re.search(r"setPanelKeyword\(\s*panelKeyword(?:\.keyword)?\s*\+", service_code):
         report("FAIL", f"{rel(service)} 里仍有 `setPanelKeyword(panelKeyword + …)` 的末尾追加："
                        "绕过光标（R1-15 / R1-44）")
         return
     # 面板内拼串的另一种写法：直接对 keyword 做 substring / `+` 再交给 setPanelKeyword
-    if re.search(r"setPanelKeyword\(\s*[^)]*\.(?:substring|drop|dropLast|take)\(", service_text):
+    if re.search(r"setPanelKeyword\(\s*[^)]*\.(?:substring|drop|dropLast|take)\(", service_code):
         report("FAIL", f"{rel(service)} 仍在视图侧拼串（`.substring/.drop/.take` 后直接 setPanelKeyword）："
                        "插入 / 删除必须走 PanelKeywordState（R1-15）")
         return
-    report("PASS", "条目 1 光标契约齐全（◀▶✕ ≥40dp、连移 380/90ms、码点口径、applyPanelState 单入口）")
+    # 再换写法：`applyPanelState(panelKeyword.replace(panelKeyword.keyword + text))`
+    # 在调用点现场拼串，同样绕过状态机的插删算式（VOCA-631 质检实测的逃逸路径）。
+    for arg in iter_call_args(service_code, "applyPanelState"):
+        if "+" in arg:
+            report("FAIL", f"{rel(service)} 的 `applyPanelState(…)` 实参里现场拼串（含 `+`）："
+                           f"{arg.strip()[:80]}；插删必须用 PanelKeywordState 的方法（R1-15）")
+            return
+    # 三处绕过 setter 的整串置空必须都在：少了 closePanel 那处，关面板后光标停在旧位置，
+    # 下次开面板「重开回末尾」就失效（AC-1.10 / R1-31）。
+    resets = len(re.findall(r"panelKeyword\s*=\s*PanelKeywordState\.EMPTY", service_code))
+    if resets < 3:
+        report("FAIL", f"{rel(service)} 的整串置空只有 {resets} 处，应 ≥3"
+                       "（openPanel / closePanel / resetState 必须一起复位光标，AC-1.10）")
+        return
+    report("PASS", "条目 1 光标契约齐全（◀▶✕ ≥40dp、连移 380/90ms、length() 码点口径、"
+                   "applyPanelState 单入口 + 三处整串复位）")
 
 
 def check_asr_model_config() -> None:
