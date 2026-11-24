@@ -193,7 +193,7 @@ tools/deploy/deploy.sh --target emulator                  # 从 main 出包并�
 
 ## 安装测试（APK）
 
-1. **安装**：`adb install -r dist/ispeech-release-v1.5.apk`，或点击 APK 安装（要求 Android 8.0+；v1.5 已签名，versionCode 5）
+1. **安装**：`adb install -r dist/_archive/ispeech-release-v1.5.apk`（11-19 归档动作已把 v1.5 及更早的包移入 `dist/_archive/`，旧路径 `dist/ispeech-release-v1.5.apk` 在树内已不存在，按旧路径跑必失败），或点击 APK 安装（要求 Android 8.0+；v1.5 已签名，versionCode 5）
 2. **启用**：系统设置 → 语言与输入 → 管理输入法 → 启用「智语」
 3. **切换**：在输入框通过输入法切换器（长按空格 / 通知栏）选择「智语」
 4. **自测**：`wqiy`→你、`trnt`→我；`hi`→「你好问候」空格上屏详细内容；退格删码、Esc 清空组合
