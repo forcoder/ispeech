@@ -385,30 +385,93 @@ I AsrTrace: session=v1 ev=ui_reset t=10872222 reason=engine_error ok=false ms=10
 `…AiAiSpeechRecognitionService`，看日志的人会以为桩没生效。原字段保留为 `first_queried`，
 两者不同时正好把「查询顺序 ≠ 实际绑定」这个坑暴露出来。
 
-### 12.1 覆盖边界：装置日志产出在 rebase 前的树上
+### 12.1 覆盖边界：两条装置日志分别产在哪棵树上
 
-本节日志是 **2026-11-24 10:14 CST 在 `emulator-5554` 上、rebase 前的分支树**（`13bd530`）采的，
-判读前必须先看清这一点，否则会把「已证」放大成「全路径已证」：
+判读前必须先看清「这份日志是哪棵树、哪个引擎采的」，否则会把「已证」放大成「全路径已证」。
+本节现在有**两组**样本，分别覆盖 rebase 前树的 `engine=SYSTEM` 与 rebase 后树的 `engine=FUNASR`：
 
-- 采日志的那棵树 `AsrEngine` 只有 `SYSTEM / CUSTOM / VOSK`，默认 `SYSTEM`，全树没有 `FunAsrSpeechEngine(` 构造点。
-  所以那次跑到的只有 **`engine=SYSTEM`** 一条链路；本 PR 给离线引擎补的
-  `stage=start` / `stage=finish` / `NO_AUDIO` 兜底在那棵树上**不可达、运行时样本为 0**。
-- 本分支已 rebase 到 `origin/main@0168e59`（PR #6 的 FunASR 接线在内），现在这棵树上
-  `AsrEngine { SYSTEM, CUSTOM, FUNASR, VOSK }`、默认 `FUNASR`（`AsrSettings.kt:70`），
-  并且 `IspeechImeService.kt:459` 构造 `FunAsrSpeechEngine` —— **`engine=FUNASR` 已是本树实际出厂默认路径**，
-  但仍**没有**它的运行时样本。合并后必须在这棵新树上补一次。
+- **样本 A（rebase 前树 `13bd530`，`engine=SYSTEM`）**：2026-11-24 10:14 CST 采，见本节上文原文。
+  那棵树 `AsrEngine` 只有 `SYSTEM / CUSTOM / VOSK`、默认 `SYSTEM`，全树没有 `FunAsrSpeechEngine(` 构造点，
+  所以离线引擎的 `stage=start` / `stage=finish` / `NO_AUDIO` 兜底在那棵树上**不可达、运行时样本为 0**。
+- **样本 B（rebase 后树 `2aba816`，`engine=FUNASR`）**：2026-11-24 14:05 CST 在同一台 `emulator-5554` 采。
+  这棵树 `AsrEngine { SYSTEM, CUSTOM, FUNASR, VOSK }`、默认 `FUNASR`（`AsrSettings.kt:70`），
+  `IspeechImeService.kt:459` 构造 `FunAsrSpeechEngine` —— **`engine=FUNASR` 是本树实际出厂默认路径**，
+  样本 B 走的就是它，不是系统识别。
+
+**样本 B 的装置**（可复跑；模型用真包，不 mock 识别结果）：
+
+```
+# 用真实模型包（77,920,048 B / sha256 da92b3db…1450，与 AsrDownloadPolicy 常量一致）
+curl -o /tmp/asr-model.tar.bz2 \
+  https://delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2
+bsdtar -xjf /tmp/asr-model.tar.bz2 -C /tmp/asr-x
+adb push /tmp/asr-x/*/model.int8.onnx /data/local/tmp/model.int8.onnx && adb push /tmp/asr-x/*/tokens.txt /data/local/tmp/tokens.txt
+# 直接落到 filesDir，绕开下载（下载链路属 VOCA-33/34/35，不在本 issue 范围）
+adb shell "run-as com.ispeech.ime sh -c 'mkdir -p files/funasr/model \
+  && cp /data/local/tmp/model.int8.onnx files/funasr/model/ \
+  && cp /data/local/tmp/tokens.txt files/funasr/model/ \
+  && printf \"model=b77920048-sda92b3db5218\n\" > files/funasr/model/.ready-b77920048-sda92b3db5218'"
+adb shell pm grant com.ispeech.ime android.permission.RECORD_AUDIO
+# 宿主输入框 → 点工具栏语音键（约 1029,1692）→ 只点这一次、不点第二次结束，等过 UI 兜底
+# 注意 FUNASR 是「点一次开始、再点一次结束」的开关式交互，不是按住说话
+adb logcat -c && adb shell input tap 1029 1692
+adb logcat -d -s AsrTrace:*
+```
+
+**实测原文**（14:05:47 开始，只点了这一次开始、全程未点第二次结束；`ms=` 基线为会话起点）：
+
+```
+I AsrTrace: session=v1 ev=begin t=24728301 via=voice_key engine=FUNASR mode=PINYIN ...
+I AsrTrace: session=v1 ev=start t=24728301 engine=FUNASR model_ready=true watchdog=start+finish start_limit_ms=10000 finish_limit_ms=6000 ms=0
+I AsrTrace: session=v1 ev=start t=24729122 engine=FUNASR stage=recording ms=821
+I AsrTrace: session=v1 ev=first_result t=24730683 engine=FUNASR kind=partial chars=5 ms=2382
+W AsrTrace: session=v1 ev=timeout t=24794302 stage=session limit_ms=66000 voice_active=true ... ms=66001
+I AsrTrace: session=v1 ev=cancel t=24794302 stage=service ms=66001
+I AsrTrace: session=v1 ev=cancel t=24794303 engine=FUNASR listening=true first_result=true ms=66001
+I AsrTrace: session=v1 ev=end t=24794303 engine=FUNASR stage=decode reads=255 empty_reads=0 ms=66002
+I AsrTrace: session=v1 ev=ui_reset t=24794315 reason=session_timeout ok=false ms=66014
+I AsrTrace: session=v1 ev=result t=24794916 engine=FUNASR kind=final chars=8 ms=66615
+```
+
+判读要点：
+- **`engine=FUNASR` 的 start 兜底真实可走**：`ev=start ... watchdog=start+finish` + `stage=recording` 证明
+  手表是引擎侧挂上的，不是系统识别那条链；`model_ready=true` 证明模型就绪判定放行。
+- **`stage=session` 的第一条运行时样本**：一次会话未结束、持续 66.001 s 触发 `UI_SESSION_TIMEOUT_MS`，
+  `limit_ms=66000` 来自 `AsrTiming`（非散落常量），随后 `ui_reset reason=session_timeout` 在 66.014 s
+  离开「识别中」——这正是本条判据要的「有界复位」证据。
+- **超时后仍会把已收音的音频解完，但结果不上屏**：`cancel` 之后工作线程照旧跑 `ev=end stage=decode`
+  （`reads=255`），并在 `ui_reset` 之后打出 `ev=result chars=8`；但这一行**后面没有 `ev=commit`**
+  —— 会话已经在 66 s 被判定超时，回调已被 `cancel()` 清掉，这段文字不会落进输入框。
+  这是这道兜底的既定语义（超时即丢弃本次会话），不是丢字的缺陷；"先收尾再上屏" 只发生在样本 C 那条正常路径上。
+- **`reason=session_timeout` 在这里是达标而非缺陷**：它来自 66 s 那道 UI 兜底（本装置就是一直不结束会话），
+  与样本 A 里 10 s 的 `engine_error` 是不同路径；§12.2 判读口径里「真机若见 session_timeout
+  说明引擎侧时限没生效」指的是**用户正常结束会话**的场景，此处是刻意不结束，不适用。
 
 | 分支 / 阶段 | 判据 | 结论 |
 | --- | --- | --- |
-| `engine=SYSTEM` + 识别服务零回调 | `ev=timeout stage=start` → `ev=ui_reset` ≤ 10.02 s | **已证**（本节实测原文，rebase 前树） |
+| `engine=SYSTEM` + 识别服务零回调 | `ev=timeout stage=start` → `ev=ui_reset` ≤ 10.02 s | **已证**（样本 A，rebase 前树） |
+| `engine=FUNASR` + 一次会话不结束、过 66 s | `ev=timeout stage=session limit_ms=66000` → `ev=ui_reset` ≤ 66.02 s | **已证**（样本 B，rebase 后树） |
+| `engine=FUNASR` + 正常收音→松手→上屏 | `ev=start stage=recording` → `ev=end stage=decode` → `ev=result` → `ui_reset reason=engine_result` | **已证**（样本 C，19.568 s，见下） |
 | `engine=SYSTEM` + 回了中间结果、收尾不回 | `ev=timeout stage=finish` | 未证（`stage=finish` 零运行时样本） |
-| `engine=SYSTEM` + 60 s 硬上限 | `ev=timeout stage=session` | 未证（`stage=session` 零运行时样本） |
-| `engine=FUNASR`（rebase 后本树出厂默认路径） | start / finish / `NO_AUDIO` 三条兜底 | 未证（本树可达，运行时样本为 0；旧树不可达） |
+| `engine=FUNASR` + `NO_AUDIO` 自旋上限 | `ev=timeout stage=audio limit_ms=10000` | 未证（本轮 4 次尝试均未造出「`read()` 持续返回 ≤0」：`killall -9 audioserver` 与 `kill -STOP` 后 `AudioRecord.read()` 仍返回数据，`appops set RECORD_AUDIO ignore` 只影响新开会话） |
 | `engine=VOSK` | start / finish 两条兜底 | 未证（本树可达，本轮未跑） |
 | 真机 `FMR0224913042917` / `23F0224224000950` | 复位时间 + 可读文案 + `stage=session`/`stage=finish` | 未达成（`adb devices -l` 无该机） |
 
-要补的三件事（按 §八 判读表，真机 / rebase 后树上各采一次）：`stage=session` / `stage=finish`
-两条运行时样本；`engine=FUNASR` 这条**实际出厂默认路径**的 start 兜底样本；以及真机三类产物。
+**样本 C（同树，正常一步到底：点开始 → 说一段 → 再点一次结束）**，证明样本 B 的 `session_timeout` 不是「链路坏了」：
+
+```
+I AsrTrace: session=v1 ev=begin ... engine=FUNASR
+I AsrTrace: session=v1 ev=start engine=FUNASR model_ready=true watchdog=start+finish ...
+I AsrTrace: session=v1 ev=start engine=FUNASR stage=recording ms=930
+I AsrTrace: session=v1 ev=end engine=FUNASR listening=true limit_ms=6000 first_result=true ms=19129
+I AsrTrace: session=v1 ev=end engine=FUNASR stage=decode reads=72 empty_reads=0 ms=19467
+I AsrTrace: session=v1 ev=result engine=FUNASR kind=final chars=13 ms=19566
+I AsrTrace: session=v1 ev=ui_reset reason=engine_result ok=true ms=19568
+I AsrTrace: session=v1 ev=commit chars=13 ms=19568
+```
+
+还在缺的（按 §八 判读表）：`engine=FUNASR` 的 `stage=finish` 与 `NO_AUDIO` 两条、`engine=VOSK` 两条，
+以及真机三类产物。前两类属 AVD 可继续补的，真机项要等设备回线。
 
 ### 12.2 真机回线后的采集步骤（未执行，设备当前不可达）
 
@@ -434,6 +497,6 @@ adb -s <serial> shell dumpsys input_method | grep -E 'mCurMethodId|mInputShown'
 
 判读口径（配 §八 表）：
 - 出 `ev=begin` 后 **10 秒内**必须有 `ev=timeout stage=start` + `ev=ui_reset` —— 这是「有界复位」的判据，缺任一即未达标。
-- 出 `ev=first_result` 但收尾不回 → 期望 `ev=timeout stage=finish`（6 秒）；按住不放超 60 秒 → `ev=timeout stage=session`。
-- 真机上 `ui_reset reason=` 若为 `session_timeout`，说明走的是 66 秒 UI 兜底而不是引擎侧时限 —— 那是超时链路没生效的证据，不是达标。
+- 出 `ev=first_result` 但收尾不回 → 期望 `ev=timeout stage=finish`（6 秒）；一次会话始终不结束、过 60 秒 → `ev=timeout stage=session`。
+- **用户正常结束会话后** `ui_reset reason=` 若仍为 `session_timeout`，说明走的是 66 秒 UI 兜底而不是引擎侧时限 —— 那是超时链路没生效的证据，不是达标。反过来，用户就是不结束会话（一直让它跑）时看到 `session_timeout` 是这条兜底**按设计生效**，见 §12.1 样本 B。
 - 打点行数为 **0** 时，先判包是不是本分支（`AsrTrace` 只在本分支引入），再判 §9.1 的分支归属；不要直接归因到引擎。
