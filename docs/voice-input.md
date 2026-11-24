@@ -379,3 +379,31 @@ I AsrTrace: session=v1 ev=ui_reset t=10872222 reason=engine_error ok=false ms=10
 
 要补的两件事（按 §八 判读表，真机接线后一次采完）：`stage=session` / `stage=finish` 两条运行时样本；
 以及合并到 `main` 后对 `engine=FUNASR` 这条**实际出厂默认路径**补一次 start 兜底样本 —— 只在那棵树上才走得到。
+
+### 12.2 真机回线后的采集步骤（未执行，设备当前不可达）
+
+本节是**待执行清单**，不是结果。2026-11-24 实测 `adb devices -l` 只列出 `emulator-5554`，
+`FMR0224913042917` / `23F0224224000950` 均未出现（USB 总线无 ADB 接口，`adb connect <手机IP>:5555` 也拿不到地址）。
+设备一回到线上，按下面四步一次采完，产物直接贴进本 issue：
+
+```
+# 1. 先坐实设备与包身份（VOCA-228 的 A0 口径：serial + sha256 + lastUpdateTime 一起记）
+adb devices -l
+adb -s <serial> shell dumpsys package com.ispeech.ime | grep -E 'versionCode|versionName|lastUpdateTime'
+
+# 2. 清屏 → 点语音键 → 每 10 秒截一张，连截 6 张，同时记开始时刻
+adb -s <serial> logcat -c
+# …点语音键，间隔截图…
+
+# 3. 取业务打点：判读只看 AsrTrace，不用系统日志兜
+adb -s <serial> logcat -d -s AsrTrace:* StubRecognitionService:*
+
+# 4. UI 侧兜底状态（判「是否真的离开识别中」的最后一道）
+adb -s <serial> shell dumpsys input_method | grep -E 'mCurMethodId|mInputShown'
+```
+
+判读口径（配 §八 表）：
+- 出 `ev=begin` 后 **10 秒内**必须有 `ev=timeout stage=start` + `ev=ui_reset` —— 这是「有界复位」的判据，缺任一即未达标。
+- 出 `ev=first_result` 但收尾不回 → 期望 `ev=timeout stage=finish`（6 秒）；按住不放超 60 秒 → `ev=timeout stage=session`。
+- 真机上 `ui_reset reason=` 若为 `session_timeout`，说明走的是 66 秒 UI 兜底而不是引擎侧时限 —— 那是超时链路没生效的证据，不是达标。
+- 打点行数为 **0** 时，先判包是不是本分支（`AsrTrace` 只在本分支引入），再判 §9.1 的分支归属；不要直接归因到引擎。
