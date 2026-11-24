@@ -133,7 +133,10 @@ object SettingsStore {
     fun keyboardSettingsFlow(context: Context): Flow<KeyboardSettings> =
         context.safeData().map { prefs ->
             KeyboardSettings(
-                keyHeightDp = normalizeKeyHeightDp(prefs[KEY_KEY_HEIGHT_DP] ?: 52),
+                // 兜底值引用 KeyboardSize.DEFAULT_HEIGHT_DP，不写字面量：档位阶梯改了这里自动跟上
+                keyHeightDp = normalizeKeyHeightDp(
+                    prefs[KEY_KEY_HEIGHT_DP] ?: KeyboardSize.DEFAULT_HEIGHT_DP,
+                ),
                 candidatePageSize = normalizeCandidatePageSize(prefs[KEY_CANDIDATE_PAGE_SIZE] ?: 9),
                 vibrate = prefs[KEY_VIBRATE] ?: true,
                 chinesePunctuation = prefs[KEY_CHINESE_PUNCTUATION] ?: true,

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.Outline
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
@@ -33,6 +34,7 @@ import com.ispeech.input.keyboard.KeyStyle
 import com.ispeech.input.keyboard.KeyboardLayoutKind
 import com.ispeech.input.keyboard.KeyboardLayouts
 import com.ispeech.input.keyboard.KeyboardPage
+import com.ispeech.settings.store.KeyboardSize
 
 /**
  * 软键盘面板：搜狗风格多页键盘（字母 / 数字 / 符号 / 表情 / 九宫格）。
@@ -1041,19 +1043,18 @@ class SoftKeyboardView @JvmOverloads constructor(
     }
 
     /**
-     * 按键背景。
-     *
-     * [inToolbar] 之前的版本靠「action / layout 白名单」猜哪些键在工具栏里，
-     * 结果字母页底行的「符」（LAYOUT→SYMBOL）和「中/英」（MODE_SWITCH）也被当成工具栏键
-     * 画成了透明底，与旁边灰底的 `123` 不一致（搜狗底行这两个键都是灰键）。
-     */
-    /**
      * 键框底部柔和投影（AC2）：有可见键底的键用 elevation 抬出「浮在灰底上」的观感，
      * 正常态与按下态都在（elevation 与按下态无关，按下只换背景色）。
      *
      * 是否算「有可见键底」直接用 [inToolbar] 判断，而不是再按 action / layout 白名单猜一遍：
-     * `backgroundFor` 已经按同一判据决定键底是透明（toolbarKeySelector）还是灰键，
+     * [backgroundFor] 已经按同一判据决定键底是透明（toolbarKeySelector）还是灰键，
      * 两处判据必须同源，否则会出现「透明键却带一圈阴影」或反之。
+     *
+     * 轮廓**不使用** `ViewOutlineProvider.BACKGROUND`：带 hint 的字母键把 elevation 抬在外层
+     * FrameLayout 上（内层主键带 elevation 会盖住 hint），而那个容器自己没有 background，
+     * BACKGROUND 轮廓退化为空矩形 → 系统不画任何阴影。这就是 VOCA-184 第一版「AC2 阴影
+     * 量不出来」的根因：字母键全都带 hint，等于全部走容器分支，投影一次都没画出来。
+     * 因此这里显式给一个与键面同圆角的轮廓，两个分支阴影一致。
      */
     private fun applyKeyElevation(view: View, fillWidth: Boolean, inToolbar: Boolean) {
         if (!fillWidth || inToolbar) {
@@ -1061,9 +1062,20 @@ class SoftKeyboardView @JvmOverloads constructor(
             return
         }
         view.elevation = dp(KEY_ELEVATION_DP)
-        view.outlineProvider = ViewOutlineProvider.BACKGROUND
+        view.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(v: View, outline: Outline) {
+                outline.setRoundRect(0, 0, v.width, v.height, dp(keyRadius))
+            }
+        }
     }
 
+    /**
+     * 按键背景。
+     *
+     * [inToolbar] 之前的版本靠「action / layout 白名单」猜哪些键在工具栏里，
+     * 结果字母页底行的「符」（LAYOUT→SYMBOL）和「中/英」（MODE_SWITCH）也被当成工具栏键
+     * 画成了透明底，与旁边灰底的 `123` 不一致（搜狗底行这两个键都是灰键）。
+     */
     private fun backgroundFor(style: KeyStyle, inToolbar: Boolean): StateListDrawable = when (style) {
         KeyStyle.SPECIAL -> if (inToolbar) toolbarKeySelector() else keySelector(specialBg, specialBgPressed)
         KeyStyle.SPACE -> keySelector(keyBg, keyBgPressed)
@@ -1132,7 +1144,14 @@ class SoftKeyboardView @JvmOverloads constructor(
     }
 
     private companion object {
-        const val DEFAULT_KEY_HEIGHT_DP = 52
+        /**
+         * 默认键高（dp）。
+         *
+         * **不写字面量**：引用 [KeyboardSize.DEFAULT_HEIGHT_DP]，与 `KeyboardSettings.keyHeightDp`
+         * 的默认值、`SettingsStore` 的读盘兜底同源。这三处曾经各写一个 `52`，改档位时漏掉一处
+         * 就会出现「设置页显示标准档、键盘实际还是旧高度」（VOCA-184 打回项 1）。
+         */
+        val DEFAULT_KEY_HEIGHT_DP: Int get() = KeyboardSize.DEFAULT_HEIGHT_DP
 
         /** 空格长按进入语音的默认阈值（毫秒）；实际值由服务侧按设置推入 [spaceLongPressMs]。 */
         const val DEFAULT_SPACE_LONG_PRESS_MS = 500L
