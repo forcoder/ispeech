@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 构建：VOCA-231 的「绑得上、永不回调」桩识别服务（见 StubRecognitionService.kt）。
+  release 变体不合并本清单，因此桩服务不会进入任何交付包。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <service
+            android:name="com.ispeech.debug.StubRecognitionService"
+            android:exported="true"
+            android:label="ispeech stub recognition (debug only)"
+            android:permission="android.permission.BIND_RECOGNITION_SERVICE">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

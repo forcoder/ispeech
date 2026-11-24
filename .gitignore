@@ -31,6 +31,7 @@ build-voca30/
 # 智能体运行时写进工作区根目录的文件（不属于产品代码）
 .multica/
 .pi/
+.dsh/
 AGENTS.md
 
 # 临时 worktree / 本地运行时
@@ -42,6 +43,17 @@ dist/deploy-*.log
 dist/screenshots/
 dist/ispeech-debug-*.apk
 dist/app-debug.apk
+# 带时间戳的出包产物（>100MB，GitHub 拒收；留在本地不入库）
+dist/ispeech-release-1.5-2*.apk
+dist/emulator-*.log
+
+# Python 校验脚本的字节码缓存
+__pycache__/
 
 # 短语数据导出
 通用短语.csv
+
+# 本地构建用的可写 GRADLE_USER_HOME / ANDROID_USER_HOME（智能体沙箱用，不入库）
+.gradle-home/
+.android-home/
+.tmp/

@@ -307,3 +307,43 @@ $ … | grep -c BIND_RECOGNITION_SERVICE  → 0                        ← 旧�
 
 **仍未坐实的部分**：本条是静态可达路径 + 判据单测，不是运行时日志。
 `ev=timeout stage=session` 至今零运行时样本，要等基线机 `23F0224224000950` 接线后按 §八 的判读表复测。
+
+## 十二、`ev=timeout stage=start` 的运行时取证（VOCA-231，2026-11-24 实测）
+
+§八 的时限此前只有单测与静态门禁，`ev=timeout` 零运行时样本。本节补上**第一条真实日志**，
+并把「怎么稳定造出这个分支」固化成可复跑装置。
+
+**为什么需要装置**：AVD 上的系统识别服务即使被 `kill -STOP` 冻住，`SpeechRecognizer` 客户端框架
+仍会在约 5 秒时自己回 `ERROR_NETWORK`（实测 5.03 s），于是走的是 `ev=error` 而不是 `stage=start`。
+不造一个「绑得上、一个回调都不回」的服务，`FIRST_CALLBACK_TIMEOUT_MS` 这条在任何可用机器上都验证不到。
+
+- **装置**：`app/src/debug/java/com/ispeech/debug/StubRecognitionService.kt` +
+  `app/src/debug/AndroidManifest.xml`。`onStartListening` / `onStopListening` / `onCancel` 全部只打一行日志、不回回调。
+- **隔离**：在 `src/debug/`，release 变体不编译。实测 release 包 dex `StubRecognitionService` = 0 命中、debug 包 = 5 命中。
+- **复跑**：
+
+```
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell settings put secure voice_recognition_service \
+    com.ispeech.ime/com.ispeech.debug.StubRecognitionService
+# 点语音键，等 10 秒
+adb logcat -d -s AsrTrace:* StubRecognitionService:*
+adb shell settings put secure voice_recognition_service \
+    com.google.android.as/com.google.android.apps.miphone.aiai.app.AiAiSpeechRecognitionService   # 复跑完还原
+```
+
+**实测原文**（Android 14 / `emulator-5554`，包 `versionCode 5`，2026-11-24 10:14 CST）：
+
+```
+W StubRecognitionService: ev=stub_start 已收下会话，故意不回任何回调（VOCA-231 复现装置）
+W AsrTrace: session=v1 ev=timeout t=10872220 stage=start limit_ms=10000 ms=10013 vad_began=false vad_ended=false
+I AsrTrace: session=v1 ev=ui_reset t=10872222 reason=engine_error ok=false ms=10016
+```
+
+三条都到位：`stage=start`（判读表里「有 `start` 无 `first_result`」那一行）、`limit_ms=10000`（时限来自
+`AsrTiming`，不是散落常量）、`ui_reset` 在 **10.016 秒**离开「识别中」。连按两次得到 `session=v2` 同样是
+`timeout stage=start → ui_reset`，即「卡住后越点越没反应」不再成立。
+
+**仍未覆盖**：①基线真机 `FMR0224913042917` / `23F0224224000950` 上的同一分支（设备未回线，`adb devices -l` 无该机）；
+②`stage=session`（60 秒硬上限）与 `stage=finish` 的运行时样本本机也没造到 —— 前者需要识别服务持续 60 秒
+既不回结果也不报错，后者需要「回了中间结果、收尾不回」。这三条按 §八 判读表在真机上一次采完即可闭环。
