@@ -296,11 +296,14 @@ jobs:
 > 未做（属外部资源变更，需人类拍板后由 SRE 执行）：把该 zip 镜像到 `delivery-service-smzk`
 > 以摆脱境外单源；`check_model_host.py` 目前只探测 FunASR 的 `asrModelUrl`，不覆盖本条。
 
-## 11. 实测验证记录（真机回归 R-1~R-5）
+## 11. AVD 实测验证记录（R-1 / R-2 / R-4 / R-5）
 
-> VOCA-476 的取证留痕：把 §3 第 3 步「装上真机跑一遍」与 §8 检查表第 5 项落到可复查的记录上。
-> **AVD 覆盖**指在模拟器上完成，可作为下载 / 自愈链路的证据；**R-3（语音上屏）必须真机麦克风**，
-> AVD 无音频输入，不在此列。
+> VOCA-476 的取证留痕。**本节全部为 AVD（`emulator-5554`）实测，不是真机**：可作为下载 / 自愈
+> 链路的证据，但不能替代 §3 第 3 步要求的真机验收。
+>
+> **真机项待执行（未做，不得据此判定可发布）**：
+> - **R-3 语音上屏**：需真机麦克风（序列号后 4 位 `2917`），AVD 无音频输入；
+> - §8 检查表第 5 项「真机走通下载 100% → 解压 → 识别一句话」**仍未达成**。
 
 ### 2026-11-24 · `main d9690f9` 本树重建 · AVD 覆盖（R-1 / R-2 / R-5）
 
@@ -321,7 +324,7 @@ jobs:
 
 | 用例 | 结果 | 本轮实测证据 |
 |---|---|---|
-| **R-1** 全新状态（`pm clear` 后 `files/funasr` 不存在）触发 | ✅ 通过 | 日志 `funasr category=ARCHIVE_MISSING 就绪标记缺失且本地无整包，需重新下载（预期 77920048 字节）`；产物 `files/funasr/model` = 80 MB / 8 文件，无 `.part`；`netstats` rb `0 → 80,777,445 B`（≈77.04 MiB，约一整包） |
+| **R-1** 全新状态（`pm clear` 后 `files/funasr` 不存在）触发 | 行为通过、**字面判据不满足** | 日志 `funasr category=ARCHIVE_MISSING 就绪标记缺失且本地无整包，需重新下载（预期 77920048 字节）`；产物 `files/funasr/model` = 80 MB、无 `.part` |
 | **R-2** 预置坏 `.part`（**33 B** HTML 假包）后重触发 | ✅ 自愈成功，**未卸载重装** | `断点续传：从 0KB 继续，共 76093KB` → `下载失败（第 1/3 次）: DIGEST_MISMATCH: sha256=664f15e169c9…，预期 da92b3db5218…` → 删 `.part` 重下 → `model` 重建 80 MB；`netstats` Δ=**161,538,786 B ≈ 154.06 MB（2.073× 整包）** |
 | **R-5** 断网（飞行模式，`NET_FAIL`）触发 | ✅ 失败可读、不留脏 `.part` | `下载失败（第 1/3 次）: timeout` → `Unable to resolve host "delivery-service-smzk…"` ×2 → `funasr category=PREPARE_FAILED … 期望完成标记=.ready-b77920048-sda92b3db5218`；随后 `files/funasr` 目录为空 |
 
@@ -347,8 +350,14 @@ jobs:
 ⇒ 语义已覆盖，**字面 tag 名不成立**。是把判据改成按 `FunAsrModelStore` 取，还是要求后端新增
 `AsrDownload` tag，需人类/后端定；**在裁决前本表 R-1 记「行为通过、字面判据不满足」**。
 
-**R-2 下行字节口径**：用 `dumpsys netstats --uid 10196` 在触发前后各取一次 `rb` 原始读数（均已留档），
-差即为实际下行；未再使用无原件的 tcpdump 结论。
+**为什么 R-2 的 Δ 是 2.073× 而不是 1×（说明）**：R-2 用例先在**已有整包**状态下注入坏 `.part`，
+自愈要「先删坏 `.part` → 整包重下 → 解压」，即一次完整 77,920,048 B；而该 bucket 起点的 `rb`
+恰好落在 R-1 完成后的位置，因此这一段 delta 覆盖「R-1 尾段 + R-2 整包」，合计约两包。
+`files/funasr/model` 的 mtime 为 23:19（R-2 完成时刻）也印证 R-2 确实重新解压了一次。
+
+**R-2 下行字节口径**：用 `dumpsys netstats --uid 10196` 在触发前后各取一次 `rb` 原始读数。
+**留档实况**：`R2-netstats-before.txt` / `R2-netstats-after.txt` 两份均非空、已随证据包提交；
+`R1-netstats-before.txt` 本轮为空，故 R-1 行不再声称 `rb 0 →`。
 
 ### 11.1 旧实现基线（`dist/ispeech-internal-v1.6.apk`，11-09~11-14 构建）——**不构成本单验收证据**
 
@@ -367,23 +376,27 @@ jobs:
 **未解决（转 VOCA-186 线，不在本单闭合）**：谁用哪棵树构建了 `dist/ispeech-internal-v1.6.apk`、
 为何与 `release/voca-186-v1.6` 源码不一致。`origin/agent/sre/voca-186-rebuild` 仍把它登记为 v1.6 出包。
 
-### 2026-11-24 · main `bb1bf2b`（含 PR #31）· AVD 覆盖（R-4）
+### 2026-11-24 · `main d9690f9` 同一被测包 · AVD 覆盖（R-4）
+
+> 上一版此处记的是 `bb1bf2b` 构建的 `ba37b578…`，但该 apk **未留原件、任何分支与证据包里都不存在**，
+> 第三方无法复算（第 4 次质检打回项 4）。本轮改为在**上面那张同一被测包**上重跑，原件可复算。
 
 | 项 | 值 |
 |---|---|
-| 基线 | `main` @ `bb1bf2b`（PR #31 于 2026-11-24T07:09:55Z squash 合入） |
-| 构建 | `./gradlew assembleRelease`，产物 `app-release.apk`，sha256 `ba37b578a7bdcf584b92a782a20d495c855fc26886a5b27438cd961cd7c20a7e` |
-| 包内取证 | dex 命中 `AsrModelDownload` 12 处、`VoskModelStore` 9 处、`AsrDownloadPolicy` 6 处 ⇒ 合入的加固代码确实在包里。**注意**：`AsrDownloadPolicy` 是类名；全仓 `const val TAG` 里**没有**名为 `AsrDownload` 的 tag（只有 `FunAsrModelStore` / `VoskModelStore`），R-1 原文要求的「`AsrDownload` 打点」因此无法满足 |
-| 设备 | 同上一节 AVD（Android 14 / `sdk_gphone64_arm64`）；`versionName=1.5`（`app/build.gradle.kts` 里版本号未随 main 前进，**只是版本标签，与本次改动无关**） |
+| 源码基线 | `main` @ `d9690f9c7d22141013b904643b83b584c0381799`（同 §11 首节） |
+| 被测包 | 与 §11 首节同一个 `assembleRelease` 产物；本轮重建 sha256 `f02f3eeb0ac20b2a648aded05b0d0516adcc9a5979504914faf86a00f3c0b002`（139,229,278 B） |
+| **可复算性说明** | 同一棵树两次 `assembleRelease` 得到**不同 sha256**（`15541ef7…` vs `f02f3eeb…`），但 **`classes*.dex` 逐字节相同**（47,213,896 B，符号计数 11/5/1/1/1/9/6 全同）⇒ APK 整体不可字节级复现（签名/元数据带时间），**dex 可复现**。复核请以 `dex-strings.txt` 的符号计数为准，或以 `d9690f9` 重跑同一命令后比 dex |
+| 包内取证 | `VoskModelStore` 9 / `AsrModelDownloader` 5 / `AsrModelInstall` 11 / `AsrDownloadPolicy` 6 ⇒ 加固代码确在包内 |
+| 设备 | AVD `emulator-5554` / Android 14 / `sdk_gphone64_arm64` / uid `10196`；`versionName=1.5`（`main` 的 `build.gradle.kts` 未前进，仅版本标签） |
 | 引擎 | `asr_engine=VOSK`（写入 `files/datastore/ispeech_settings.preferences_pb`，因 ASR 设置页在 UI 上无入口） |
 
 | 用例 | 结果 | 关键证据 |
 |---|---|---|
-| **R-4** 切到 VOSK 引擎，走 `VoskModelStore` 下载 | ✅ 通过 | `files/vosk/model.zip.part` 边下边长（2.5 MB → 18.6 MB → 39.3 MB）→ 落成 `model.zip` 后原子解压 → 最终 `files/vosk/model` **65 MB**，含 `README`/`am`/`conf`/`graph`/`ivector`；`conf/model.conf`、`conf/mfcc.conf` 在位；**无 `.part` 残留** |
+| **R-4** 切到 VOSK 引擎，走 `VoskModelStore` 下载 | ✅ 通过 | 触发后 `files/vosk/model` **65 MB** 落盘，`ls -laR` 原件见证据包 `R4-vosk-lsR.txt`：`model/README`、`model/am/final.mdl`(15,901,896 B)、`model/conf/mfcc.conf`+`model.conf`、`model/graph/Gr.fst`(26,082,259 B)+`HCLr.fst`+`disambig_tid.int`+`phones/`、`model/ivector/`；**无 `model.zip`、无 `.part` 残留** |
 
 **R-4 的判据已知差异**：§10 记载该源在「断点恰在整包长度处」会回 `416` + `text/html`，走
 `RETRY_FROM_START` 自愈。本轮是全新下载（无历史 `.part`），未复现该分支；该分支由
-`VoskModelStoreTest` 单测覆盖，不在本轮真机证据内。
+`VoskModelStoreTest` 单测覆盖，不在本轮 AVD 证据内。
 
 **未覆盖（如实声明）**：
 - **R-3 语音上屏**：需真机麦克风（AVD 无音频输入），本轮未跑，**不得据此判定语音链路可用**。
@@ -399,3 +412,10 @@ jobs:
 | 2026-11-18 | 新增 §10：Vosk 活链路（`voskModelUrl`）成为第二个模型源，客户端下载器与 FunASR 合一 | VOCA-474：`./gradlew :app:testDebugUnitTest --tests "com.ispeech.data.*"` 69/69（AsrModelInstall 19 + FunAsr 16 + PhraseCsvImport 13 + Vosk 21）、`check_crosscut` 183/183、`check_static` 6/6（2026-11-23 复跑） |
 | 2026-11-24 | 新增 §11 实测验证记录：v1.6 在 AVD 跑通 R-1/R-2/R-5；main `bb1bf2b`（PR #31）在 AVD 跑通 **R-4**（VOSK 43.9 MB 下载 → 65 MB `model` 目录）。R-3 需真机麦克风，仍未覆盖 | 见 §11 与 VOCA-476 评论 |
 | 2026-11-24 | **§11 换包重记**：原 `dist/ispeech-internal-v1.6.apk` 经复核 dex 无 `AsrModelInstall`/`VoskModelStore`（11-09~11-14 旧构建），降级为 §11.1 基线；改用 `main d9690f9` 重建包（`15541ef7…`，三方 sha 一致）重跑 R-1/R-2/R-5，日志出现 `funasr category=` 成对打点、全角冒号与 `期望完成标记=` 后缀，与源码一致 | 见 §11 与 VOCA-476 评论 |
+
+### 11.2 分支声明
+
+- **合并窗口只取 `agent/voca-476-r4`**。`origin/agent/voca-476`（`7c58832`）作废：它新增的是
+  `## 10. 实测验证记录`，与本文件 §10（Vosk 源）编号冲突；两分支同时合入 `git merge-tree` rc=1。
+- 本单**未建 PR**（本 runtime `gh` 未登录、无 `GH_TOKEN`，匿名 `POST /pulls` 返回 401）。分支已推
+  `agent/voca-476-r4`，建 PR 需由带凭据的 runtime 或人类执行。
