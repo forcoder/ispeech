@@ -275,9 +275,40 @@ jobs:
 | 客户端下载器校验与自愈 | 后端（VOCA-34） |
 | 远端配置下发（若要做「不发版换源」） | 架构师（需新 issue） |
 
+## 10. 实测验证记录
+
+> 「§3 第 3 步验证」与「§8 检查表第 5 项」的实测留痕。**AVD 覆盖**指在模拟器上完成，
+> 可作为下载 / 自愈链路的证据；**R-3（语音上屏）必须真机麦克风**，AVD 无音频输入，不在此列。
+
+### 2026-11-24 · v1.6 内部包 · AVD 覆盖（R-1 / R-2 / R-5）
+
+| 项 | 值 |
+|---|---|
+| 设备 | AVD `ispeech_test`，Android 14（`ro.build.version.release=14`），`sdk_gphone64_arm64`，端口 5554 |
+| 安装包 | `dist/ispeech-internal-v1.6.apk`（98,416,118 B） |
+| 包 sha256 | `9cddcec5a88d53017c5680eb07ba52e643d523d273f5d3649180df44f8d43f42`（与 `dist/SHA256SUMS` 逐字符一致） |
+| 应用版本 | `versionName=1.6` / `versionCode=6` |
+| 默认源 | OSS `delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/…tar.bz2`，`check_model_host.py` 7/7 全绿（200 / 77920048 B / `BZh` / Range 206） |
+
+| 用例 | 结果 | 关键证据 |
+|---|---|---|
+| **R-1** 全新安装（`pm clear` 后 `files/funasr` 不存在），触发下载 | ✅ 通过 | 解压后 `files/funasr/model` = 80 MB、8 个文件；**无 `.part` 残留**、无 `model.tar.bz2` 残留 |
+| **R-2** 预置坏 `.part`（向 `files/funasr/model.tar.bz2.part` 写入 38 B 的 HTML 假包）后重触发 | ✅ 自愈成功，**未卸载重装** | 日志 `断点续传：从 0KB 继续，共 76093KB` → `下载失败（第 1/3 次）: DIGEST_MISMATCH: sha256=5e5ef48a…，预期 da92b3db…` → 删 `.part` 重下 → `model` 重新解压 80 MB |
+| **R-5** 断网（飞行模式）后触发 | ✅ 失败可读、不留脏 `.part` | 三次重试后 `FunASR 模型准备失败: Unable to resolve host "delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com"`；目录内无任何残留文件 |
+
+**R-2 下行字节（按 Content-Length 与 `.part` 长度推算，非实测计量）**：续传段 77,920,010 B
+（77,920,048 − 38）＋ 摘要失配后整包重下 77,920,048 B ≈ **155.8 MB**。与 VOCA-478 登记的
+「坏 `.part` 自愈多下一整包」一致，属已知行为、本单不修。
+
+**未覆盖（如实声明）**：
+- **R-3 语音上屏**：需真机麦克风（AVD 无音频输入），本轮未跑，不得据此判定语音链路可用。
+- **R-4 VOSK 引擎**：`VoskModelStore` 的校验与 zip-slip 防护在 PR #31，未合入 `main`（`state=open`），装上真机的包仍是旧行为，此时跑验不到本单改动。
+- **R-5 的 UI 文案**：仅取到 logcat 与文件系统证据，候选条文案未截图取证。
+
 ## 变更记录
 
 | 日期 | 变更 | 证据 |
 |---|---|---|
 | 2026-11-09 | 新建；实测 `cvm` 被备案拦截、官方源可用、探测脚本上线 | 见 §1 与 issue VOCA-35 评论 |
 | 2026-11-09 | **默认源切到阿里云 OSS**；§1 复测 `cvm`（302 → dnspod 拦截页后 502 / 166 B）；新增 §5.1 落地配置、§6 OSS 行为差异、§7 成本与恢复、§8 检查表 OSS 项 | `check_model_host.py --sha256` 9/9 全绿、无参数探测 7/7 全绿、`check_static` 6/6、`check_crosscut` 138/138；见 VOCA-35 评论 |
+| 2026-11-24 | 新增 §10 实测验证记录：v1.6 内部包在 AVD（Android 14）上跑通 R-1 / R-2 / R-5（下载 100%、坏 `.part` 自愈、断网可读失败）；R-3 需真机麦克风、R-4 待 PR #31，均未覆盖 | 见 §10 与 VOCA-476 评论 |
