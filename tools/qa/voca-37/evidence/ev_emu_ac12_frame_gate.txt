@@ -1,0 +1,58 @@
+# VOCA-37 · AC-12 工装帧闸门 · emulator-5554 实测（2026-11-24 10:2xZ / 18:2x CST）
+
+## 1 设备与构建
+List of devices attached
+emulator-5554          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:1
+
+panel: Physical size: 1080x2340 Override size: 1260x2720 
+density: Physical density: 440 Override density: 520 
+apk: app/build/outputs/apk/debug/app-debug.apk  sha256=ba590d01a6416427
+
+## 2 本轮阻塞读数（为什么 AC-10/AC-12 像素没出数）
+- 装的是带 AC-12 的新构建：dex 里 CandidateOverflowCue=3 / candidate_overflow_cue=2 命中
+- Settings 搜索框宿主在本 AVD 不存在（uiautomator 无 open_search_view_edit_text），旧 host_ready() 恒 FAIL
+- 联系人编辑器在 adjust=pan 下 IME 被顶成全屏 frame=[0,158][1260,2720]；Chrome 地址栏能只出单键 's'；ispeech 快捷短语搜索框回读 'sh'
+- 这三条都表现为：候选条所在行段不是 46dp 条带，而是整块 #F4F5F7 面板（158..2564, 740.3dp）
+
+## 3 由此暴露的工装缺陷（旧版 ac12_overflow.py）
+旧 find_bar 只按 ≥60% 底色找最长连续行段，不校验高度，于是把整屏当候选条：
+```
+帧 = 面板整块底色 + 右沿附近一点墨迹：
+OLD verdict = FADE_PRESENT      <-- 假的 AC-12 达标
+NEW ok=False why=bar_height_implausible band_dp=740.3 need_dp=24..160
+```
+
+## 4 修复后本地门禁
+```
+Ran 4 tests in 0.384s
+
+OK
+Ran 11 tests in 0.000s
+
+OK
+SUMMARY: passed=6 failed=0 warned=0
+SECTION1 field_diffs=0 verdict=NO_DRIFT
+SECTION2 before=no_effect after=verdict_moves
+RESULT PASS
+```
+
+## 5 A/B 对照（同一 AVD、同一宿主、同一几何 1260x2720@520，相隔数分钟）
+```
+release 1.5 (dist/ispeech-release-1.5-20261119-1557.apk)
+  Chrome 地址栏连敲 7 键 → focused_text='shijian'  (回读成功)
+  组合态帧：键面在场 white=17908，候选带 1472..1592 有 chip 墨迹
+debug AC-12 (app/build/outputs/apk/debug/app-debug.apk, HEAD=950be90+d59c375)
+  Chrome 地址栏连敲 7 键 → focused_text='sh'       (回读只到第 2 键)
+  组合态帧：keyboard 区 white=18（整块 #F4F5F7），候选带只到 1404
+```
+logcat 同刻出现（debug 包）：
+```
+W View : requestLayout() improperly called by android.widget.FrameLayout{f84bdcd ... 0,182-1260,2484} during layout: running second layout pass
+```
+该 FrameLayout 的边界 0,182-1260,2484 = 新加的 candidate_scroll_frame 包裹层（d59c375 把
+HorizontalScrollView 从 LinearLayout 的 0dp+weight 改成 FrameLayout(match_parent) 内层）。
+
+## 6 结论
+- AC-10 像素（full_count/档位）与 AC-12 在场证据本轮**未取得**：进不到可信组合态。
+- 不能归因为「只剩真机项」：debug 构建在模拟器上就先丢了输入，release 同条件正常。
+- 工装侧已修：ac12_overflow 的帧闸门（空白面板不再能报 FADE_PRESENT）。

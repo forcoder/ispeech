@@ -53,6 +53,6 @@ dist/ispeech-release-1.5-20261115-1004.apk
 dist/ispeech-release-*-2*.apk
 dist/emulator-*.log
 
-# Python 静态检查脚本的字节码缓存（tools/verify 会被反复执行）
+# Python 字节码缓存（tools/verify 与 tools/qa 下的脚本都会被反复执行）
 __pycache__/
 *.pyc

@@ -45,6 +45,13 @@ FADE_WIDTH_DP = 12
 # 候选条 paddingEnd（candidate_view.xml）
 PAD_END_DP = 6
 
+# 候选条带的合理高度（candidate_view.xml layout_height=46dp，上下各 4dp padding 已在内）。
+# 给到 24–160 dp 的宽区间：厂商字体放大、角度行高差异都在里面，但「整块键盘面板」进不来。
+MIN_BAND_DP = 24
+MAX_BAND_DP = 160
+# 条带占面板高度的上限。候选条永远是面板顶部的一条，不可能占掉四分之一屏还多。
+MAX_BAND_PANEL_FRAC = 0.25
+
 OUT = "build/ac12"
 
 
@@ -135,6 +142,21 @@ def measure(path: str) -> dict:
     if not band:
         return dict(ok=False, why="no_bar", w=w, h=h, density_px_dp=d)
     y0, y1 = band
+    # 帧有效性闸门：面板整块都是 #F4F5F7 时 find_bar 会把「整屏」当成候选条，
+    # 于是线索区里既没墨迹、左边也没墨迹 → NO_CONTENT_ANYWHERE，或者更糟：
+    # 键盘没画出来但面板底色相同，被判成 FADE_PRESENT（假的达标）。
+    # 候选条只可能是面板顶部的一条 46dp，所以这里先否掉「不像候选条」的帧，
+    # 让这类帧走 ok=False，而不是让它产出 verdict。
+    bar_h = y1 - y0
+    if not (MIN_BAND_DP * d <= bar_h <= MAX_BAND_DP * d):
+        return dict(ok=False, why="bar_height_implausible", w=w, h=h, density_px_dp=d,
+                    band_y=(y0, y1), band_dp=round(bar_h / d, 1),
+                    need_dp="%d..%d" % (MIN_BAND_DP, MAX_BAND_DP))
+    if bar_h > MAX_BAND_PANEL_FRAC * h:
+        return dict(ok=False, why="bar_covers_panel", w=w, h=h, density_px_dp=d,
+                    band_y=(y0, y1), band_dp=round(bar_h / d, 1),
+                    panel_frac=round(bar_h / float(h), 3),
+                    max_frac=MAX_BAND_PANEL_FRAC)
 
     def ink(a: int, b: int) -> int:
         return sum(
