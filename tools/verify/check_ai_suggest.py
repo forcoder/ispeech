@@ -28,6 +28,9 @@ AI_SCREEN = ROOT / "app/src/main/java/com/ispeech/settings/ai/AiSettingsScreen.k
 AI_VM = ROOT / "app/src/main/java/com/ispeech/settings/ai/AiSettingsViewModel.kt"
 HOME = ROOT / "app/src/main/java/com/ispeech/settings/HomeScreen.kt"
 NAV = ROOT / "app/src/main/java/com/ispeech/settings/nav/IspeechNavGraph.kt"
+PANEL = ROOT / "app/src/main/java/com/ispeech/input/AiReplyPanel.kt"
+GUARD = ROOT / "app/src/main/java/com/ispeech/input/AiSourceGuard.kt"
+LAYOUT = ROOT / "app/src/main/res/layout/ime_input_view.xml"
 
 _passed = 0
 _failed = 0
@@ -173,6 +176,81 @@ def check_learning_chain() -> None:
     )
 
 
+def check_one_tap_fill() -> None:
+    """VOCA-65 条目 5a（VOCA-628）：一步填入。
+
+    面板必须先真的接上服务（历史缺陷：布局里声明了 AiReplyPanel，服务侧从未
+    findViewById，等于死代码），再满足「点行即上屏 / 长按或…进详情 / 原文校验不复制」。
+    """
+    service = read(SERVICE)
+    panel = read(PANEL)
+    layout = read(LAYOUT)
+
+    check(
+        "com.ispeech.input.AiReplyPanel" in layout and "ai_reply_panel" in layout,
+        "一步填入：布局里声明了 AI 结果面板",
+        "ime_input_view.xml 缺 AiReplyPanel",
+    )
+    check(
+        "findViewById<AiReplyPanel>(R.id.ai_reply_panel)" in service and "aiReplyPanel = replyPanel" in service,
+        "一步填入：服务侧真正接线面板（不是死代码）",
+        "IspeechImeService 未 findViewById / 未保存 aiReplyPanel",
+    )
+    check(
+        "replyPanel.onPick = { index -> commitAiReply(index) }" in service,
+        "一步填入：点行直接走 commitAiReply，不复制上屏路径",
+        "面板 onPick 未接到 commitAiReply(index)",
+    )
+    check(
+        "setOnClickListener { pick(index) }" in panel and "setOnLongClickListener" in panel,
+        "一步填入：点行上屏、长按进详情（AC-5a.1 / 5a.2）",
+        "AiReplyPanel 行点击/长按未分别接 pick / showDetail",
+    )
+    check(
+        "private fun showDetail(" in panel and "more" in panel,
+        "一步填入：详情页入口保留（长按 + 行尾…）",
+        "详情页入口丢失",
+    )
+    # AC-5a.3：替换校验只此一份，面板不得自己删原文
+    check(
+        "AiSourceGuard.shouldReplace(" in service,
+        "一步填入：原文替换校验走共享判定（AC-5a.3）",
+        "commitAiReply 未使用 AiSourceGuard",
+    )
+    check(
+        "deleteSurroundingText" in service and "deleteSurroundingText" not in panel,
+        "一步填入：删除原文只发生在服务侧一条路径",
+        "面板内出现 deleteSurroundingText 副本",
+    )
+    guard = read(GUARD)
+    check(
+        "beforeCursor == sourceText" in guard,
+        "一步填入：校验是「逐字相等」而非仅比长度",
+        "AiSourceGuard 未做逐字比较",
+    )
+    check(
+        "if (panel == Panel.AI_REPLY) closePanel()" in service,
+        "一步填入：上屏后关闭面板（AC-5a.1）",
+        "commitAiReply 未在 AI 面板打开时关闭面板",
+    )
+    check(
+        "aiReplyPanel?.submit(emptyList())" in service,
+        "一步填入：无结果 / 失败时清空面板（AC-5a.4）",
+        "dismissAiState 未清空面板结果",
+    )
+    check(
+        "submitAiResults(" in service,
+        "一步填入：结果灌入面板带来源日志（AC-5a.5 可观测）",
+        "缺少 submitAiResults 结构化日志",
+    )
+    test = ROOT / "app/src/test/java/com/ispeech/input/AiSourceGuardTest.kt"
+    check(
+        test.exists() and "shouldReplace" in read(test),
+        "一步填入：替换校验有 JVM 单测覆盖",
+        "缺 AiSourceGuardTest",
+    )
+
+
 def check_settings_ui() -> None:
     screen = read(AI_SCREEN)
     check(
@@ -227,6 +305,7 @@ def main() -> int:
     check_settings_store()
     check_generation_chain()
     check_learning_chain()
+    check_one_tap_fill()
     check_settings_ui()
     print("-" * 62)
     print(f"SUMMARY: passed={_passed} failed={_failed}")

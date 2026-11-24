@@ -22,11 +22,15 @@ import android.widget.TextView
  * 1. 标题行：[‹ 返回] 「AI 参考回复」 [共 N 条]
  * 2. 列表：每行只显示前 [PREVIEW_CHARS] 个字，超出用省略号；行高固定，
  *    **超过 [MAX_VISIBLE_ROWS] 条时列表出现滚动条**（ScrollView 限高）。
- * 3. 详情：点某一行即切换到全文视图（可滚动），底部「上屏」「关闭」两个按钮，
- *    「关闭」回到列表，不退出面板。
+ * 3. 详情：长按某一行 / 点行尾「…」切换到全文视图（可滚动），底部「上屏」「关闭」
+ *    两个按钮，「关闭」回到列表，不退出面板。
  *
- * 面板本身不调用后端：结果由服务通过 [submit] 灌入，点击回调 [onPick]，
- * 上屏动作在服务侧（[com.ispeech.input.IspeechImeService.commitAiReply]）。
+ * 「一步填入」（VOCA-65 条目 5a）：**点行即该条原文上屏并关闭面板**，不再先进详情。
+ * 详情页保留原入口，改由长按行 / 行尾「…」触发——长文本仍要能看一眼全文再决定。
+ *
+ * 面板本身不调用后端：结果由服务通过 [submit] 灌入，上屏回调 [onPick]，
+ * 实际动作在服务侧（[com.ispeech.input.IspeechImeService.commitAiReply]），
+ * 生成前原文的替换校验也在那一条路径上（见 [AiSourceGuard]），面板不复制一份。
  */
 class AiReplyPanel @JvmOverloads constructor(
     context: Context,
@@ -34,7 +38,12 @@ class AiReplyPanel @JvmOverloads constructor(
     defStyleAttr: Int = 0,
 ) : LinearLayout(context, attrs, defStyleAttr) {
 
-    /** 点击详情里的「上屏」：回调列表下标。 */
+    /**
+     * 点击列表行：该条原文一步上屏（VOCA-65 AC-5a.1）。
+     *
+     * 回调列表下标交给服务侧 `commitAiReply(index)`，与候选条 / 空格 / 回车上屏
+     * 走同一条路径（含生成前原文的替换校验），面板不自己拼上屏逻辑。
+     */
     var onPick: ((Int) -> Unit)? = null
 
     /** 点击返回 / 关闭：退出面板。 */
@@ -199,20 +208,7 @@ class AiReplyPanel @JvmOverloads constructor(
         listContainer.removeAllViews()
         items.forEachIndexed { index, item ->
             listContainer.addView(
-                TextView(context).apply {
-                    text = preview(item)
-                    textSize = 15f
-                    setTextColor(textPrimary)
-                    maxLines = 1
-                    ellipsize = TextUtils.TruncateAt.END
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(10), 0, dp(10), 0)
-                    background = rowSelector()
-                    isClickable = true
-                    isFocusable = true
-                    contentDescription = preview(item)
-                    setOnClickListener { showDetail(index) }
-                },
+                buildRow(index, item),
                 LayoutParams(LayoutParams.MATCH_PARENT, dp(rowHeightDp)).apply {
                     setMargins(dp(4), dp(1), dp(4), dp(1))
                 },
@@ -224,6 +220,56 @@ class AiReplyPanel @JvmOverloads constructor(
         }
         listScroll.isVerticalScrollBarEnabled = items.size > maxVisibleRows
         titleLabel.text = if (items.isEmpty()) TITLE_EMPTY else RESULT_COUNT.format(items.size)
+    }
+
+    /**
+     * 一行结果：预览文字 + 行尾「…」。
+     *
+     * 点预览文字 = 一步上屏（AC-5a.1）；长按预览文字或点「…」= 进详情看全文（AC-5a.2）。
+     * 整行也接一遍点击 / 长按，避免用户点在行内边距上没反应。
+     */
+    private fun buildRow(index: Int, item: String): LinearLayout {
+        val label = preview(item)
+        val body = TextView(context).apply {
+            text = label
+            textSize = 15f
+            setTextColor(textPrimary)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, dp(4), 0)
+            isClickable = true
+            isFocusable = true
+            contentDescription = ROW_A11Y_PICK.format(label)
+            setOnClickListener { pick(index) }
+            setOnLongClickListener {
+                showDetail(index)
+                true
+            }
+        }
+        val more = textButton(ELLIPSIS, textSecondary) { showDetail(index) }.apply {
+            contentDescription = ROW_A11Y_DETAIL
+        }
+        return LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rowSelector()
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { pick(index) }
+            setOnLongClickListener {
+                showDetail(index)
+                true
+            }
+            addView(body, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
+            addView(more, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
+        }
+    }
+
+    /** 一步填入：把下标交给服务侧的上屏路径（含原文替换校验），面板不再中转详情页。 */
+    private fun pick(index: Int) {
+        if (items.getOrNull(index) == null) return
+        onPick?.invoke(index)
     }
 
     private fun showDetail(index: Int) {
@@ -295,7 +341,14 @@ class AiReplyPanel @JvmOverloads constructor(
         const val DETAIL_TITLE = "AI 参考回复 · 详情"
         const val RESULT_COUNT = "共 %d 条"
 
-        /** 列表行预览字数：超出部分用省略号，点行看全文。 */
+        /** 列表行预览字数：超出部分用省略号，长按行 / 点行尾「…」看全文。 */
         const val PREVIEW_CHARS = 12
+
+        /** 行尾详情入口：一步填入主路径之外，长文本仍要能看全文。 */
+        const val ELLIPSIS = "…"
+
+        /** 无障碍：行主体读作「填入第 N 条」，行尾按钮读作「查看全文」。 */
+        const val ROW_A11Y_PICK = "填入：%s"
+        const val ROW_A11Y_DETAIL = "查看全文"
     }
 }

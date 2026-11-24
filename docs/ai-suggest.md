@@ -20,7 +20,8 @@ AI 键 ─► startAiReply()
                 └─ 是（OpenAI 兼容）─► DirectLlmClient.generate()
                                            └─ 提示词 = 系统约束 + 采纳过的回复（few-shot）+ 本次输入
           │
-          └─ 采纳（空格 / 点候选）─► AiLearningStore.recordAccepted()
+          └─ 采纳（点结果行 / 空格 / 点候选）─► AiLearningStore.recordAccepted()
+                                             └─ 生成前原文未变才 deleteSurroundingText（AiSourceGuard）
 ```
 
 ## 模型配置（设置页 → AI 建议）
@@ -40,6 +41,25 @@ AI 键 ─► startAiReply()
 切换来源会**清空** Base URL 与模型名，回落到新来源的预设 —— 否则从 OpenAI 切到 DeepSeek 会带着 `openai.com` 的地址请求，直接鉴权失败。
 
 配置不全时点 AI 键会提示「请先在设置页配置大模型」，而不是抛一个看不懂的 HTTP 错误。
+
+## 结果面板与「一步填入」（VOCA-65 条目 5a）
+
+AI 键的结果同时进两处，**同一份 `candidates`**，所以两条上屏入口行为一致：
+
+| 入口 | 动作 | 关闭面板 |
+| --- | --- | --- |
+| 点结果行 | 该条原文一步上屏 | 是 |
+| 长按结果行 / 点行尾「…」 | 进详情页看全文，再点「上屏」 | 是 |
+| 候选条点击 / 空格 / 回车 | 上屏（既有入口，保留） | — |
+
+两条路径都走 `IspeechImeService.commitAiReply(index)`，**生成前原文的替换校验只有一份**
+（`AiSourceGuard.shouldReplace`）：只有光标前 `aiSourceLen` 个字逐字等于生成时的原文才删原文，
+用户中途改了输入框就只插入、不删除。面板里不得再复制一份删除逻辑。
+
+> 历史坑：`AiReplyPanel` 曾在布局里声明、服务侧从未 `findViewById`，是死代码；5a 之前 AI 结果
+> 实际只走候选条。本次重新接线，改动才可被真机点验证。
+
+真机判定：点行后输入框出现该条原文且面板收起、长按进详情、改了输入框再点不吞字。
 
 ## 学习与采纳率
 
