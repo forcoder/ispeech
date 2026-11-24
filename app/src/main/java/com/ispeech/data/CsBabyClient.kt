@@ -184,6 +184,31 @@ class CsBabyClient(@Suppress("UNUSED_PARAMETER") context: Context) {
         private const val DEFAULT_WEIGHT = 100
 
         /**
+         * 五笔态能敲全的简写长度上限（与 `IspeechImeService.MAX_CODE_LENGTH` 同值）：
+         * 超过它的简写在五笔态只能靠子串命中，引擎侧「单字母不触发」的守卫（`minTriggerLength = 2`）
+         * 挡不住 4 位输入命中 5 位码。
+         */
+        private const val WUBI_REACHABLE_TRIGGER_LENGTH = 4
+
+        /**
+         * 云端 `match_type` → 本地匹配方式；超过五笔态可敲全长度（[WUBI_REACHABLE_TRIGGER_LENGTH]）
+         * 的简写一律降级 `EXACT`，口径同 ADR C1-6 覆盖条目。
+         *
+         * regex 不降级：命中与否由表达式自己决定，项目口径里它与 exact 同属不受长度守卫的模式。
+         */
+        private fun remoteMatchMode(trigger: String, matchType: String?): QuickMatchMode {
+            val declared = when (matchType.orEmpty().trim().uppercase()) {
+                "EXACT" -> QuickMatchMode.EXACT
+                "CONTAINS", "FUZZY" -> QuickMatchMode.CONTAINS
+                "REGEX" -> QuickMatchMode.REGEX
+                else -> QuickMatchMode.PREFIX
+            }
+            val canMisfireBeforeFullCode = trigger.length > WUBI_REACHABLE_TRIGGER_LENGTH &&
+                (declared == QuickMatchMode.PREFIX || declared == QuickMatchMode.CONTAINS)
+            return if (canMisfireBeforeFullCode) QuickMatchMode.EXACT else declared
+        }
+
+        /**
          * 把远端关键词规则转换为本地快捷短语；规则被删除 / 禁用或内容为空时返回 null。
          */
         fun toQuickEntry(rule: RemoteKeywordRule): QuickEntry? {
@@ -196,18 +221,12 @@ class CsBabyClient(@Suppress("UNUSED_PARAMETER") context: Context) {
                 .replace("\r", "")
                 .replace("\n", "\\n")
                 .replace("\t", "\\t")
-            val mode = when (rule.matchType.orEmpty().trim().uppercase()) {
-                "EXACT" -> QuickMatchMode.EXACT
-                "CONTAINS", "FUZZY" -> QuickMatchMode.CONTAINS
-                "REGEX" -> QuickMatchMode.REGEX
-                else -> QuickMatchMode.PREFIX
-            }
             return QuickEntry(
                 trigger = keyword,
                 label = keyword,
                 content = content,
                 weight = if (rule.priority > 0) rule.priority else DEFAULT_WEIGHT,
-                mode = mode,
+                mode = remoteMatchMode(keyword, rule.matchType),
                 kind = LookupKind.QUICKAPPLY
             )
         }

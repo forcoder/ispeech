@@ -17,14 +17,18 @@
     B. trigger 只能是小写 a-z；> 12 位（拼音态组合串 MAX_PINYIN_LENGTH）直接判死，
        5-12 位且用 prefix / contains 时告警 —— 五笔态组合缓冲区 MAX_CODE_LENGTH=4，
        完整码只能在拼音态敲出，拿不到「精确码优先」的首位加成（exact / regex 不受影响）；
+       编辑器口径与本节同源：2-12 位、>4 位提示可达性（ADR-0002 C1-1 / C1-7），
+       长度判定值从 QuickTrigger.kt 读取，脚本侧不抄第二份常量；
     C. trigger 全局唯一（大小写不敏感）；
     D. **1 字母 trigger 必须是 exact / regex 模式**（否则静默失效）；
     E. weight 为整数、kind 为 p/a、mode 为四种之一；
     F. 无重复的 (trigger, content)；
     G. 源码侧的排序契约未被改坏（QUICKAPPLY 在 WUBI 之前 + 精确码优先 + 守卫存在）；
-    H. 用户自定义快捷字母全链路：设置页 2–4 位小写校验 / 中英文案 / 面板角标 / 保存即生效；
+    H. 用户自定义快捷字母全链路：设置页 2–12 位小写校验（单一来源 QuickTrigger，
+       源码内不得残留 2..4 字面量）/ 中英文案 / 面板角标 / 保存即生效；
     I. 需求场景验收：输入 ``ycsf`` 时快捷短语排在候选第 1 位（与 Kotlin 排序同构）；
     J. 远端规则的查看与快捷字母覆盖：远端进列表 / 覆盖写用户文件 / 排序胜出 / 恢复默认；
+    M. 回写安全线：映射表是唯一同步身份、冲突不写、conflicts 文案、同 trigger 折叠、迁移不改盘。
     L. 内置 5 位触发码 dtwsl（泡池 / 充气城堡 / 泳池收费说明）：正文逐字一致、exact 排首位、
        两种输入态的缓冲区行为、upsert 工具幂等。
 
@@ -45,11 +49,15 @@ LOOKUP_CANDIDATE = ROOT / "app/src/main/java/com/ispeech/engine/LookupCandidate.
 LOOKUP_ENGINE = ROOT / "app/src/main/java/com/ispeech/engine/LookupEngine.kt"
 QUICK_ENGINE = ROOT / "app/src/main/java/com/ispeech/engine/QuickPhraseEngine.kt"
 QUICK_ENTRY = ROOT / "app/src/main/java/com/ispeech/engine/QuickEntry.kt"
+QUICK_TRIGGER = ROOT / "app/src/main/java/com/ispeech/engine/QuickTrigger.kt"
+LOCAL_SYNC_PLAN = ROOT / "app/src/main/java/com/ispeech/data/LocalRuleSyncPlan.kt"
+ISPEECH_SERVICE = ROOT / "app/src/main/java/com/ispeech/input/IspeechImeService.kt"
 QUICK_LOCATOR = ROOT / "app/src/main/java/com/ispeech/engine/QuickLocator.kt"
 COMPOSITE_ENGINE = ROOT / "app/src/main/java/com/ispeech/engine/CompositeEngine.kt"
 QUICK_SCREEN = ROOT / "app/src/main/java/com/ispeech/settings/QuickPhrasesScreen.kt"
 QUICK_PANEL = ROOT / "app/src/main/java/com/ispeech/input/QuickPhrasePanel.kt"
 QUICK_VM = ROOT / "app/src/main/java/com/ispeech/settings/quick/QuickPhrasesViewModel.kt"
+SYNC_VM = ROOT / "app/src/main/java/com/ispeech/settings/sync/SyncViewModel.kt"
 SYNC_REPO = ROOT / "app/src/main/java/com/ispeech/data/SyncRepository.kt"
 APP_CONTAINER = ROOT / "app/src/main/java/com/ispeech/di/AppContainer.kt"
 STRINGS_ZH = ROOT / "app/src/main/res/values/strings.xml"
@@ -76,6 +84,31 @@ _warned = 0
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def trigger_limits() -> tuple[int, int, int]:
+    """从 QuickTrigger.kt 读取长度口径（ADR-0002 §7.3 跨脚本同源，脚本侧不抄第二份常量）。
+
+    读不到就 fail：常量改名 / 迁走时，本脚本绝不能退回「按字面量继续判」，
+    否则编辑器与校验器又会各说一套（修正 4 的同一类病）。
+    """
+    global _limits
+    if _limits is not None:
+        return _limits
+    text = read(QUICK_TRIGGER) if QUICK_TRIGGER.exists() else ""
+    match = re.search(r"MIN_TRIGGER_LENGTH\s*=\s*(\d+)", text)
+    lengths = [int(match.group(1))] if match else []
+    for name in ("MAX_TRIGGER_LENGTH", "WUBI_REACHABLE_LENGTH"):
+        match = re.search(rf"{name}\s*=\s*(\d+)", text)
+        lengths.append(int(match.group(1)) if match else -1)
+    lo, hi, reachable = lengths
+    if lo < 0 or hi < 0 or reachable < 0:
+        fail(f"{rel(QUICK_TRIGGER)} 读取长度常量失败（min={lo} max={hi} reachable={reachable}）")
+    _limits = (lo, hi, reachable)
+    return _limits
+
+
+_limits: tuple[int, int, int] | None = None
 
 
 def rel(path: Path) -> str:
@@ -139,6 +172,7 @@ def parse_phrases() -> list[dict]:
 
 
 def check_rows(rows: list[dict]) -> None:
+    _, hi, reachable = trigger_limits()
     seen_trigger: dict[str, int] = {}
     seen_pair: dict[tuple[str, str], int] = {}
     single_letter: list[str] = []
@@ -157,15 +191,17 @@ def check_rows(rows: list[dict]) -> None:
         if not re.fullmatch(r"[a-z]+", trig):
             fail(f"{tag} trigger 含非法字符: {trig!r}（只允许小写 a-z）")
             continue
-        if len(trig) > 4 and row["mode"] not in UNGUARDED_MODES:
+        if len(trig) > reachable and row["mode"] not in UNGUARDED_MODES:
             warn(
-                f"{tag} trigger {trig!r} 超过 4 位且用的是 {row['mode']} —— "
-                f"五笔态组合缓冲区上限 MAX_CODE_LENGTH=4，完整码只能在拼音态敲出，"
-                f"拿不到「精确码优先」的首位加成"
+                f"{tag} trigger {trig!r} 超过 {reachable} 位且用的是 {row['mode']} —— "
+                f"五笔态组合缓冲区上限 MAX_CODE_LENGTH={reachable}，完整码只能在拼音态敲出，"
+                f"拿不到「精确码优先」的首位加成。"
+                f"这正是编辑器允许 {reachable + 1}-{hi} 位的前提：>{reachable} 位必须 exact / regex"
+                f"（ADR-0002 C1-6，QuickTrigger.overrideMode 同口径）"
             )
-        if len(trig) > 12:
+        if len(trig) > hi:
             fail(
-                f"{tag} trigger {trig!r} 超过拼音态组合串上限 MAX_PINYIN_LENGTH=12 —— "
+                f"{tag} trigger {trig!r} 超过组合串上限 MAX_PINYIN_LENGTH={hi}（= QuickTrigger.MAX_TRIGGER_LENGTH）—— "
                 f"完整码永远打不出来，该条静默失效"
             )
 
@@ -288,23 +324,67 @@ def check_user_trigger_chain() -> None:
         else:
             fail(f"缺少中英文案 {key}（zh={key in zh} en={key in en}）")
 
-    # 设置页：2–4 位小写字母校验，未通过时确认按钮禁用
+    # 设置页：快捷字母校验 2–12 位，口径单一来源 QuickTrigger（ADR-0002 C1-1 / C1-2）
     screen = read(QUICK_SCREEN) if QUICK_SCREEN.exists() else ""
     if not screen:
         fail(f"文件不存在：{QUICK_SCREEN}")
     else:
-        if "isValidShortcutTrigger" in screen and "in 2..4" in screen and "'a'..'z'" in screen:
-            ok("QuickPhrasesScreen：快捷字母校验为 2–4 位小写字母")
-        else:
-            fail("QuickPhrasesScreen 未实现 2–4 位小写字母校验（超出 IME 组合缓冲区上限会打不出来）")
+        lo, hi, reachable = trigger_limits()
+        # ① 长度常量存在且就是契约值：2–12 位，>4 位的可达性口径另有常量
+        check(
+            lo == 2 and hi == 12 and reachable == 4,
+            f"QuickTrigger：MIN/MAX_TRIGGER_LENGTH = {lo}/{hi}、WUBI_REACHABLE_LENGTH = {reachable}（C1-1 的 2–12 位）",
+            f"QuickTrigger 长度常量不是 2 / 12 / 4（实得 min={lo} max={hi} reachable={reachable}），编辑器口径与规则表校验会分裂",
+        )
+        # ② 旧的 2..4 字面量必须从源码里彻底消失，否则「放宽到 12」只是文档口径
+        stale = [
+            rel(path)
+            for path in sorted((ROOT / "app/src/main/java").rglob("*.kt"))
+            if "in 2..4" in path.read_text(encoding="utf-8")
+        ]
+        check(
+            not stale,
+            "app 源码内 `in 2..4` 出现次数 == 0（2–4 位老口径未残留）",
+            f"以下文件仍写死 `in 2..4`：{stale}",
+        )
+        # ③ 校验函数只有一个定义处（C1-2：单一来源）
+        defs = sum(
+            path.read_text(encoding="utf-8").count("fun isValidShortcutTrigger(")
+            for path in sorted((ROOT / "app/src/main/java").rglob("*.kt"))
+        )
+        check(
+            defs == 1,
+            "isValidShortcutTrigger 定义处 == 1（校验逻辑不复制第二份）",
+            f"isValidShortcutTrigger 有 {defs} 个定义处，多份实现会各自漂移",
+        )
+        # ④ 三个弹窗 + ViewModel 都调用同一函数（Screen 侧不得再写内联长度判断）
+        call_sites = screen.count("QuickTrigger.isValidShortcutTrigger(")
+        check(
+            call_sites == 3,
+            f"QuickPhrasesScreen 三处编辑器（本地 / 快捷字母覆盖 / 云端快捷字母）都调用 {call_sites} 处同一校验",
+            f"QuickPhrasesScreen 调用 QuickTrigger.isValidShortcutTrigger 的次数是 {call_sites}（应为 3 处编辑器各 1 次）",
+        )
+        vm_text = read(QUICK_VM) if QUICK_VM.exists() else ""
+        check(
+            "QuickTrigger.issue(" in vm_text and "QuickTrigger.normalize(" in vm_text
+            and "QuickTrigger.overrideMode(" in vm_text,
+            "QuickPhrasesViewModel 保存云端快捷字母走同一 QuickTrigger（normalize → issue → overrideMode）",
+            "ViewModel 仍在自行判定快捷字母长度 / 模式（C1-4 / C1-6 会失效）",
+        )
         if "triggerValid && editor.content.isNotBlank()" in screen:
             ok("QuickPhrasesScreen：快捷字母非法时确认按钮禁用")
         else:
             fail("QuickPhrasesScreen 的确认按钮未使用 triggerValid 校验")
-        if "quick_trigger_hint" in screen and "quick_trigger_error" in screen:
-            ok("QuickPhrasesScreen：快捷字母字段带示例与错误提示")
-        else:
-            fail("QuickPhrasesScreen 快捷字母字段缺少示例 / 错误提示")
+        # C1-7：非法时给出可见原因，>4 位给出可达性提示（都是非阻断文案）
+        missing = [
+            key for key in ("quick_trigger_hint", "quick_trigger_invalid", "triggerIssueRes", "quick_trigger_reachable_hint")
+            if key not in screen
+        ]
+        check(
+            not missing,
+            "QuickPhrasesScreen：字段带示例、非法原因与 >4 位可达性提示（C1-7）",
+            f"QuickPhrasesScreen 缺少提示 / 原因文案：{missing}",
+        )
         if "filter { it in 'a'..'z' }" in screen:
             ok("QuickPhrasesScreen：输入时自动转小写并过滤非法字符")
         else:
@@ -408,13 +488,14 @@ def check_remote_shortcut_chain() -> None:
     )
     check(
         "QuickPhraseCodec.format(entries)" in vm and "QuickOverride.matches(it, original)" in vm,
-        "覆盖条目与普通用户规则一样由 save() 写入 quick_phrases_user.txt",
+        "覆盖条目与普通用户规则一样由 save() 写入 quick_phrases_user.txt（C2-2 后判定基准变了，落盘路径不变）",
         "覆盖条目未落用户文件或未与远端规则建立覆盖关系",
     )
     check(
-        "object QuickOverride" in entry and "fun matchesAny(" in entry,
-        "QuickOverride 统一「label + content 相同即覆盖」的判定口径",
-        "QuickEntry.kt 缺少 QuickOverride 覆盖判定",
+        "object QuickOverride" in entry and "fun matchesAny(" in entry
+        and "QuickTrigger.normalize" in entry,
+        "QuickOverride 统一「归一化 trigger 相同即覆盖」的判定口径（C2-2，不看 label / content）",
+        "QuickEntry.kt 的 QuickOverride 覆盖判定未走归一化 trigger，同码不同正文会被当成新规则",
     )
 
     # J3. 排序胜出：精确码 -> kind -> weight 降序 -> display 去重
@@ -441,8 +522,25 @@ def check_remote_shortcut_chain() -> None:
     # J5. 覆盖条目是本地别名，不应作为新规则推送
     check(
         "QuickOverride.matchesAny(entry, remoteEntries)" in sync and "fun readRemoteEntries(" in sync,
-        "SyncRepository.pushLocalRules 跳过覆盖条目（云端不产生同内容重复规则）",
+        "SyncRepository.pushLocalRules 跳过覆盖条目（C3-10：云端不产生同内容重复规则）",
         "覆盖条目会被当成新规则推送，云端出现同内容重复规则",
+    )
+    # 新增（§7.1 :443-444 行）：上传集合只能来自决策层，冲突条目不存在「未解决即推送」的可达路径
+    plan_text = read(LOCAL_SYNC_PLAN) if LOCAL_SYNC_PLAN.exists() else ""
+    push_body = sync.split("suspend fun pushLocalRules(", 1)[1] if "suspend fun pushLocalRules(" in sync else ""
+    push_body = push_body.split("\n    /**", 1)[0]
+    check(
+        "LocalRuleSyncPlan.decide(" in push_body
+        and "decisions.updates.forEach" in push_body
+        and push_body.count(".toPushRule(") == 1
+        and "conflicts" in push_body,
+        "pushLocalRules 的上传集合全部来自 LocalRuleSyncPlan.decide（冲突未解决即推送的路径不可达，C3-1 / C3-7）",
+        "pushLocalRules 里还能绕过决策层直接构造推送，云端正文可能被静默覆盖",
+    )
+    check(
+        "ref == null && !remoteMatches(target, entry)" in plan_text and "conflicts +=" in plan_text,
+        "决策层：无映射 + 同码正文不一致 → conflicts（禁止按 keyword 覆盖远端正文，C3-1）",
+        "LocalRuleSyncPlan 没有把「无映射且正文不一致」判成冲突",
     )
 
     # J6. 中英文案
@@ -490,12 +588,147 @@ def check_pinyin_state_quick_chain() -> None:
         "拼音态 pinyinLookupEngine 未挂载快捷短语引擎，快捷字母在默认拼音态会静默失效",
     )
 
+    # C4-1：面板挂载只吃设置开关，输入方式不参与（VOCA-29 曾被顺带删掉过一次）
+    service = read(ISPEECH_SERVICE) if ISPEECH_SERVICE.exists() else ""
+    load_body = service.split("private fun loadQuickPhrases(", 1)[1] if "private fun loadQuickPhrases(" in service else ""
+    load_body = load_body.split("\n    /**", 1)[0]
+    check(
+        load_body != ""
+        and "QuickLocator.loadAll(" in load_body
+        and "includeLocal = enableQuick" in load_body
+        and "includeRemote = enableRemote" in load_body
+        and "InputMethodMode" not in load_body
+        and "chineseInputMethod" not in load_body,
+        "IspeechImeService.loadQuickPhrases 的挂载条件只来自设置开关，与输入方式无关（C4-1）",
+        "loadQuickPhrases 里输入方式重新参与了 includeLocal / includeRemote 计算，五笔态面板会再次整体为空",
+    )
+
     locator = read(QUICK_LOCATOR) if QUICK_LOCATOR.exists() else ""
     composite_chunk = locator.split("fun buildComposite", 1)[1] if "fun buildComposite" in locator else ""
     check(
         "fun buildQuickEngines(" in locator and "buildQuickEngines(" in composite_chunk,
         "QuickLocator.buildQuickEngines 同时被五笔态 buildComposite 复用（两态规则一致）",
         "快捷规则构建未抽成 buildQuickEngines 或五笔态未复用",
+    )
+
+
+def check_conflict_safety() -> None:
+    """M. 回写安全线：映射表是唯一同步身份，冲突不写、迁移不改盘（ADR-0002 C2/C3）。
+
+    这几条是 P0 的静态护栏：任何一条被改坏，「一次同步就把云端营业话术覆盖掉」的路径
+    会重新可达，而界面照样报成功。
+    """
+    sync = read(SYNC_REPO) if SYNC_REPO.exists() else ""
+    plan_text = read(LOCAL_SYNC_PLAN) if LOCAL_SYNC_PLAN.exists() else ""
+    vm = read(QUICK_VM) if QUICK_VM.exists() else ""
+    screen = read(QUICK_SCREEN) if QUICK_SCREEN.exists() else ""
+    zh = read(STRINGS_ZH) if STRINGS_ZH.exists() else ""
+    en = read(STRINGS_EN) if STRINGS_EN.exists() else ""
+    sync_vm = read(SYNC_VM) if SYNC_VM.exists() else ""
+
+    # M1（C3-1）P0 单测在，且断言的就是「不覆盖」
+    gate_test = ROOT / "app/src/test/java/com/ispeech/data/LocalRuleSyncPlanTest.kt"
+    gate = read(gate_test) if gate_test.exists() else ""
+    check(
+        "C3-1" in gate and "decisions.updates.isEmpty()" in gate and "conflicts" in gate,
+        "C3-1 门禁单测存在：无映射记录时 updates.isEmpty() 且 conflicts == 1",
+        "缺少 C3-1 单测，云端正文被静默覆盖的回归无法在 CI 拦住",
+    )
+    check(
+        "ref != null) remoteById[ref.id] else remoteByKeyword[trigger]" in plan_text,
+        "keyword 兜底只在「无有效映射」时生效：兜底命中的同码他人规则一律按 C3-1 判冲突，不覆盖（C3-1 / C3-5′）",
+        "决策层用 keyword 兜底替代映射身份，会把别人的远端规则当成自己那条覆盖掉",
+    )
+
+    # M2（C3-3）冲突条数如实上报，且不复用 partial 文案
+    conflict_first_vm = "R.string.quick_synced_conflict" in vm and vm.find(
+        "R.string.quick_synced_conflict"
+    ) < vm.find("R.string.quick_synced_partial")
+    check(
+        "val conflicts: Int" in sync and conflict_first_vm and "R.string.sync_upload_conflict" in sync_vm
+        and sync_vm.find("R.string.sync_upload_conflict") < sync_vm.find("R.string.sync_upload_partial")
+        and 'name="quick_synced_conflict"' in zh and 'name="quick_synced_conflict"' in en,
+        "冲突计入 RuleSyncReport.conflicts，同步文案冲突分支优先于 partial 且中英齐备（C3-3，不复用「后端不支持」那条）",
+        "冲突条数没有独立上报口径，用户会把「没同步上去」看成同步成功",
+    )
+
+    # M3（C3-8）本地不知道就别写：不硬编码 enabled = true
+    check(
+        sync.count("enabled = null") == 2 and "enabled = true" not in sync,
+        "toRuleRequest / toPushRule 不传 enabled（C3-8：云端已停用的规则不会被每次同步悄悄打开）",
+        "上传请求里重新出现 enabled = true，远端停用状态会被覆盖",
+    )
+
+    # M4（C2-3）同 trigger 折叠为一张卡片，正文取本地
+    merge = vm.split("internal object QuickDisplayMerge", 1)[1] if "internal object QuickDisplayMerge" in vm else ""
+    check(
+        merge != "" and "QuickTrigger.normalize" in merge and "LocalRuleSyncPlan.contentEquals" in merge
+        and "overrideTrigger = local?.trigger" in merge and "val effective = local ?: rule" in merge
+        and "display.add(effective)" in merge
+        and "R.string.quick_source_remote_overridden" in screen,
+        "同 trigger 折叠为 1 张卡片：正文取本地、来源标「远端 · 已覆盖」、冲突按转义口径（C2-3 / C2-5）",
+        "列表按 label/content 去重或正文取远端，同码会出现两张卡片并丢本地正文",
+    )
+
+    # M5（C2-6）迁移不自动改写任何一侧文件
+    adopt = vm.split("fun adoptRemoteContent(", 1)[1] if "fun adoptRemoteContent(" in vm else ""
+    adopt = adopt.split("\n    /**", 1)[0]
+    check(
+        adopt != ""
+        and all(token not in adopt for token in ("QuickPhraseCodec.format(", "writeText", "QuickLocator.saveUser", "SyncRepository."))
+        and "PhraseUsageStore.idOf" in adopt and "store.toggleStar(" in adopt,
+        "「采用云端正文」只改内存条目并迁移收藏，不自动改写任何规则文件（C2-6 / C2-7）",
+        "迁移路径直接写盘，升级后 quick_phrases_user.txt / _remote.txt 会被悄悄改写",
+    )
+
+    # M6（C3-5′）映射有效性判定必须先于 keyword 兜底，失效映射即判即清
+    validity = plan_text.find("?.takeIf { remoteById.containsKey")
+    fallback = plan_text.find("else remoteByKeyword[trigger]")
+    check(
+        validity != -1 and fallback != -1 and validity < fallback
+        and "decisions.staleMappings.forEach { trigger -> next.remove(trigger) }" in sync
+        and "decisions.creates.isEmpty()" in gate and "staleMappings" in gate,
+        "兜底之前先判映射是否仍被远端返回；判冲突的失效映射由 SyncRepository 清出映射表（C3-5′：表里不留死凭证）",
+        "失效映射仍被当所有权（同码被占会走 create 留下重复码），或死凭证永久残留导致反复重推",
+    )
+
+    # M7（C3-11）身份判定的远端集合排除软删条目
+    check(
+        "rules.filterNot { it.deleted }" in sync
+        and "val visible = visibleRules(remote)" in sync
+        and "visible.associateBy { it.id }" in sync
+        and "visible.associateBy { QuickTrigger.normalize(it.keyword) }" in sync
+        and sync.count("visibleRules(rules).associateBy") == 2
+        and "C3-11" in gate and "deleted = true" in gate,
+        "remoteById / remoteByKeyword 只由未软删的远端条目构建（C3-11：软删条目既不占码也不算所有权）",
+        "软删条目重新参与身份判定：按软删 id 推送永远复核不过，条目会永久卡在「未同步」，另有假冲突",
+    )
+
+
+
+def check_cross_script_caliber() -> None:
+    """§7.3 跨脚本口径：长度判定值只从 QuickTrigger 取，两个脚本不得各抄一份常量。
+
+    防的是第三次「编辑器与校验器分裂」：脚本 A 放宽到 12 位、脚本 B 仍按 4 位判死，
+    门禁就会自己打自己。
+    """
+    self_text = read(Path(__file__))
+    # 只看真正做长度判定的那段，否则本断言会把自己写的检查串当成违规
+    rows_body = self_text.split("def check_rows(", 1)[1].split("\ndef ", 1)[0]
+    sibling = ROOT / "tools/verify/check_phrase_csv_import.py"
+    sibling_text = read(sibling) if sibling.exists() else ""
+    check(
+        "MIN_TRIGGER_LENGTH" in self_text and "MAX_TRIGGER_LENGTH" in self_text
+        and "len(trig) > reachable" in rows_body and "len(trig) > hi" in rows_body
+        and not re.search(r"len\(trig\) > \d", rows_body),
+        "本脚本规则表长度判定用 QuickTrigger 解析值（reachable / hi），未写死数字",
+        "本脚本重新抄了一份长度常量，规则表判定会与编辑器口径分裂",
+    )
+    check(
+        sibling_text != "" and "MIN_TRIGGER_LENGTH" in sibling_text and "MAX_TRIGGER_LENGTH" in sibling_text
+        and "in 2..4" not in sibling_text,
+        "check_phrase_csv_import.py 同源 QuickTrigger 长度常量，判定式里未残留 2..4 老口径",
+        "另一个导入校验脚本仍按自己的长度常量判死，门禁会互相打脸",
     )
 
 
@@ -509,6 +742,8 @@ def main() -> int:
     check_exact_trigger_ranking()
     check_remote_shortcut_chain()
     check_pinyin_state_quick_chain()
+    check_conflict_safety()
+    check_cross_script_caliber()
     check_dtwsl_phrase()
     check_space_long_press_triggers_voice()
     check_ai_key_shows_quick_phrases_first()

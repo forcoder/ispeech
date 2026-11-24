@@ -133,6 +133,9 @@ object QuickLocator {
      *
      * 五笔态与拼音态必须共用同一份快捷规则：拼音态若只挂拼音词表，用户设置的
      * 「快捷字母」会在默认的拼音态下静默失效（输入 `ytyc` 永远没有候选）。
+     *
+     * 与 [loadAll] 走同一份分组 + 同一套 [QuickOwnership.dedupe]（C2-4）：候选池里同一个
+     * trigger 只有一条，面板和打字候选不会给出两套答案。
      */
     fun buildQuickEngines(
         context: Context,
@@ -140,39 +143,17 @@ object QuickLocator {
         includeRemote: Boolean = true,
         includeUser: Boolean = true,
         minTriggerLength: Int = 2,
-    ): List<LookupEngine> {
-        val engines = ArrayList<LookupEngine>(4)
-        if (includeLocal) {
-            openLocal(context)?.use { input ->
-                QuickPhraseEngine.fromText(input.readTextUtf8(), minTriggerLength = minTriggerLength)
-                    ?.let { engines.add(it) }
-            }
-            // 搜狗拼音内置常用语（诗词 / 网络常用语 + 快捷触发码）与内置规则同属内置档
-            openSogouPhrases(context)?.use { input ->
-                QuickPhraseEngine.fromText(input.readTextUtf8(), minTriggerLength = minTriggerLength)
-                    ?.let { engines.add(it) }
-            }
+    ): List<LookupEngine> =
+        QuickOwnership.dedupe(
+            ruleGroups(context, includeLocal, includeRemote, includeUser, minTriggerLength),
+        ).mapNotNull { group ->
+            if (group.entries.isEmpty()) null
+            else QuickPhraseEngine(group.entries, minTriggerLength)
         }
-
-        if (includeRemote) {
-            openRemote(context)?.use { input ->
-                QuickPhraseEngine.fromText(input.readTextUtf8(), minTriggerLength = minTriggerLength)
-                    ?.let { engines.add(it) }
-            }
-        }
-
-        if (includeUser) {
-            openUser(context)?.use { input ->
-                QuickPhraseEngine.fromText(input.readTextUtf8(), minTriggerLength = minTriggerLength)
-                    ?.let { engines.add(it) }
-            }
-        }
-        return engines
-    }
 
     /**
      * 读取内置 / 远端 / 用户三个规则文件，解析后给每条 [QuickEntry] 打上来源标签
-     * （[QuickSource.BUILT_IN] / [QuickSource.REMOTE] / [QuickSource.USER]）并合并返回。
+     * （[QuickSource.BUILT_IN] / [QuickSource.REMOTE] / [QuickSource.USER]）并按 trigger 去重合并。
      *
      * 单个文件缺失、读取失败或解析异常都直接跳过，不抛异常；顺序为内置 → 远端 → 用户。
      */
@@ -182,40 +163,60 @@ object QuickLocator {
         includeRemote: Boolean = true,
         includeUser: Boolean = true,
         minTriggerLength: Int = 2,
-    ): List<QuickEntry> {
-        val out = ArrayList<QuickEntry>()
+    ): List<QuickEntry> =
+        QuickOwnership.dedupe(
+            ruleGroups(context, includeLocal, includeRemote, includeUser, minTriggerLength),
+        ).flatMap { it.entries }
+
+    /**
+     * 按「内置 quick_phrases → 内置 sogou_phrases → 远端 → 用户」的顺序读取并解析规则文件。
+     *
+     * 每个文件一组，组内保持文件顺序；空文件（解析不出条目）不产生组。
+     */
+    private fun ruleGroups(
+        context: Context,
+        includeLocal: Boolean,
+        includeRemote: Boolean,
+        includeUser: Boolean,
+        minTriggerLength: Int,
+    ): List<QuickRuleGroup> {
+        val groups = ArrayList<QuickRuleGroup>(4)
+
+        fun addGroup(input: InputStream?, source: String) {
+            if (input == null) return
+            runCatching {
+                input.use { stream ->
+                    val text = stream.readTextUtf8()
+                    // 云端落盘走 fromRemoteText：升级前已写在盘上的 >4 位 CONTAINS / PREFIX 存量行
+                    // 要在读盘侧就按 EXACT 生效，否则装了拉取侧修复的设备不点第二次同步就永远照旧（VOCA-423）。
+                    // 面板与打字候选共用这份 ruleGroups，两条链路同口径。
+                    val engine = if (source == QuickSource.REMOTE) {
+                        QuickPhraseEngine.fromRemoteText(text, minTriggerLength = minTriggerLength)
+                    } else {
+                        QuickPhraseEngine.fromText(text, minTriggerLength = minTriggerLength)
+                    } ?: return@use
+                    groups.add(
+                        QuickRuleGroup(
+                            source = source,
+                            entries = engine.entries.map { it.copy(source = source) },
+                        )
+                    )
+                }
+            }.onFailure { Log.w(TAG, "读取快捷规则失败: $source", it) }
+        }
+
         if (includeLocal) {
-            loadInto(out, openLocal(context), QuickSource.BUILT_IN, minTriggerLength)
-            loadInto(out, openSogouPhrases(context), QuickSource.BUILT_IN, minTriggerLength)
+            addGroup(openLocal(context), QuickSource.BUILT_IN)
+            // 搜狗拼音内置常用语（诗词 / 网络常用语 + 快捷触发码）与内置规则同属内置档
+            addGroup(openSogouPhrases(context), QuickSource.BUILT_IN)
         }
         if (includeRemote) {
-            loadInto(out, openRemote(context), QuickSource.REMOTE, minTriggerLength)
+            addGroup(openRemote(context), QuickSource.REMOTE)
         }
         if (includeUser) {
-            loadInto(out, openUser(context), QuickSource.USER, minTriggerLength)
+            addGroup(openUser(context), QuickSource.USER)
         }
-        return out
-    }
-
-    /** 解析单个规则流并打上来源标签，追加到 [out]；失败静默跳过。 */
-    private fun loadInto(
-        out: MutableList<QuickEntry>,
-        input: InputStream?,
-        source: String,
-        minTriggerLength: Int,
-    ): Unit {
-        if (input == null) return
-        runCatching {
-            input.use { stream ->
-                val engine = QuickPhraseEngine.fromText(
-                    stream.readTextUtf8(),
-                    minTriggerLength = minTriggerLength,
-                ) ?: return@use
-                for (entry in engine.entries) {
-                    out.add(entry.copy(source = source))
-                }
-            }
-        }.onFailure { Log.w(TAG, "读取快捷规则失败: $source", it) }
+        return groups
     }
 }
 
