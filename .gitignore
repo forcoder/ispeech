@@ -32,6 +32,7 @@ build-voca30/
 .multica/
 .pi/
 AGENTS.md
+.qoder/
 
 # 临时 worktree / 本地运行时
 .claude/worktrees/
@@ -42,6 +43,12 @@ dist/deploy-*.log
 dist/screenshots/
 dist/ispeech-debug-*.apk
 dist/app-debug.apk
+# 133 MB，超过 GitHub 单文件 100 MB 硬限制，推上去会被 pre-receive 拒（GH001）
+dist/ispeech-release-1.5-20261115-1004.apk
+
+# 短语数据导出
+通用短语.csv
+
 # 带时间戳的临时出包 / 模拟器日志（正式包是 dist/ispeech-release-v<major>.<minor>.apk）
 dist/ispeech-release-*-2*.apk
 dist/emulator-*.log
@@ -49,6 +56,3 @@ dist/emulator-*.log
 # Python 静态检查脚本的字节码缓存（tools/verify 会被反复执行）
 __pycache__/
 *.pyc
-
-# 短语数据导出
-通用短语.csv
