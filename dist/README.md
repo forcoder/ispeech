@@ -138,14 +138,14 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 
 ## AC-6 取证变体包（不是交付包，禁止进内测通道）
 
-- 文件：`ispeech-internal-v1.6-ac6-probe404-20261124.apk`（与最终包同批，取件走上方 `refs/archive/voca-186/v1.6-ac6-probe404-20261124`，非 issue 附件）
-  sha256 `cee7e1ef7770e1941490a09215c35281a02909eb91105f536c40c6445ad374f1`（139,295,049 字节）
+- 文件：`ispeech-internal-v1.6-ac6-probe404-20261125.apk`（取件走 `refs/archive/voca-186/v1.6-ac6-probe404-20261125`，blob `$(git hash-object 该文件)`，非 issue 附件）
+  sha256 `b347a3939d9263e78685b00c4155e1b53dc432271ca45e468fc892b777dedb45`（139,299,145 字节）
 - 与最终包**同一出包 commit / 同 versionCode 6 / 同 debug 证书 / 同 ABI**，仅构建时命令行覆盖
   `-PasrModelUrl=https://delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/v1.6-ac6-404-probe-does-not-exist.tar.bz2`
   （HEAD/GET/Range 三段全 404 + `NoSuchKey`，11-19 复测；override 不落 main，`app/build.gradle.kts` 兜底值未动）。
 - 用途：11-20 装机时跑 AC-6（模型源 404 → 可读报错）。**模型永远下不下来**：不进内测通道、不覆盖试包与最终包、
   不进 `SHA256SUMS` 交付行（本节即其单独登记）；装机后请卸载或覆盖回最终包。
-- 门禁：`APK_MODE=probe404 bash tools/deploy/assert_apk_fix.sh <该包> f1d9124 bb1bf2b2` → exit 0（变体构建正确；实测 404 探针 URL 命中 2 处、正式 object key 0 命中）。
+- 门禁：`APK_MODE=probe404 bash tools/deploy/assert_apk_fix.sh <该包> 84d2a2b d9690f9` → exit 0（变体构建正确；实测 404 探针 URL 命中 2 处、正式 object key 0 命中）。
 
 ## v1.5 变更（历史，相对 v1.4）
 
