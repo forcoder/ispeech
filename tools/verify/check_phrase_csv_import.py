@@ -422,7 +422,9 @@ def engine_lookup(entries: list[dict], needle: str, limit: int = 10, min_trigger
         if entry["mode"] == "exact":
             hit = trigger == needle
         elif entry["mode"] == "prefix":
-            hit = trigger.startswith(needle) or needle.startswith(trigger)
+            # 单向：只认「触发码以输入为前缀」（VOCA-651），与 QuickPhraseEngine.matches 同口径。
+            # 双向会让短触发码在打满 4 码后仍命中，把候选条填满、把同码单字挤出首屏。
+            hit = trigger.startswith(needle)
         else:
             hit = False
         if hit:

@@ -24,6 +24,7 @@ class QuickPhraseEngine(
      * 排序：精确码优先 → 应用 < 短语 < 五笔 → 权重降序 → display 升序。
      * 防误触：prefix / contains 模式在输入不足 2 个字符时不返回，把单字母留给五笔一级简码；
      * exact / regex 不受该限制。
+     * prefix 只认「触发码以输入为前缀」单向：输入长于触发码时不再命中（VOCA-651）。
      */
     override fun lookup(input: String, limit: Int): List<LookupCandidate> {
         val needle = input.lowercase()
@@ -59,7 +60,10 @@ class QuickPhraseEngine(
         if (guarded && needle.length < minTriggerLength) return false
         return when (entry.mode) {
             QuickMatchMode.EXACT -> trigger == needle
-            QuickMatchMode.PREFIX -> trigger.startsWith(needle) || needle.startsWith(trigger)
+            // 只认「触发码以输入为前缀」这一向：长码可以打前几位命中（5 位码在五笔态可达），
+            // 但短码不再因为输入长于它而继续命中（VOCA-651：2 码触发码在打满 4 码时仍冒出来，
+            // 把候选条一路填满，把同码单字挤出首屏）。
+            QuickMatchMode.PREFIX -> trigger.startsWith(needle)
             QuickMatchMode.CONTAINS -> trigger.contains(needle) || needle.contains(trigger)
             QuickMatchMode.REGEX -> runCatching {
                 Regex(entry.trigger).containsMatchIn(needle)

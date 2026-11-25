@@ -910,7 +910,9 @@ def _quick_lookup(rows: list[dict], needle: str, limit: int = 10, min_trigger_le
         if mode == "exact":
             hit = trigger == needle
         elif mode == "prefix":
-            hit = trigger.startswith(needle) or needle.startswith(trigger)
+            # 单向：只认「触发码以输入为前缀」（VOCA-651）。双向会让 2 码触发码在打满 4 码后
+            # 仍命中，把候选条一路填满、把同码单字挤出首屏。
+            hit = trigger.startswith(needle)
         elif mode == "contains":
             hit = trigger in needle or needle in trigger
         else:
