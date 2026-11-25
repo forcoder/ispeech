@@ -13,6 +13,8 @@ import com.ispeech.data.PhraseMatch
 import com.ispeech.data.PhraseSearch
 import com.ispeech.data.PhraseUsageStore
 import com.ispeech.data.RemoteKeywordRule
+import com.ispeech.data.RemoteRulesChanges
+import com.ispeech.data.RemoteRulesReload
 import com.ispeech.data.SyncRepository
 import com.ispeech.data.unescapeLineText
 import com.ispeech.di.AppContainer
@@ -21,6 +23,7 @@ import com.ispeech.engine.LookupKind
 import com.ispeech.engine.QuickEntry
 import com.ispeech.engine.QuickMatchMode
 import com.ispeech.engine.QuickOverride
+import com.ispeech.engine.QuickPhraseEngine
 import com.ispeech.engine.QuickSource
 import com.ispeech.engine.QuickTriggerIssue
 import com.ispeech.engine.QuickTrigger
@@ -74,6 +77,9 @@ data class QuickPhrasesUiState(
  * 保存时除了写盘，还会把本地增 / 改 / 删同步到 csBaby 远端（未登录则只落本地并提示）；
  * 搜索栏的关键词过滤与智能联想（拼音首字母 / 使用频次 / 收藏加权）由 PhraseSearch 负责，
  * 使用数据在 [load] 里一次性读入内存，输入时只做纯计算，不在主线程碰磁盘。
+ *
+ * 本类作用在导航栈条目上，去同步页拉完远端再返回不会重建，所以 [load] 之外还订阅了
+ * [RemoteRulesChanges]：同步写盘后当场重新读盘（VOCA-293）。
  */
 class QuickPhrasesViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -93,17 +99,25 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
         const val REMOTE_OVERRIDE_WEIGHT_BONUS = 1000
     }
 
+    /** 远端规则文件被别处（同步页）改写后的重载订阅器；重载就是再走一遍 [load]。 */
+    private val remoteRulesReload = RemoteRulesReload(RemoteRulesChanges.version, ::load)
+
     init {
         load()
+        // 本页 ViewModel 作用在导航栈条目上：去同步页拉完再返回不会重建，
+        // 靠这条订阅让「刚写盘的远端规则」当场可见（VOCA-293）。
+        remoteRulesReload.start(viewModelScope)
     }
 
     /** 读取用户文件 / 远端文件与使用记录；文件不存在时对应来源为空。 */
     fun load() {
         viewModelScope.launch {
+            // 必须在碰磁盘之前记录版本：读盘期间到来的变更才会被判定为「我还没读到」
+            remoteRulesReload.markReadStarted()
             val loaded = withContext(Dispatchers.IO) {
-                val user = parseFile(AppContainer.quickPhrasesUserFile(app))
+                val user = parseFile(AppContainer.quickPhrasesUserFile(app), applyRemoteModeGuard = false)
                     .map { it.copy(source = QuickSource.USER) }
-                val remote = parseFile(AppContainer.quickPhrasesRemoteFile(app))
+                val remote = parseFile(AppContainer.quickPhrasesRemoteFile(app), applyRemoteModeGuard = true)
                     .map { it.copy(source = QuickSource.REMOTE) }
                 // 使用记录只在这里读一次：之后每次输入关键词都只做纯计算
                 val store = AppContainer.phraseUsage(app)
@@ -138,9 +152,14 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    /** 读取规则文件；不存在或解析失败返回空列表（单个来源损坏不影响另一个来源）。 */
-    private fun parseFile(file: File): List<QuickEntry> = runCatching {
-        if (file.exists()) QuickPhraseCodec.parse(file.readText()) else emptyList()
+    /**
+     * 读取规则文件；不存在或解析失败返回空列表（单个来源损坏不影响另一个来源）。
+     *
+     * [applyRemoteModeGuard] 只有云端落盘文件传 `true`：那条链路的 mode 是客户端映射出来的，
+     * 没有独立语义，要按 ADR-0002 C1-6b 收严；用户文件的 mode 是用户在编辑器里选的（C1-4 / C1-9），不收严。
+     */
+    private fun parseFile(file: File, applyRemoteModeGuard: Boolean): List<QuickEntry> = runCatching {
+        if (file.exists()) QuickPhraseCodec.parse(file.readText(), applyRemoteModeGuard) else emptyList()
     }.getOrElse { emptyList() }
 
     /**
@@ -568,8 +587,16 @@ internal object QuickPhraseCodec {
 
     private const val SEPARATOR = '\t'
 
-    /** 解析规则文本；重复触发词保留最后一条。 */
-    fun parse(text: String): List<QuickEntry> {
+    /**
+     * 解析规则文本；重复触发词保留最后一条。
+     *
+     * [applyRemoteModeGuard] = 解析的是云端落盘文件（`filesDir/quick_phrases_remote.txt`）：对第 1 字段
+     * **原样长度** `> 4` 且声明 `PREFIX` / `CONTAINS` 的行按 `EXACT` 生效（ADR-0002 C1-6b）。
+     * 判定直接复用引擎侧的 `QuickPhraseEngine.guardedRemoteMode`，不另写一份、也不改走
+     * `QuickTrigger.mayMisfire`（那是 trim + 小写折叠后的归一化口径，会让带尾随空格的畸形行逃过守卫）。
+     * 只重解释匹配方式：`trigger` / `label` / 正文 / `weight` / `kind` 原样，磁盘文件不回写。
+     */
+    fun parse(text: String, applyRemoteModeGuard: Boolean = false): List<QuickEntry> {
         val byTrigger = LinkedHashMap<String, QuickEntry>()
         text.lineSequence().forEach { rawLine ->
             val line = rawLine.trim()
@@ -580,7 +607,14 @@ internal object QuickPhraseCodec {
             val content = unescapeLineText(fields[2].trim())
             if (trigger.isEmpty() || content.isEmpty()) return@forEach
             val label = fields[1].trim().ifEmpty { content }
-            val mode = if (fields.size > 3) QuickMatchMode.parse(fields[3]) else QuickMatchMode.PREFIX
+            val declaredMode =
+                if (fields.size > 3) QuickMatchMode.parse(fields[3]) else QuickMatchMode.PREFIX
+            // 守卫要吃第 1 字段的原样值（fields[0]，未 trim），与 QuickPhraseEngine.parse 的读盘侧口径逐字一致
+            val mode = if (applyRemoteModeGuard) {
+                QuickPhraseEngine.guardedRemoteMode(fields[0], declaredMode)
+            } else {
+                declaredMode
+            }
             val weight = if (fields.size > 4) fields[4].trim().toIntOrNull() ?: 100 else 100
             val kind = if (fields.size > 5) {
                 if (fields[5].trim().lowercase().startsWith("a")) LookupKind.QUICKAPPLY else LookupKind.PHRASE

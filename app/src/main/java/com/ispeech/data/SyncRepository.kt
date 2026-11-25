@@ -54,7 +54,7 @@ object SyncRepository {
      * 拉取远端关键词规则并写入 filesDir/quick_phrases_remote.txt。
      *
      * 流程：读取本地登录态（未登录直接抛错）→ 过期且可刷新时先刷新并保存 →
-     * fetchAllRules → 转换为 QuickEntry → 写文件。
+     * fetchAllRules → 转换为 QuickEntry → 写文件 → 发布 [RemoteRulesChanges] 变更信号。
      *
      * @return 写入的规则条数（无有效规则时同样写入只含注释头的空文件）
      */
@@ -70,6 +70,8 @@ object SyncRepository {
 
         val entries = client.fetchAllRules(auth).mapNotNull { CsBabyClient.toQuickEntry(it) }
         writeEntries(File(context.filesDir, REMOTE_RULES_FILE_NAME), entries)
+        // 先落盘、后发通知（顺序契约见 RemoteRulesChanges）：已打开的快捷短语页据此立刻重新读盘
+        RemoteRulesChanges.publish()
         entries.size
     }
 

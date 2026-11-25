@@ -609,7 +609,8 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 - 用户文件里**归一化 trigger 相同**的条目，即视为该远端规则的覆盖条目（`QuickOverride.matches`
   只看 trigger，不再看 `label + content`，ADR-0002 C2-2）；正文以本地为准，同一个 trigger
   在设置页只出一张卡片，卡片来源标「远端 · 已覆盖」（C2-3）。普通用户规则仍显示来源「用户」。
-- 远端条目先按原文件展示；覆盖后卡片上的**快捷字母与匹配方式**取覆盖条目的值，
+- 远端条目先按原文件展示（**匹配方式除外**：云端行在展示侧也走下面那条读盘守卫，卡片显示的
+  就是引擎实际生效的 mode）；覆盖后卡片上的**快捷字母与匹配方式**取覆盖条目的值，
   **正文取本地条目**（本地为准），权重仍为远端 weight + 加成。
 - 远端文件的匹配方式在**读盘侧**再校验一次长度（VOCA-423）：`QuickPhraseEngine.fromRemoteText`
   把 `trigger` 超过 4 位（五笔态组合缓冲上限）且声明 `CONTAINS` / `PREFIX` / 缺省的存量行按 `EXACT` 生效。
@@ -618,6 +619,16 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
   `dtwsl` 的 245 字正文并顶到候选首位。读盘侧兜底与拉取侧同口径、幂等，磁盘文件与云端正文都不动；
   内置 assets 与 `quick_phrases_user.txt` 不走这条（`>4 位 + prefix` 在那两份里是有意的，
   见 ADR-0002 C1-5 / C1-10）。
+- **展示侧与引擎侧同一套 mode（VOCA-207 质检打回项 1，补 ADR-0002 C1-6b 的已知偏差）**：设置页卡片
+  读的是 `QuickPhraseCodec.parse`，它过去直取磁盘声明值，于是「卡片写 `PREFIX`、引擎按 `EXACT` 生效」
+  两套口径并存；卡片上的「编辑」按钮又从这条展示条目继承 mode（`QuickEditor.from`），保存进用户文件后
+  `fromText` 不带守卫，>4 位 `PREFIX` 的误弹会沿「用户没选过 mode」的路径回来。现在云端那份文件的
+  解析分支直接复用引擎侧的 `QuickPhraseEngine.guardedRemoteMode`（同一个函数，不另写一份判定，
+  也不改走归一化口径的 `QuickTrigger.mayMisfire` —— 带尾随空格的畸形行会逃过归一化守卫），
+  判的是第 1 字段的**原样**长度；`trigger` / 正文 / `weight` / `kind` 仍原样，磁盘文件不回写。
+  作用域仍然只有云端落盘文件：用户文件那条链路的开关传 `false`，用户在编辑器里选的 mode 受
+  C1-4 / C1-9 保护。接线由 `check_phrase_csv_import.py` 的 C1-6b 展示半边断言 + `QuickDisplayMergeTest`
+  的行为断言两头锁，行为侧还锁了「与 `fromRemoteText` 同输入结果一致」这条等价关系。
 
 排序为什么能胜出：
 
@@ -736,6 +747,42 @@ python3 tools/quick/upsert_quick_phrase.py --trigger dtwsl --label 泡池须知 
 
 离线断言覆盖到「输入 `dtwsl` 的候选首位是泡池须知、插入文本与源文件 sha256 一致」；
 真实候选条截图 / 真机记录需要在装有输入法的设备上补（离线环境没有 Android SDK）。
+
+### 12.7 「从远程同步」后列表立刻可见（VOCA-293，2026-11-18 追加）
+
+缺陷：在快捷短语页点「从远程同步」→ 同步页拉取成功 → 返回，**新拉下来的规则与来源角标不出现，
+必须退出重进**。后端拿到数据了，界面还是旧的。
+
+根因是链路上少一环（两处各自都「没毛病」）：`SyncRepository.pullAndWriteRemoteRules` 只写盘、
+不通知任何人；`QuickPhrasesViewModel` 只在构造时 `load()` 一次；而本页 ViewModel 作用在导航栈条目上，
+去同步页再返回不会重建。
+
+采用的口径是 issue 方案 1（同步成功后显式重新读盘），**不是**「界面提示用户退出重进」：
+
+| 环节 | 落点 | 规则 |
+| --- | --- | --- |
+| 写盘方通知 | `data/SyncRepository.kt` `pullAndWriteRemoteRules` | `writeEntries(...)` **之后**调 `RemoteRulesChanges.publish()`。顺序即契约：版本推进不得早于文件内容变化 |
+| 信号本体 | `data/RemoteRulesChanges.kt` | `version: StateFlow<Long>`，每次成功写盘 +1；全仓库**只有**拉取写盘会 publish |
+| 读盘方订阅 | `settings/quick/QuickPhrasesViewModel.kt` | `init` 里 `load()` + `remoteRulesReload.start(viewModelScope)`；`load()` 在碰磁盘**之前** `markReadStarted()` |
+| 重载范围 | 同上 | 重载 = 再走一遍 `load()`，整体重读 `quick_phrases_remote.txt` 并重算 `mergeForDisplay` / `remoteInfo`，所以新条目、来源角标、「已覆盖 / 恢复默认」一起更新 |
+
+为什么用「版本比较」而不是 `version.drop(1)`：`drop(1)` 会漏掉「页面已读盘、收集协程还没跑起来」
+这段窗口里到来的变更，而同步完立刻返回正是这段窗口的典型时序。版本比较让判定与订阅时机无关，
+代价最坏是多读一次磁盘（不会读到旧内容）。
+
+四态口径（禁止只修成功态）：
+
+| 状态 | 用户看到 | 是否 publish |
+| --- | --- | --- |
+| 同步中 | 同步页按钮转圈、禁用（`state.syncing`） | 否 |
+| 成功 | 同步页「已同步 N 条」，**返回快捷短语页即见新内容与角标**；输入法侧同批由 `AppContainer.invalidateEngine()` 生效 | 是 |
+| 失败 | 同步页错误文案，列表保持原内容（磁盘没变，不刷才是对的） | 否（异常在写盘前抛出，走不到 publish） |
+| 冲突 | 同 trigger 折叠卡片 + 「已覆盖」角标随重载一起重建；**C3 的独立冲突徽标属 VOCA-207，main 尚无该字段**，其刷新由同一条 `load()` 链路承接（VOCA-293 不实现冲突判定） | — |
+
+```bash
+python3 tools/verify/check_crosscut.py            # 13 节：三环齐全 + 先写盘后通知 + 文档口径
+./gradlew :app:testDebugUnitTest --tests '*RemoteRulesChangesTest*'
+```
 
 ## 13. 导入「通用短语.csv」（2026-11-09 追加）
 
