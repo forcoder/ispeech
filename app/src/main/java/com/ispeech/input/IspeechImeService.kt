@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
 import android.graphics.Paint
 import android.net.Uri
@@ -359,6 +360,7 @@ class IspeechImeService : InputMethodService() {
         // 软键盘
         val keyboard = root.findViewById<SoftKeyboardView>(R.id.soft_keyboard)
         keyboard.onKey = { key -> handleSoftKey(key) }
+        keyboard.onAltPick = { entry -> commitPickedChar(entry) }
         // 空格键按住 ≥ 设置阈值直接进入语音输入：与语音键共用同一套按下 / 抬起语义
         keyboard.onSpaceLongPress = { onVoicePressDown() }
         keyboard.onSpaceLongPressEnd = { onVoicePressUp() }
@@ -461,6 +463,15 @@ class IspeechImeService : InputMethodService() {
         }
         resetState()
         super.onFinishInput()
+    }
+
+    /**
+     * 旋转 / 屏幕配置变化：浮层锚的是变化前的按键位置，而框架接下来会重排甚至销毁输入视图，
+     * 留下一层游离 PopupWindow 就违反 AC-2.10，所以先主动收掉再交给框架继续处理。
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        softKeyboard?.dismissAltPopup()
+        super.onConfigurationChanged(newConfig)
     }
 
     override fun onDestroy() {
@@ -646,6 +657,12 @@ class IspeechImeService : InputMethodService() {
         // Ctrl / Alt / Meta 组合键放行给宿主应用，避免抢快捷键
         if (event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) {
             return false
+        }
+
+        // 浮层已弹出时返回键只关浮层、不上屏（R2-22 / AC-2.6）。浮层是不可聚焦窗口（R2-26），
+        // 键事件到不了它，只能在键盘侧消费；排在关面板分支之前，「返回不关面板」才成立。
+        if (keyCode == KeyEvent.KEYCODE_BACK && softKeyboard?.dismissAltPopup() == true) {
+            return true
         }
 
         // 面板打开时：字母进筛选框，退格删筛选字符，空格上屏第一条，返回键关面板
@@ -1086,6 +1103,23 @@ class IspeechImeService : InputMethodService() {
     private fun applyFullWidth(raw: String): String =
         if (settings.fullWidth) Punctuation.toFullWidth(raw) else raw
 
+    /**
+     * 长按浮层的「精确取字符」通道（VOCA-65 条目 2 / R2-13、R2-14、R2-17）。
+     *
+     * 与 [handleChar] / [commitPunctuation] 的区别只有一句话：浮层选的是**一个字符**，
+     * 不是**一次按键** —— 所以原样上屏，既不过 [PunctuationConverter] 也不过 [applyFullWidth]，
+     * 也不碰 Shift / 中英 / 布局。缓冲里还有未完成的编码时先按现有规则落定再上屏，
+     * 不能把用户打到一半的码悄悄丢掉。
+     */
+    private fun commitPickedChar(raw: String) {
+        if (raw.isEmpty()) return
+        if (buffer.isNotEmpty()) commitTop()
+        dismissAiState()
+        clearAssociation()
+        val letter = raw.length == 1 && ((raw[0] in 'a'..'z') || (raw[0] in 'A'..'Z'))
+        commitDirect(raw, if (letter) CommitType.ENGLISH else directCommitType(raw))
+    }
+
     /** 放弃当前组合，不往应用里写任何文字 */
     private fun clear() {
         buffer = ""
@@ -1472,6 +1506,9 @@ class IspeechImeService : InputMethodService() {
 
     /** 各内容视图显示切换：快捷短语面板与软键盘同屏，其余面板独占内容区 */
     private fun updatePanelVisibility() {
+        // 开 / 关 / 换面板是浮层唯一还可能留在屏上的路径，在这里收一次就够（R2-23 / AC-2.10）：
+        // 快捷短语面板与键盘同屏，收不到就会浮在搜索框上；其余面板连键盘一起隐藏。
+        softKeyboard?.dismissAltPopup()
         // 快捷短语面板打开时保持软键盘可见（面板在上、键盘在下），以便用软键盘在面板内搜索；
         // 剪贴板 / 切换输入法面板打开时隐藏软键盘（维持原行为）。
         val showKeyboard = panel == Panel.NONE || panel == Panel.QUICK_PHRASE
