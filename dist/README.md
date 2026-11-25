@@ -3,6 +3,17 @@
 搜狗五笔 86 复刻原型 · Kotlin + Jetpack Compose · 五笔86 引擎 + 拼音混输 / 模糊音 + 九宫格 T9 +
 简繁输出 + 颜文字 / 更多符号 + 输入统计 + csBaby 快捷短语（收藏 / 最近）+ 触屏软键盘 + AI 回复。
 
+## 11-25 重打（最终包作废替换：BUILD `84d2a2b` / MAIN `d9690f9`）
+
+11-24 那份最终包（`88062bdb…0d820`，BUILD `f1d9124`）**已作废**：它的基线不含 main 的 `9564cf7`(#42) 与 `d9690f9`(#36)，
+装它跑 VOCA-208 用例 4（同步后列表刷新）必被误判成修复失败。本轮按 `d9690f9` 重打：
+
+- 新基线：merge 提交 **`84d2a2b`**（发布分支 `98df9d1` + `origin/main` `d9690f9`，无冲突；版本号维持 6 / 1.6）
+- 新包：`ispeech-internal-v1.6-final-20261125.apk`，sha256 **`b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce`**，139,299,145 字节
+- 门禁：`assert_apk_fix.sh <包> 84d2a2b d9690f9` → **exit 0**（C1…C5 / C9 / dex 字节全 PASS）；4 ABI、Android Debug 证书、6/1.6 逐项复验通过
+- 装机：模拟器 `emulator-5554` 装入后 `versionName=1.6`、`versionCode=6`，设备 `base.apk` sha256 与构建侧逐字节一致（**真机仍未达成，AC-DIST 不记交付**）
+- 配置变化：**零配置变化**（`asrModelUrl` 默认值未动，构建不带 `-PasrModelUrl`；仅版本号沿用 6/1.6 与文档登记）
+
 **本版定位**：内测分发 · Android Debug 证书签名 · 含 FunASR 离线语音运行时（4 ABI）· 默认模型源为 OSS HTTPS。
 **11-24 W-B 重打**：旧最终包 `ispeech-internal-v1.6-final-20261119.apk`（出包提交 `1597c80`）**已作废**，三个理由：① 落后 main 5 个提交（`0168e59` / `7eb60a4` / `52ae190` / `d33d025` / `bb1bf2b`），缺 VOCA-127 自学习、#30 读盘断言、#24 键盘规格、#31 下载校验、#22 新门禁；② #22 带入的 `check_dist_manifest.py` 判 release 树不合法（缺文件 `ispeech-internal-v1.6-final-20261119.apk`）；③ main 仍是 5/1.5，6/1.6 只在发布分支。新基线 **MAIN_NEW = `bb1bf2b2`**（旧 `a9c5109` 作废）。
 **11-24 16:0x CST 重打已完成**：`assembleRelease` @ `f1d9124` → 本机 debug keystore 重签 → `assert_apk_fix.sh` **final 与 probe404 两模式均 exit 0** → 装机实测 `versionName=1.6` 且设备侧 `base.apk` sha256 与构建侧逐字节一致。下方 sha256 / 文件名 / 字节数为本批次实测值。试包 `ispeech-internal-v1.6.apk` 保留作基线证据，**不作为交付包**。
@@ -11,14 +22,14 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `ispeech-internal-v1.6-final-20261124.apk` | **内测交付包（最终包）**：versionCode 6 / versionName 1.6，Android Debug 证书（SHA-256 `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`），含 4 ABI `libsherpa-onnx-jni.so`，构建基线 **BUILD = merge 提交 `f1d9124`**（吸收 main `bb1bf2b2`）。**sha256 `88062bdba552fd1c5a0de770b7494fddfde137da67c4c4e7ca8b32319750d820` / 139,295,049 字节**；字节不在 git 树内，取件见下方「取包方式」 |
+| `ispeech-internal-v1.6-final-20261125.apk` | **内测交付包（最终包·11-25 重打）**：versionCode 6 / versionName 1.6，Android Debug 证书（SHA-256 `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`），含 4 ABI `libsherpa-onnx-jni.so`，构建基线 **BUILD = merge 提交 `84d2a2b`**（吸收 main `d9690f9`）。**sha256 `b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce` / 139,299,145 字节**；字节不在 git 树内，取件见下方「取包方式」 |
 | `ispeech-internal-v1.6.apk` | 试包（11-15 基线证据，sha256 `9cddcec5…43f42`）：路径与字节不动，不含窗口修复，勿用于验收 |
 | `SHA256SUMS` | 完整性校验，**生成物**：唯一写入路径是 `python3 tools/verify/check_dist_manifest.py --regen`（口径见 `docs/adr/VOCA-400-dist-checksum-manifest.md`）。树外最终包**不入本表**（无文件即无行，写了会判 FAIL），其期望值只登记在下方「取包方式」 |
 | `_archive/` | 历史包 v1.0–v1.5，**均不含语音**（无 sherpa-onnx / FunASR 运行时），仅用于回归对比 |
 
 ## 取包方式（产物必须可被他人取到）
 
-**最终包字节既不在 git 树内，也不在 issue 附件**（11-19 三次实测：单包 413、双包 413、278 MB 上传超时未建评论；>139 MB 超平台单请求上限。PM 11-19 05:23 裁定「不裁剪、不分卷」，按交付计划六·四第 5 条走 adb 直传退路）。本批次（11-24）已实测**装机通道成立**：`adb install` 后设备侧 `base.apk` sha256 = 构建侧 `88062bdb…0d820`，逐字节一致（**在模拟器 `emulator-5554` 上取的读数；AC-DIST 要求真机，此项仍未达成**）。字节另存两处：出包机 `~/ispeech-artifacts/`（仓库外，符合 cfg_gate 放行条件 1）+ 本机 git 对象库 ref（未推远端）：
+**最终包字节既不在 git 树内，也不在 issue 附件**（11-19 三次实测：单包 413、双包 413、278 MB 上传超时未建评论；>139 MB 超平台单请求上限。PM 11-19 05:23 裁定「不裁剪、不分卷」，按交付计划六·四第 5 条走 adb 直传退路）。本批次（11-24）已实测**装机通道成立**：`adb install` 后设备侧 `base.apk` sha256 = 构建侧 `b44c5ec1…8bcce`，逐字节一致（**在模拟器 `emulator-5554` 上取的读数；AC-DIST 要求真机，此项仍未达成**）。字节另存两处：出包机 `~/ispeech-artifacts/`（仓库外，符合 cfg_gate 放行条件 1）+ 本机 git 对象库 ref（未推远端）：
 
 | 包 | ref | git blob（40 位 object id） | sha256 | 字节 |
 | --- | --- | --- | --- | --- |
@@ -29,8 +40,8 @@
 
 ```bash
 # 在出包机的 ispeech 仓库内执行（blob id 不是文件 sha256，两者哈希体系不同，别拿 64 位 sha256 去喂 git）
-git cat-file blob refs/archive/voca-186/v1.6-final-20261124 > ispeech-internal-v1.6-final-20261124.apk
-shasum -a 256 ispeech-internal-v1.6-final-20261124.apk   # 期望 88062bdba552fd1c5a0de770b7494fddfde137da67c4c4e7ca8b32319750d820（139295049 字节）
+git cat-file blob refs/archive/voca-186/v1.6-final-20261125 > ispeech-internal-v1.6-final-20261125.apk
+shasum -a 256 ispeech-internal-v1.6-final-20261125.apk   # 期望 b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce（139299145 字节）
 cd dist && shasum -a 256 -c SHA256SUMS                   # 恢复出的包放进 dist/ 后整表校验
 ```
 
@@ -70,12 +81,12 @@ cd voca-186-v1.6/dist && shasum -a 256 ispeech-internal-v1.6.apk
 
 | 门禁 | 结果 |
 | --- | --- |
-| 出包门禁脚本 | `bash tools/deploy/assert_apk_fix.sh <最终包> f1d9124 bb1bf2b2` → **exit 0**（C9 祖先 YES + C1…C5 在树断言 + dex 字节 + 交付文档） |
+| 出包门禁脚本 | `bash tools/deploy/assert_apk_fix.sh <最终包> 84d2a2b d9690f9` → **exit 0**（C9 祖先 YES + C1…C5 在树断言 + dex 字节 + 交付文档） |
 | 原生库 ABI 数 | `unzip -l … \| grep -c libsherpa-onnx-jni.so` = **4**（arm64-v8a / armeabi-v7a / x86 / x86_64） |
 | 模型源在 dex | 命中 `delivery-service-smzk`；`cvm.agentai0.com` = **0** |
 | 签名证书 | `apksigner verify --print-certs` → `85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:30:01:16:CD:5A:CA:8B:4F:9F:66:A0:ED`（Android Debug） |
 | 版本元数据 | `aapt2 dump badging` → `versionCode='6'` / `versionName='1.6'` |
-| 装机双向核对（AC-DIST，**仅模拟器**） | `adb install` Success → `dumpsys package com.ispeech.ime` = `versionName=1.6` / `versionCode=6`；设备 `base.apk` sha256 = `88062bdb…0d820` = 构建侧（两向一致）。设备为 `emulator-5554`（`ro.kernel.qemu=1`），**AC-DIST 要求 ≥1 台真机，该项仍未达成** |
+| 装机双向核对（AC-DIST，**仅模拟器**） | `adb install` Success → `dumpsys package com.ispeech.ime` = `versionName=1.6` / `versionCode=6`；设备 `base.apk` sha256 = `b44c5ec1…8bcce` = 构建侧（两向一致）。设备为 `emulator-5554`（`ro.kernel.qemu=1`），**AC-DIST 要求 ≥1 台真机，该项仍未达成** |
 | dex 字节断言（本批次） | `AssociationCommit`=23 / `textToCommit`=6 / `suffixPrefixOverlap`=3 / `ASSOCIATION_ANCHOR_CHARS`=1 / `FUNASR`=12 / `delivery-service-smzk`=2 / `cvm.agentai0.com`=0 |
 | 模型源可用 | `HEAD` 200 / `Content-Length: 77920048` / `Range: 0-1023` → 206（11-19 复测） |
 
@@ -188,7 +199,7 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-git checkout f1d9124                             # 11-24 重打 BUILD = 吸收 main bb1bf2b2 的 merge 提交（旧 2b393b2 / a9c5109 / 1597c80 作废）
+git checkout 84d2a2b                             # 11-25 重打 BUILD = 吸收 main d9690f9 的 merge 提交（旧 f1d9124 / 2b393b2 / a9c5109 / 1597c80 作废）
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties   # 本机文件，不入库
 ./gradlew assembleRelease                        # 不带 -PasrModelUrl / -PvoskModelUrl，走默认源
 
