@@ -49,5 +49,15 @@ dist/ispeech-release-1.5-20261115-1004.apk
 # 短语数据导出
 通用短语.csv
 
-# VOCA-657 真机取证产物（大文件 / 每次跑都不同，不入库）
-qa-evidence/
+# VOCA-657 取证产物：文字证据（REPORT/device/log/txt）随提交入库，重截图与 raw 不入库。
+# 旧规则整目录忽略 qa-evidence/，run workdir 一回收证据就全丢，导致每轮从零重跑 —— 这里收窄。
+qa-evidence/**
+!qa-evidence/**/
+!qa-evidence/**/*.md
+!qa-evidence/**/*.txt
+!qa-evidence/**/*.log
+!qa-evidence/**/*.json
+
+# 测试脚本的字节码缓存（不同 Python 版本产物不同，不入库）
+__pycache__/
+*.pyc

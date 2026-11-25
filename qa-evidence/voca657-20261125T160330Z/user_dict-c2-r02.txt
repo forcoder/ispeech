@@ -1,0 +1,5 @@
+# 用户词频 / 自造词（自动生成，可在设置页管理）
+klge	喂	2	wb
+uyhn	门	1	wb
+uykl	门喂	1	wb
+pwtq	窗	1	wb

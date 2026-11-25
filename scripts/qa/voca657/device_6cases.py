@@ -126,18 +126,20 @@ def preflight(d, args, out):
     lines.append("%-24s %s" % ("versionName", vn.group(1) if vn else "?"))
     lines.append("%-24s %s" % ("versionCode", vc.group(1) if vc else "?"))
     lines.append("%-24s %s" % ("apk_path", apk_path or "?"))
-    sha = "?"
+    sha, hits = "?", "n/a"
     if apk_path:
         local = os.path.join(out, "base.apk")
         d("pull", apk_path, local)
         if os.path.exists(local):
             sha = hashlib.sha256(open(local, "rb").read()).hexdigest()
+            # phrase_learn 自证必须读**已装的这个包**，不能读本机另一个 APK：
+            # 否则 sha256 说的是设备上的包、字符串说的是本机的包，自证自相矛盾。
+            hits = str(count_phrase_learn(local))
             os.remove(local)
     lines.append("%-24s %s" % ("apk_sha256", sha))
-    hits = "n/a"
-    if args.local_apk and os.path.exists(args.local_apk):
-        hits = str(count_phrase_learn(args.local_apk))
     lines.append("%-24s %s" % ("phrase_learn_hits", hits))
+    if args.local_apk and os.path.exists(args.local_apk):
+        lines.append("%-24s %s" % ("local_apk_hits", count_phrase_learn(args.local_apk)))
     run_as = d.sh("run-as", PKG, "id").strip()
     debug_pkg = "uid=" in run_as
     lines.append("%-24s %s" % ("run_as", "可用（debug 包）" if debug_pkg else "不可用（release 包）"))
@@ -396,39 +398,58 @@ def case2(d, out, args, dev):
 
 
 def case3(d, out, args, dev):
-    """AC-3.4 ③ 拼完首字切短语面板再切回 → 无 commit、无新增（弱判据）"""
+    """AC-3.4 ③ 拼完首字切短语面板再切回 → 无 commit、无新增。
+
+    判据必须可证伪：**每次都必须先证明「短语」面板真的开过**（IME 窗口高度变化），
+    再断言无 commit / 无新增。打不开面板就不算测过 —— 旧版按比例硬套点击点，
+    点空也判 pass，属空过（停工诊断 15:24Z 打回项 ②）。
+    """
     reset(d, args.prefs)
     fresh_host(d)
     empty_field(d)
     before = snap_dict(d, out, "c3-before") or []
+    pt = find_phrase_key(d)
+    if not pt:
+        return dict(name="AC-3.4③ 拼首字后开合短语面板", verdict="fail",
+                    detail="没能自证「短语」面板被打开（IME 窗口高度无变化）——判据不可证，按 fail 处理，"
+                           "不得判 pass",
+                    evidence="case3-*.log")
+    px, py = pt
     rows = []
-    px, py = panel_point(d)
     for i, (a, b) in enumerate([("klge", "pwtq"), ("klge", "lfqv")], 1):
         d.sh("logcat", "-c")
         hop(d, a)
+        top0, h0 = _ime_win(d)
         panel_open(d, px, py)
         shot(d, os.path.join(out, "case3-%02d-panel-open.png" % i))
+        top1, h1 = _ime_win(d)
+        opened = h0 is not None and h1 is not None and h1 > h0
         panel_close(d)
         hop(d, b)
         lg = logs(d)
         txt = "\n".join(lg)
         exp = a[:2] + b[:2]
-        rows.append(dict(i=i, pair=a + "+" + b, expect=exp,
+        rows.append(dict(i=i, pair=a + "+" + b, expect=exp, panel_opened=opened,
+                         ime_h=(h0, h1),
                          commit=("commit code=%s" % exp) in txt,
                          any_commit=bool(re.search(r"commit code=\w+ text=", txt)),
                          dict_lines=snap_dict(d, out, "c3-r%02d" % i) or []))
         open(os.path.join(out, "case3-%02d.log" % i), "w").write("\n".join(lg) + "\n")
-        print("  r%02d %s commit=%s any_commit=%s"
-              % (i, rows[-1]["pair"], rows[-1]["commit"], rows[-1]["any_commit"]))
+        print("  r%02d %s panel_opened=%s(IME %s→%s) commit=%s"
+              % (i, rows[-1]["pair"], opened, h0, h1, rows[-1]["commit"]))
     after = snap_dict(d, out, "c3-after") or []
     new_lines = [l for l in after if l not in before]
-    ok = (not any(r["commit"] for r in rows)
+    ok = (all(r["panel_opened"] for r in rows)
+          and not any(r["commit"] for r in rows)
           and not any(l.startswith(r["expect"] + "\t") for r in rows for l in new_lines))
     return dict(name="AC-3.4③ 拼首字后开合短语面板",
                 verdict="pass" if ok else "fail",
-                detail="%d 次均无 commit code=<本组期望码>；词库新增 %d 行且不含本组期望码"
-                       "（弱判据：只断词库与 commit）" % (len(rows), len(new_lines)),
-                evidence="case3-*.log / case3-*-panel-open.png / user_dict-c3-*.txt", rows=rows)
+                detail="%d/%d 次自证面板真的打开（IME 窗口高度变化）；无 commit code=<本组期望码>；"
+                       "词库新增 %d 行且不含本组期望码"
+                       % (sum(1 for r in rows if r["panel_opened"]), len(rows), len(new_lines)),
+                evidence="case3-*.log / case3-*-panel-open.png / user_dict-c3-*.txt",
+                rows=[dict(i=r["i"], panel_opened=r["panel_opened"],
+                           ime_h="%s→%s" % r["ime_h"], commit=r["commit"]) for r in rows])
 
 
 def case4(d, out, args, dev):
@@ -593,14 +614,62 @@ CASES = {"1": case1, "2": case2, "3": case3, "4": case4, "5": case5, "6": case6,
 
 
 # ───────────────────────────── 用例支撑件 ─────────────────────────────
-def panel_point(d):
-    """工具栏「短语」键的点击点（1080×2340 / 440dpi 实测校准：x≈472 命中，y 1580~1640 命中）。
+_PHRASE_PT = None
 
-    不按比例硬套：先用 BACK 探针确认「点完再点 BACK 后键盘仍在、字母进宿主」——命中即面板未开。
-    真机分辨率不同时，用 --calibrate 重新标一次。
+
+def _ime_win(d):
+    """IME 窗口的 (顶端 y, 请求高度)。找不到返回 (None, None)。"""
+    out = d.sh("dumpsys", "window", "windows")
+    for m in re.finditer(r"Window #\d+ Window\{[^}]*\}:", out):
+        st = m.start()
+        nx = out.find("Window #", st + 10)
+        seg = out[st:nx if nx > 0 else len(out)]
+        if "mIsImWindow=true" not in seg:
+            continue
+        req = re.search(r"Requested w=\d+ h=(\d+)", seg)
+        fr = re.search(r"frame=\[-?\d+,(-?\d+)\]\[-?\d+,-?\d+\]", seg)
+        return (int(fr.group(1)) if fr else None,
+                int(req.group(1)) if req else None)
+    return (None, None)
+
+
+def find_phrase_key(d):
+    """定位并**自证**工具栏「短语」键，返回 (x, y) 或 None。
+
+    自证判据：点一下之后 IME 窗口高度必须变化。快捷短语面板开在键盘上方、键盘仍可见
+    （IspeechImeService.updatePanelVisibility），所以窗口只会变高；高度不动 ⇒ 没点到
+    「短语」。全部候选点试完仍无一次变高 ⇒ 返回 None，调用方必须判 FAIL / blocked。
+
+    旧实现按比例硬套 (0.437, 0.685)，点空也照跑，case3 才会在面板从未打开时判 pass —— 空过。
     """
-    w, h = screen(d)
-    return int(w * 0.437), int(h * 0.685)
+    global _PHRASE_PT
+    if _PHRASE_PT:
+        return _PHRASE_PT
+    w, _ = screen(d)
+    top, base = _ime_win(d)
+    if not top or not base:
+        print("  x 读不到 IME 窗口几何，无法自证「短语」键")
+        return None
+    # 工具栏是 SoftKeyboardView 的第一个子视图（SoftKeyboardView.kt:251），在候选条下方；
+    # 8 键权重 1,1,1,1.3,1.2,1.1,1.1,1（合计 8.7）⇒「短语」第 4 键，横带中心 0.420。
+    for dy in range(40, 320, 20):
+        for fx in (0.420, 0.395, 0.445, 0.370, 0.470):
+            x, y = int(w * fx), top + dy
+            d.sh("input", "tap", str(x), str(y))
+            time.sleep(1.2)
+            _, got = _ime_win(d)
+            if got is not None and got != base:
+                print("  命中「短语」x=%.3f dy=%d → (%d,%d)，IME 高度 %d→%d"
+                      % (fx, dy, x, y, base, got))
+                _PHRASE_PT = (x, y)
+                d.sh("input", "keyevent", "4")     # BACK 关面板
+                time.sleep(1.1)
+                top, base = _ime_win(d)
+                return _PHRASE_PT
+            d.sh("input", "keyevent", "67 67 67 67")
+            time.sleep(0.2)
+    print("  x 工具栏扫完都没打开「短语」面板 —— 不得据此判 pass")
+    return None
 
 
 def probe_panel(d, x, y):

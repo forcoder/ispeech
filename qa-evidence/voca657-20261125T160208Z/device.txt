@@ -1,0 +1,18 @@
+WARN 序列号不符：期望 FMR0224913042917，实测 EMULATOR37X2X12X0
+serial                   emulator-5554
+ro.serialno              EMULATOR37X2X12X0
+ro.product.model         sdk_gphone64_arm64
+ro.product.device        emu64a
+ro.build.display.id      sdk_gphone64_arm64-userdebug 14 UE1A.230829.050 12077443 dev-keys
+ro.build.version.release 14
+ro.build.version.sdk     34
+ro.kernel.qemu           1
+layer                    模拟器层（不顶替真机）
+host_utc                 2026-11-25T16:02:08Z
+device_date              Thu Nov 26 00:02:08 CST 2026
+versionName              1.5
+versionCode              5
+apk_path                 /data/app/~~uZplpw-MzyVoMExHL4COUQ==/com.ispeech.ime-b_sALBbJQ-KOIiKgLXpgbQ==/base.apk
+apk_sha256               156ac57969e5f33d85ae0ea27c5b77fb39e402df45e8684f503b1b4a6ed018e8
+phrase_learn_hits        0
+run_as                   可用（debug 包）
