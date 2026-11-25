@@ -48,3 +48,6 @@ dist/ispeech-release-1.5-20261115-1004.apk
 
 # 短语数据导出
 通用短语.csv
+
+# VOCA-657 真机取证产物（大文件 / 每次跑都不同，不入库）
+qa-evidence/
