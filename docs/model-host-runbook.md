@@ -368,9 +368,17 @@ jobs:
 `MAX_ATTEMPTS=3` 的失败重试在本例中未触发（日志只出现「第 1/3 次」即成功）。因此该数字
 **可以作为「坏 `.part` 自愈的实际下行成本」结论**：约为单包的 2.07 倍。
 
-**R-2 下行字节口径**：用 `dumpsys netstats --uid 10196` 在触发前后各取一次 `rb` 原始读数。
-**留档实况**：`R2-netstats-before.txt` / `R2-netstats-after.txt` 两份均非空、已随证据包提交；
-`R1-netstats-before.txt` 本轮为空，故 R-1 行不再声称 `rb 0 →`。
+**下行字节口径与留档实况（按证据包逐项核对）**：统一用 `dumpsys netstats --uid 10196`
+在触发前后各取一次 `rb` 原始读数，差值即该用例的实际下行。
+
+| 用例 | 留档文件 | 状态 |
+|---|---|---|
+| **R-1**（第 5 轮） | `R1-netstats-before.txt`(261 B, `rb=45,567,856`) / `R1-netstats-after.txt`(`rb=126,345,193`) | **两份均非空，随 round5 包提交**；净增 80,777,337 B |
+| **R-4**（第 5 轮） | `R4-netstats-before.txt` / `R4-netstats-after.txt` | 两份均非空，随 round5 包提交；`rb` 45,567,856 |
+| **R-2**（第 3 轮） | `R2-netstats-before.txt`(`rb=80,777,445`) / `R2-netstats-after.txt`(`rb=242,316,231`)，随 `voca476-round3-evidence.tar.gz` 提交 | **不在 round5 包内**——R-2 第 5 轮未重跑；Δ=161,538,786 B 已按该两文件复算核对一致 |
+
+> 更正说明：本段曾写「`R1-netstats-before.txt` 本轮为空」与「R2 netstats 已随包提交」，
+> 与 round5 包实际内容不符（前者 261 B 非空、后者根本不在该包内），已按上表订正。
 
 ### 11.1 旧实现基线（`dist/ispeech-internal-v1.6.apk`，11-09~11-14 构建）——**不构成本单验收证据**
 
