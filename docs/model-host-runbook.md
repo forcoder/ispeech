@@ -304,6 +304,8 @@ jobs:
 > **真机项待执行（未做，不得据此判定可发布）**：
 > - **R-3 语音上屏**：需真机麦克风（序列号后 4 位 `2917`），AVD 无音频输入；
 > - §8 检查表第 5 项「真机走通下载 100% → 解压 → 识别一句话」**仍未达成**。
+>
+> 收口口径与到期默认见 **§11.3**。
 
 ### 2026-11-24/25 · `main d9690f9` 本树重建 · AVD 覆盖（R-1 / R-2 / R-4 / R-5）
 
@@ -435,10 +437,35 @@ jobs:
 | 2026-11-18 | 新增 §10：Vosk 活链路（`voskModelUrl`）成为第二个模型源，客户端下载器与 FunASR 合一 | VOCA-474：`./gradlew :app:testDebugUnitTest --tests "com.ispeech.data.*"` 69/69（AsrModelInstall 19 + FunAsr 16 + PhraseCsvImport 13 + Vosk 21）、`check_crosscut` 183/183、`check_static` 6/6（2026-11-23 复跑） |
 | 2026-11-24 | 新增 §11 实测验证记录：v1.6 在 AVD 跑通 R-1/R-2/R-5；main `bb1bf2b`（PR #31）在 AVD 跑通 **R-4**（VOSK 43.9 MB 下载 → 65 MB `model` 目录）。R-3 需真机麦克风，仍未覆盖 | 见 §11 与 VOCA-476 评论 |
 | 2026-11-24 | **§11 换包重记**：原 `dist/ispeech-internal-v1.6.apk` 经复核 dex 无 `AsrModelInstall`/`VoskModelStore`（11-09~11-14 旧构建），降级为 §11.1 基线；改用 `main d9690f9` 重建包（`15541ef7…`，三方 sha 一致）重跑 R-1/R-2/R-5，日志出现 `funasr category=` 成对打点、全角冒号与 `期望完成标记=` 后缀，与源码一致 | 见 §11 与 VOCA-476 评论 |
+| 2026-11-25 | 新增 §11.3 收口口径与 §11.2 交付状态：PR #45（`99a10e5`，open/clean）；明确 R-3 为**唯一人类门**并给两条走法（真机窗口 / 书面豁免）与 11-27 12:00Z 到期默认（降范围，R-3 移交 VOCA-33 人类门） | 见 §11.2/§11.3 与 VOCA-476 评论 |
+### 11.2 交付与合并状态
 
-### 11.2 分支声明
-
+- **PR：[#45](https://github.com/forcoder/ispeech/pull/45)**，base `main`、head `agent/voca-476-r4` @ `99a10e5`，
+  `state=open` / `mergeable_state=clean` / `changed_files=1`（仅本文件）。由督导员于 2026-11-24 16:30Z 代建
+  （本 test-engineer 运行时无 gh 凭据，`~/.config/gh` 与 keychain 均无，匿名 `POST /pulls` 401）。
 - **合并窗口只取 `agent/voca-476-r4`**。`origin/agent/voca-476`（`7c58832`）作废：它新增的是
   `## 10. 实测验证记录`，与本文件 §10（Vosk 源）编号冲突；两分支同时合入 `git merge-tree` rc=1。
-- 本单**未建 PR**（本 runtime `gh` 未登录、无 `GH_TOKEN`，匿名 `POST /pulls` 返回 401）。分支已推
-  `agent/voca-476-r4`，建 PR 需由带凭据的 runtime 或人类执行。
+- **合入 `main` 属生产写入**，按项目规则 §二/§五 由人类在统一合并窗口执行，本单不自行合并。
+
+### 11.3 收口口径（2026-11-25 定，督导员 13:20Z 派）
+
+本单**除 R-3 外全部按 AVD 收口**，证据见 §11 首节与 §11.1 基线对照：
+
+| 项 | 状态 | 依据 |
+|---|---|---|
+| R-1 下载 + 产品落盘 | 行为通过（字面判据见下） | `funasr category=ARCHIVE_MISSING`、`model` 8 条目含就绪哨兵、`netstats` 净增 80,777,337 B |
+| R-2 坏 `.part` 自愈 | 通过 | `DIGEST_MISMATCH` → `RETRY_FROM_START` 整包重下；Δ=161,538,786 B（=续传 77,920,015 + 整包 77,920,048，+3.66% 协议开销） |
+| R-4 VOSK 下载 | 通过 | 65 MB `model`、`conf/model.conf` 就绪哨兵、`ls -laR` 54 行原件 |
+| R-5 断网失败可读 | 通过 | `funasr category=PREPARE_FAILED … 期望完成标记=…`，无脏 `.part` |
+| **R-3 语音上屏** | **未做 —— 唯一人类门** | AVD 无音频输入 |
+
+**R-1 字面判据**：原文要求 logcat 有 `AsrDownload` 起始终止打点，但全仓 `const val TAG` 中**不存在**
+该 tag（只有 `FunAsrModelStore` / `VoskModelStore`），任何构建都无法满足。本单按等价语义取证并如实
+标注「行为通过、字面判据不满足」，**未自行改写判据**。
+
+**唯一的未闭环项：R-3**。需人类提供以下任一：
+1. **真机窗口**：序列号后 4 位 `2917` 那台接入 runtime（或由持有者在真机上点一次麦克风说一句话，录屏 + logcat）；
+2. **书面豁免**：明确接受「R-3 留作残余风险」，本单按 AVD 收口。
+
+**到期默认（11-27 12:00Z）**：无真机窗口即按第 2 项降范围——R-3 单列移交 VOCA-33 的人类门，
+本单以 AVD 证据收口，PR #45 由人类在统一合并窗口合入。
