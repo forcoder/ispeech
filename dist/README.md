@@ -33,6 +33,7 @@
 
 | 包 | ref | git blob（40 位 object id） | sha256 | 字节 |
 | --- | --- | --- | --- | --- |
+| `ispeech-internal-v1.6-final-20261125.apk`（**当前交付包**） | `refs/archive/voca-186/v1.6-final-20261125` | `8557c633f2f2d49e9f1a0b28bd73a0b6196eb5e5` | `b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce` | 139,299,145 |
 | ~~`ispeech-internal-v1.6-final-20261124.apk`~~（作废：基线 `f1d9124` 不含 #36/#42） | `refs/archive/voca-186/v1.6-final-20261124` | `4ec138d4ea100b6f21f4a260c77fe363a0016e54` | `88062bdba552fd1c…b32319750d820` | 139,295,049 |
 | ~~`ispeech-internal-v1.6-ac6-probe404-20261124.apk`~~（作废） | `refs/archive/voca-186/v1.6-ac6-probe404-20261124` | `78c88c55ad5b64d1b234cdb9462bd7f27847f8f4` | `cee7e1ef7770e194…c6445ad374f1` | 139,295,049 |
 | ~~`ispeech-internal-v1.6-final-20261119.apk`~~（作废，仅回滚用） | `refs/archive/voca-186/v1.6-final-20261119` | `564911634317238d23493bee95dc2a548e2eab9c` | `736236292856ada2…d1b430a6` | 139,258,185 |
@@ -42,16 +43,16 @@
 # 在出包机的 ispeech 仓库内执行（blob id 不是文件 sha256，两者哈希体系不同，别拿 64 位 sha256 去喂 git）
 git cat-file blob refs/archive/voca-186/v1.6-final-20261125 > ispeech-internal-v1.6-final-20261125.apk
 shasum -a 256 ispeech-internal-v1.6-final-20261125.apk   # 期望 b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce（139299145 字节）
-cd dist && shasum -a 256 -c SHA256SUMS                   # 恢复出的包放进 dist/ 后整表校验
+cd dist && shasum -a 256 -c SHA256SUMS                   # 校验的是清单里那 9 行（试包 + _archive），不含最终包
 ```
 
 - **分发与验收通道**：装机现场 `adb install -r` 直传 + 设备侧 `base.apk` sha256 与构建侧登记值**双向核对**，两向都对上才算字节交付（PM 11-19 05:23 裁定口径；完整规程见 VOCA-186 附件 `v1.6-final-build-20261119.md`「adb 退路执行规程」）。AC-6 包同规程，**仅取证装机，禁进内测通道**。
-- **残余风险（外链 go/no-go 在 VOCA-419 待人类裁决）**：以上两条 ref 仍只存在于出包机本机对象库（`refs/archive` 远端 0 条，未推远端），`~/ispeech-artifacts/` 同在出包机上，仍无他人可独立拉取的离机外链；出包机重装或对象库被清理即彻底丢失。补副本的两条路已排除：本仓为**公开仓**，把 `refs/archive/voca-186/*` 推上远端等于对外发布内测包，且 139,258,185 B 超 GitHub 100,000,000 B 单文件硬限（11-19 该仓 pre-receive 已实测拒绝 139,171,786 B blob）；issue 附件通道 11-19 三次实测被拒（413 两次 + 278 MB 超时）。唯一剩余方案 = OSS 私有读对象 + 在 `SHA256SUMS` 同行登记 URL 与 sha256（花钱 + 对外发布，需人类明确 go）。
+- **残余风险（外链 go/no-go 在 VOCA-419 待人类裁决）**：上表各 ref 仍只存在于出包机本机对象库（`refs/archive` 远端 0 条，未推远端），`~/ispeech-artifacts/` 同在出包机上，仍无他人可独立拉取的离机外链；出包机重装或对象库被清理即彻底丢失。补副本的两条路已排除：本仓为**公开仓**，把 `refs/archive/voca-186/*` 推上远端等于对外发布内测包，且 139,299,145 B 超 GitHub 100,000,000 B 单文件硬限（11-19 该仓 pre-receive 已实测拒绝 139,171,786 B blob）；issue 附件通道 11-19 三次实测被拒（413 两次 + 278 MB 超时）。唯一剩余方案 = OSS 私有读对象 + 在 `SHA256SUMS` 同行登记 URL 与 sha256（花钱 + 对外发布，需人类明确 go）。
 - **为什么不在 git 树内**：窗口后 main 含 Vosk 引擎（`07214d6`），4 ABI `libvosk.so` 使整包从试包 98,416,118 B 增至
-  139,258,185 B，超过 GitHub 100,000,000 B 单文件硬限（runbook §6 R1，触发点 = 第 8 步构建后 stat）。
+  139,299,145 B，超过 GitHub 100,000,000 B 单文件硬限（runbook §6 R1，触发点 = 第 8 步构建后 stat）。
   按 R1 口径「发布分支只承载元数据」：最终包**不入 `dist/SHA256SUMS`**（它是 >100 MB 未跟踪包，按 ADR-0003 §4 三态判 FAIL，登记了反而让 `check_dist_manifest.py` 判孤儿行）；期望值登记见上方取包表，字节按 ref 取回后自行 `shasum -a 256` 对读。口径出处：ADR-0003 §4「最终包不走清单」那一段。
-- 出包 commit = 发布分支 `release/voca-186-v1.6` 上的交付提交 `0be24ba`（其父 = merge 提交 `84d2a2b`，
-  吸收 main `d9690f9`）；构建基线 = `84d2a2b` 树，`git merge-base --is-ancestor d9690f9 84d2a2b` = YES（C9）。
+- 出包 commit = merge 提交 `84d2a2b`（发布分支 `release/voca-186-v1.6` 上，吸收 main `d9690f9`）；构建基线 = `84d2a2b` 树，`git merge-base --is-ancestor d9690f9 84d2a2b` = YES（C9）。
+  门禁与证据可在发布分支上复算：`git show origin/release/voca-186-v1.6:docs/voca-186-rebuild-20261125.log`。
   门禁命令：`bash tools/deploy/assert_apk_fix.sh <包> 84d2a2b d9690f9` → exit 0（17 项 PASS / 0 FAIL）。
 - **试包**仍可从发布分支取（字节未变）：
 
