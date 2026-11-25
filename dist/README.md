@@ -138,7 +138,7 @@ if [ -z "$MISS" ]; then echo "入包断言 PASS"; else echo "入包断言 FAIL�
 
 ## AC-6 取证变体包（不是交付包，禁止进内测通道）
 
-- 文件：`ispeech-internal-v1.6-ac6-probe404-20261125.apk`（取件走 `refs/archive/voca-186/v1.6-ac6-probe404-20261125`，blob `$(git hash-object 该文件)`，非 issue 附件）
+- 文件：`ispeech-internal-v1.6-ac6-probe404-20261125.apk`（取件走 `refs/archive/voca-186/v1.6-ac6-probe404-20261125`，blob `4ee85ee8fc72629523a2c9f8bd977700c9121201`，非 issue 附件）
   sha256 `b347a3939d9263e78685b00c4155e1b53dc432271ca45e468fc892b777dedb45`（139,299,145 字节）
 - 与最终包**同一出包 commit / 同 versionCode 6 / 同 debug 证书 / 同 ABI**，仅构建时命令行覆盖
   `-PasrModelUrl=https://delivery-service-smzk.oss-cn-guangzhou.aliyuncs.com/models/asr/v1.6-ac6-404-probe-does-not-exist.tar.bz2`
