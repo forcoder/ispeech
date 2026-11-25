@@ -150,6 +150,15 @@ source == SINGLE_CHAR ⟺ 候选来源 kind ∈ {WUBI} 且 insertText.length == 
 | 5 | `IspeechImeService.kt:752` `toggleMode()` / `:399` `onStartInput()` | `tracker.reset()` | 换态 / 换输入框 |
 | 6 | 新增 `onUpdateSelection()` | `tracker.onInterrupt()` | AC-3.4「光标移动」，见下 |
 
+> **VOCA-650 教训（接线表未要求、实现时顺手改出来的回归）**：VOCA-127 在接线点 #1 把
+> `commit(candidate.insertText)` 改成了 `commit(candidate.insertText, allowAssociation = false, source = ...)`。
+> 本表 #1 只要求「多传一个 `source`」，`allowAssociation` 不在接线范围内；而 `startAssociation()`
+> 全仓只有 `commit()` 内一个调用点（`if (allowAssociation) startAssociation(out)`），
+> 所以这一改把点选候选 / 数字键 1-9 选候选两条路径的联想整链关掉了（空格 / 回车走 `commitTop` 不受影响）。
+> 现由 `CandidateCommitPolicy.allowAssociation(wasAssociation)` 显式表达两条分支的语义
+> （非联想分支接续、联想分支不接续），并由 `check_crosscut.py` 第 13 项与
+> `CandidateCommitPolicyTest` 双向钉住。改这条调用链时，先确认本表是否要求改 `allowAssociation`。
+
 **`source` 的取值规则**（实现时按此表填，不要就近判断）：
 
 | 调用点 | 传什么 |

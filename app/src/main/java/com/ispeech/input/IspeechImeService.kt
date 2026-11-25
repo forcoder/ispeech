@@ -1309,11 +1309,15 @@ class IspeechImeService : InputMethodService() {
     private fun startAssociation(text: String) {
         val related = lookupRelated(text)
         if (!related) {
+            // 结构化日志：点选后联想为什么没出，现场可判定（VOCA-650 的回归点就在这条路径上）。
+            // 只记长度与开关，不记上屏内容（那是用户输入，不落日志）
+            Log.d(TAG, "associate miss chars=${text.length} enabled=${settings.association}")
             renderCandidateView()
             return
         }
         associationActive = true
         codeOverride = "联想"
+        Log.d(TAG, "associate hit chars=${text.length} count=${candidates.size}")
         renderCandidateView()
     }
 
@@ -1340,7 +1344,13 @@ class IspeechImeService : InputMethodService() {
         if (!wasAssociation) {
             learn(candidate)
             val source = sourceOf(candidate)
-            commit(candidate.insertText, allowAssociation = false, source = source)
+            // 点选候选后必须接着联想（VOCA-650）：VOCA-127 曾在此顺手写成
+            // allowAssociation = false，把点选 / 数字键选候选两条路径的联想整链关掉
+            commit(
+                candidate.insertText,
+                allowAssociation = CandidateCommitPolicy.allowAssociation(wasAssociation),
+                source = source,
+            )
             return
         }
         // 联想词按已上屏的末字查出来，开头就是这个字，整词上屏会把它重复一遍：

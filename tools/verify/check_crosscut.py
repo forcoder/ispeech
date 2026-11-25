@@ -2027,6 +2027,33 @@ def check_association_commit() -> None:
     )
     pick = re.search(r"private fun pickCandidate\(.*?\n    \}", service, re.S)
     body = pick.group(0) if pick else ""
+    # VOCA-650 回归：非联想分支曾被写成 allowAssociation = false，点选 / 数字键选候选上屏后
+    # startAssociation() 再不被调用，整条联想链断掉。按「联想分支之前的代码」判定；
+    # 注释里可以提到这次回归的写法，所以判定前先剥掉行注释。
+    head = body.split("getTextBeforeCursor", 1)[0]
+    head_code = re.sub(r"//[^\n]*", "", head)
+    check(
+        "CandidateCommitPolicy.allowAssociation" in head_code,
+        "pickCandidate 非联想分支按 CandidateCommitPolicy 决定是否接续联想（点选后联想存活）",
+        "pickCandidate 非联想分支未接 CandidateCommitPolicy，点选候选后联想可能再次被关掉",
+    )
+    check(
+        "allowAssociation = false" not in head_code,
+        "pickCandidate 非联想分支没有硬编码 allowAssociation = false（VOCA-650 回归点）",
+        "pickCandidate 非联想分支把联想关死了（VOCA-650 复发的写法），点选候选后不再出联想",
+    )
+    policy = read(JAVA / "input" / "CandidateCommitPolicy.kt")
+    check(
+        "fun allowAssociation" in policy and "!associationActive" in policy,
+        "CandidateCommitPolicy：非联想分支接续联想、联想分支不再接续",
+        "CandidateCommitPolicy 规则与预期不符（点选后联想存活 / 联想词不再接续）",
+    )
+    check(
+        (ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" /
+         "CandidateCommitPolicyTest.kt").exists(),
+        "点选后联想存活的回归单测存在（CandidateCommitPolicyTest）",
+        "缺少 CandidateCommitPolicyTest，VOCA-650 回归点没有单测钉住",
+    )
     check(
         "AssociationCommit.textToCommit" in body,
         "pickCandidate 的联想分支走 AssociationCommit",
