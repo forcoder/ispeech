@@ -29,12 +29,12 @@
 
 ## 取包方式（产物必须可被他人取到）
 
-**最终包字节既不在 git 树内，也不在 issue 附件**（11-19 三次实测：单包 413、双包 413、278 MB 上传超时未建评论；>139 MB 超平台单请求上限。PM 11-19 05:23 裁定「不裁剪、不分卷」，按交付计划六·四第 5 条走 adb 直传退路）。本批次（11-24）已实测**装机通道成立**：`adb install` 后设备侧 `base.apk` sha256 = 构建侧 `b44c5ec1…8bcce`，逐字节一致（**在模拟器 `emulator-5554` 上取的读数；AC-DIST 要求真机，此项仍未达成**）。字节另存两处：出包机 `~/ispeech-artifacts/`（仓库外，符合 cfg_gate 放行条件 1）+ 本机 git 对象库 ref（未推远端）：
+**最终包字节既不在 git 树内，也不在 issue 附件**（11-19 三次实测：单包 413、双包 413、278 MB 上传超时未建评论；>139 MB 超平台单请求上限。PM 11-19 05:23 裁定「不裁剪、不分卷」，按交付计划六·四第 5 条走 adb 直传退路）。本批次（11-25）已实测**装机通道成立**：`adb install` 后设备侧 `base.apk` sha256 = 构建侧 `b44c5ec1…8bcce`，逐字节一致（**在模拟器 `emulator-5554` 上取的读数；AC-DIST 要求真机，此项仍未达成**）。字节另存两处：出包机 `~/ispeech-artifacts/`（仓库外，符合 cfg_gate 放行条件 1）+ 本机 git 对象库 ref（未推远端）：
 
 | 包 | ref | git blob（40 位 object id） | sha256 | 字节 |
 | --- | --- | --- | --- | --- |
-| `ispeech-internal-v1.6-final-20261124.apk` | `refs/archive/voca-186/v1.6-final-20261124` | `4ec138d4ea100b6f21f4a260c77fe363a0016e54` | `88062bdba552fd1c…b32319750d820` | 139,295,049 |
-| `ispeech-internal-v1.6-ac6-probe404-20261124.apk` | `refs/archive/voca-186/v1.6-ac6-probe404-20261124` | `78c88c55ad5b64d1b234cdb9462bd7f27847f8f4` | `cee7e1ef7770e194…c6445ad374f1` | 139,295,049 |
+| ~~`ispeech-internal-v1.6-final-20261124.apk`~~（作废：基线 `f1d9124` 不含 #36/#42） | `refs/archive/voca-186/v1.6-final-20261124` | `4ec138d4ea100b6f21f4a260c77fe363a0016e54` | `88062bdba552fd1c…b32319750d820` | 139,295,049 |
+| ~~`ispeech-internal-v1.6-ac6-probe404-20261124.apk`~~（作废） | `refs/archive/voca-186/v1.6-ac6-probe404-20261124` | `78c88c55ad5b64d1b234cdb9462bd7f27847f8f4` | `cee7e1ef7770e194…c6445ad374f1` | 139,295,049 |
 | ~~`ispeech-internal-v1.6-final-20261119.apk`~~（作废，仅回滚用） | `refs/archive/voca-186/v1.6-final-20261119` | `564911634317238d23493bee95dc2a548e2eab9c` | `736236292856ada2…d1b430a6` | 139,258,185 |
 | ~~`ispeech-internal-v1.6-ac6-probe404.apk`~~（作废） | `refs/archive/voca-186/v1.6-ac6-probe404` | `a182868bd48c7f279c3cfb0349da7ee345c1d920` | `3e46f92630ead588…2bffef5a` | 139,258,185 |
 
