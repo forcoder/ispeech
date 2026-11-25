@@ -3,7 +3,7 @@
 > 维护人：重构清理大师（Multica agent `a0946453-a67c-483e-8d79-45b56b0dd09d`）
 > 用途：给代码库熵减提供可控抓手。每次巡检和每次清理都必须更新本表。
 > 更新节奏：随巡检 / 清理 MR 同步更新；不另建第二份台账。
-> 本版基准：`origin/main` @ `76dd9f5`（2026-11-24，merge `#37` 之后）。上一版基准为 `0168e59`（2026-11-19）。
+> 本版基准：`origin/main` @ `d9690f9`（2026-11-24，merge `#36` 之后）。上一版基准为 `76dd9f5`（merge `#37`），再上一版为 `0168e59`（2026-11-19）。
 
 ## 状态与证据等级约定
 
@@ -35,13 +35,13 @@
 | `input/VoskSpeechEngine`（223 行）+ `data/VoskModelStore`（171 行） | 后端 | `IspeechImeService` 按 `AsrEngine.VOSK` 分支接线 | vosk.android / AsrSettings / `AsrModelDownload` | 2026-11-14 07214d6 / 2026-11-24 bb1bf2b | 不可得 | active | VOCA-voice-offline-1114 / VOCA-474 |
 | `agent/AgentDispatcher`（101 行） | 后端 | 生产零引用；`AgentDispatcherTest` 24 条断言中 **16 条失败**（实测），`selectAgent` 的 `claude-code-guide`/`statusline-setup` 两分支从未实现，且关键词优先级让 `plan`/`explore`/`general-purpose` 三类也大面积误判 → **未完成原型** | `.agents/agents.yaml`（未接入） | 2026-11-09 904a98d | 不可得 | **疑似腐化（未完成原型，不删）** | 测试基建单独立 issue |
 | `engine/`（Pinyin/Wubi/CellDict/QuickPhrase/QuickTrigger/Lookup/UserDict，18 文件） | 后端 | 由 `CompositeEngine` 聚合，`IspeechImeService` 调用 | data 词典 Store | 2026-11-24 7eb60a4 | 不可得 | active | VOCA-127 / VOCA-203 / VOCA-496 |
-| `data/`（词典/同步/统计/剪贴板/AI/认证/ASR 安装，32 文件＝顶层 kt 25 + `remote/` 5 + 内置词表 2） | 后端 | `AppContainer` 统一装配 | remote API / datastore | 2026-11-24 bb1bf2b | 不可得 | active | VOCA-127 / VOCA-474 |
+| `data/`（词典/同步/统计/剪贴板/AI/认证/ASR 安装/远端规则，33 文件＝顶层 kt 26 + `remote/` 5 + 内置词表 2） | 后端 | `AppContainer` 统一装配 | remote API / datastore | 2026-11-24 d9690f9 | 不可得 | active | VOCA-127 / VOCA-474 / VOCA-293 |
 | `data/remote/`（Auth/Chat/Ai/Sync ApiService + Dtos） | 后端 | `CsBabyClient` / `DirectLlmClient` | retrofit / gson | 2026-11-09 904a98d | 不可得 | active | — |
-| `settings/`（Compose 设置页 + ViewModel） | 前端 | `IspeechNavGraph` 路由表 | SettingsStore / data | 2026-11-24 9564cf7 | 不可得 | active | VOCA-207 / VOCA-127 |
+| `settings/`（Compose 设置页 + ViewModel） | 前端 | `IspeechNavGraph` 路由表 | SettingsStore / data | 2026-11-24 d9690f9 | 不可得 | active | VOCA-207 / VOCA-127 / VOCA-293 |
 | `settings/store/SettingsStore`（283 行） | 前端/后端契约 | 各 ViewModel + `IspeechImeService`（10 个 kt 引用） | datastore | 2026-11-19 6ef10c2 | 不可得 | active | — |
 | `ui/theme/`（Color/Theme/Type） | UI | `IspeechTheme` | material3 | 2026-10-17 72bb547 | 不可得 | active | — |
 | `di/AppContainer` | 后端 | `IspeechApp` 全局装配 | 全 data 层 | 2026-11-14 3edfc83 | 不可得 | active | VOCA-voice-offline-1114 |
-| `tools/`（dev/deploy/gen/import/pinyin/quick/verify 脚本） | SRE/测试 | 独立脚本，不进入 APK | — | 2026-11-24 9564cf7 | 不可得 | active | VOCA-400 / VOCA-127 |
+| `tools/`（dev/deploy/gen/import/pinyin/quick/verify 脚本） | SRE/测试 | 独立脚本，不进入 APK | — | 2026-11-24 d9690f9 | 不可得 | active | VOCA-400 / VOCA-127 / VOCA-293 |
 
 ## 重点条目
 
@@ -77,12 +77,13 @@
   1. `app/build.gradle.kts` 只声明 junit / `androidx.test.ext:junit` / kotlin-test，缺 `androidx.test:runner`；且该用例用 `@RunWith(AndroidJUnit4)` 却放在 `test/`（JVM 单测）目录——实测报 `Delegate runner ... AndroidJUnit4ClassRunner for AndroidJUnit4 could not be found`。补 `testImplementation("androidx.test:runner:1.5.2")` 后预期仍落到 `android.os.StrictMode not mocked`（androidx.test 平台在 JVM 里初始化 `PlatformTestStorageRegistry`）。此项为**预测**，需改 build 文件才能验，超出只读边界，本轮未跑。
   2. **断言与实现脱轨**：24 条断言中 16 条失败（实测），`claude-code-guide` / `statusline-setup` 两分支从未实现，且 IME 组 `contains("view")` 命中 `review` 等子串、`分析`/`performance` 等判据过宽，导致 `plan`/`explore`/`general-purpose` 三类也大面积误判 —— 即便补全 runner 仍会断言失败。
   治理归「测试基建 + 未完成原型」单独立 issue（需架构/测试决策：迁 `androidTest/`、接 Robolectric、或补实现），不在本熵减单内处理。
-  **`origin/main` @ `76dd9f5` 基线红测 = `205 tests / 1 failed`（2026-11-24 v8 实跑，testsuite XML 原文见下）**：
-  - 运行方式：`git archive 76dd9f5` 导出干净树 → `--rerun-tasks` 强制全量（不复用任何缓存结果）。本机 `~/.gradle` 不可写，故 `GRADLE_USER_HOME` 指向其可写副本。
-  - 控制台原文：`205 tests completed, 1 failed`；唯一失败项即本条的 `AgentDispatcherTest > initializationError`。
-  - XML 汇总（`app/build/test-results/testDebugUnitTest/*.xml`，25 个 testsuite 求和）：**`tests=205 failures=1 errors=0 skipped=0`**。
-  - 失败出处原文：`<testsuite name="com.ispeech.agent.AgentDispatcherTest" tests="1" skipped="0" failures="1" errors="0">` → `<testcase name="initializationError">` → `<failure message="java.lang.RuntimeException: Delegate runner androidx..."`。
-  - 与 `@Test` 数的差可对账：该树 **210 个 `@Test` / 25 个测试类**；`AgentDispatcherTest` 的 6 个 `@Test` 因 runner 缺失只产出 1 个 `initializationError`，故 210 − 6 + 1 = **205**。
+  **`origin/main` @ `d9690f9` 基线红测 = `209 tests / 1 failed`（2026-11-25 v9 实跑，testsuite XML 原文见下）**：
+  - 运行方式：`git archive d9690f9` 导出干净树 → `--rerun-tasks` 强制全量（不复用任何缓存结果）。本机 `~/.gradle` 不可写，故 `GRADLE_USER_HOME` 指向其可写副本。
+  - 控制台原文：`209 tests completed, 1 failed`；唯一失败项即本条的 `AgentDispatcherTest > initializationError`。
+  - XML 汇总（`app/build/test-results/testDebugUnitTest/*.xml`，26 个 testsuite 求和）：**`tests=209 failures=1 errors=0 skipped=0`**。
+  - 失败出处原文：`<testsuite name="com.ispeech.agent.AgentDispatcherTest" tests="1" skipped="0" failures="1" errors="0">` → `<testcase name="initializationError">` → `<failure message="java.lang.RuntimeException: Delegate runner androidx.test.internal.runner.junit4.AndroidJUnit4ClassRunner for AndroidJUnit4 could not be found.">`。
+  - 与 `@Test` 数的差可对账：该树 **214 个 `@Test` / 26 个测试类**；`AgentDispatcherTest` 的 6 个 `@Test` 因 runner 缺失只产出 1 个 `initializationError`，故 214 − 6 + 1 = **209**。
+  - 历史锚点（保留不改，供回溯）：`76dd9f5` = **`205 tests / 1 failed`**（210 − 6 + 1，25 个套件）；`0168e59` = `126 tests / 1 failed`（131 个 `@Test`）。三次实测的差值全部来自新增测试类（`76dd9f5`→`d9690f9` 增 `RemoteRulesChangesTest` 4 个 `@Test`），非回归。
   ```
   # 复跑命令（只设 shell 的 TMPDIR 不够：createTempFile 被拒会批量假失败并虚增用例数，
   # 必须把 JVM 的 java.io.tmpdir 指到可写目录）
@@ -96,6 +97,11 @@
 
 ## 变更日志
 
+- 2026-11-25（VOCA-441 v9，PM 自裁收口：**基线再漂移一格，红测数由 205 → 209**，非回归）：
+  - **触发**：`76dd9f5` 之后 main 又进 `d9690f9`（VOCA-293 / PR #36），新增 `data/RemoteRulesChanges.kt`（60 行）与 `RemoteRulesChangesTest.kt`（89 行 / 4 个 `@Test`），并把 `tools/verify/check_crosscut.py`、`settings/quick/QuickPhrasesViewModel.kt` 一并改动。台账「已知缺陷」仍写死 `76dd9f5` 的 205，下轮会拿错基线判回归，故按同一口径重锚。
+  - **实跑（本轮，2026-11-25，`d9690f9` 干净树）**：`--rerun-tasks` 全量 → `209 tests completed, 1 failed`；26 个 testsuite XML 求和 `tests=209 failures=1 errors=0 skipped=0`；唯一失败仍是 `AgentDispatcherTest > initializationError`。对账：210→214 个 `@Test`（+4 来自 `RemoteRulesChangesTest`），214 − 6 + 1 = **209**，与 `76dd9f5` 的 205 同构。
+  - **事实单元格更新**：`data/` 由「32 文件＝顶层 kt 25」→ **「33 文件＝顶层 kt 26 + `remote/` 5 + 内置词表 2」**；`data/`、`settings/`、`tools/` 的「最后被修改」由 `bb1bf2b`/`9564cf7` → **`d9690f9`**。其余单元格（行数、`@Test` 以外的项）本轮逐项复算，**0 处新增漂移**。
+  - 历史锚点全部保留：`76dd9f5`=205/1、`0168e59`=126/1，不改不删，便于回溯哪个数字钉在哪个 commit 上。
 - 2026-11-24（VOCA-441 v8，回应质检第七轮 FAIL 唯一 1 条打回项：`205 tests / 1 failed` 证据不成立）：
   - **该项已实跑补齐，数字维持 `205 tests / 1 failed`，无需改数**。质检的判断依据是「13:20 帖称实测、13:37 帖称未复跑」两条自述互斥——那是自述纪律问题，不是数字错误。本轮以一次真跑消解：导出 `76dd9f5` 干净树 + `--rerun-tasks` 全量，得 `205 tests completed, 1 failed`，25 个 testsuite XML 求和 `tests=205 failures=1 errors=0 skipped=0`，失败项与台账所述完全一致。
   - **口径改写**：原句「实测 `205 tests / 1 failed`」无任何可核查锚点，等同于让下轮凭信任采信。现改为逐项可复算：运行方式 + 控制台原文 + XML 汇总 + 失败 testsuite 原文 + `@Test` 数对账（210 − 6 + 1 = 205）+ 复跑命令块（含 `GRADLE_USER_HOME`/`java.io.tmpdir` 两个本机必需前置）。
