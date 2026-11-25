@@ -164,6 +164,21 @@ sha256 Fingerprint=85:7C:E6:4E:EB:E7:FE:D7:C5:15:96:ED:05:70:30:F7:0D:38:10:2E:3
 
 为什么未跟踪那一态必须 FAIL：`--regen` 会把这种包照记进清单，而它推不进 GitHub（GH001）—— 清单一旦随包提交，就是把「仓库里永远不存在的字节」写成可信答案，与本 issue 要消灭的故障同类。仓库里 release/debug 包实测 15–23 MB，`dist/` 下出现 >100 MB 者按定义不是本仓库产物，而是被 runtime baseline 从工作目录扫进来的外来残留。
 
+**最终包（VOCA-186 的 v1.6 内测包，139 MB）不走清单 —— 本条是 §4 的正式例外，不是遗漏**
+
+VOCA-186 的最终包按上表属「未跟踪 + >100 MB」，登记它会让 `check_dist_manifest.py` 判 FAIL（并让 ⑤ `die`）。因此该包的取件凭**发布分支上的 ref / 对象 id + sha256**，清单里没有它的行，且**不应该有**：
+
+| 项 | 值（2026-11-25 批次） |
+|---|---|
+| 包 | `ispeech-internal-v1.6-final-20261125.apk` |
+| sha256 | `b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce` |
+| 字节 | 139,299,145 |
+| 取件凭 | 出包机本机 ref `refs/archive/voca-186/v1.6-final-20261125` → blob `8557c633f2f2d49e9f1a0b28bd73a0b6196eb5e5`（`git cat-file blob <ref>` 取回） |
+| 登记位置 | `dist/README.md`「取包方式」表（人工可读，随发布分支版本化） |
+| 清单状态 | **0 行**（`git show <ref>:dist/SHA256SUMS \| grep -c b44c5ec1` = 0，预期值） |
+
+**替代路径与约束**：`refs/archive` 远端实测 0 条（`git ls-remote origin \| grep -c refs/archive`），即该包**只有出包机单副本、离机不可核**；补离机副本要么走 OSS 私有读对象（花钱 + 对外发布，go/no-go 在 VOCA-419），要么走 `adb install` 现场双向核对（设备侧 `base.apk` sha256 == 上表值）。**不要**为了让「清单里有这一行」把 139 MB 包 `git add` 进 `dist/` —— 这正是 GH001 拒推的那条路。
+
 > **本条的来历（Z1，2026-11-17 二次修订）**：上一版这里写「已跟踪仍只 WARN」，§6 又写「对 >100 MB 的包给 WARN 不给 FAIL」，两处互相矛盾。核对时发现**机器做的和三处文案都不一样**：已跟踪超限那行调的是 `check(True, …)`，打的是 `PASS:` 且不带「超限」二字 —— 文档要表达的 WARN 在实现里根本没有出口，而只比退出码的 `--self-test`（`rc=0` 对 `rc=0`）看不见这个差别。现在判定显式走三态，超限场景同一次构造两个分支、**断言输出级别**（见下）。
 
 **判定逻辑自身可验**（沿 `check_model_host.py --self-test` 先例）：

@@ -1,0 +1,109 @@
+# VOCA-186 · 11-25 重打实跑原始输出
+
+## $ uname / 时间
+Wed Nov 25 01:07:01 UTC 2026
+Darwin arm64
+
+## $ git merge-base --is-ancestor 校验
+is-ancestor d9690f9 84d2a2b = YES
+100644 blob 6362dd557805b9df4cbbfb3d606cf62ae3e5596b	app/src/main/java/com/ispeech/data/RemoteRulesChanges.kt
+
+## $ ./gradlew assembleRelease（75 词条，无 -PasrModelUrl）
+BUILD SUCCESSFUL in 27s / 48 actionable tasks: 16 executed, 32 up-to-date
+
+## $ apksigner sign（本机 debug keystore 重签）
+b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce  /tmp/ispeech-internal-v1.6-final-20261125.apk
+ 139299145
+
+## $ apksigner verify --print-certs
+Signer #1 certificate DN: C=US, O=Android, CN=Android Debug
+Signer #1 certificate SHA-256 digest: 857ce64eebe7fed7c51596ed057030f70d38102e300116cd5aca8b4f9f66a0ed
+
+## $ unzip -l | grep -c libsherpa-onnx-jni.so
+4
+
+## $ aapt2 dump badging
+versionCode='6'
+versionName='1.6'
+native-code: 'arm64-v8a' 'armeabi' 'armeabi-v7a' 'mips' 'mips64' 'x86' 'x86_64'
+
+## $ assert_apk_fix.sh（final 模式）
+== v1.6 出包门禁 ==  模式=final  包=/tmp/ispeech-internal-v1.6-final-20261125.apk
+  出包 commit: 84d2a2be3   窗口 HEAD: d9690f9c7
+· 门一 源码基线（C9 + C1 C2 C3 C4 C5代码半，共 6 项）
+  [PASS] C9 窗口 HEAD 是出包 commit 的祖先（①…④ 的 squash 提交与 main 原有提交都在包里）
+  [PASS] C1 ① VOCA-190：出包树里 AsrEngine.FUNASR 命中 14 处（默认引擎有离线链路）
+  [PASS] C2 ② VOCA-170/AC-9：两个声明最大行(:35) 早于 init{ }(:38)，且护栏单测在树
+  [PASS] C3 ③ VOCA-121/AC-10：app/src/main/java/com/ispeech/engine/AssociationCommit.kt 在出包树里
+         C3 附注：e8dc6f1 不在本出包 commit 历史里 → 只说明本包字节不含那个提交（11-15 试包就是这样），squash 后的最终包同样显示这一行；不参与判定
+  [PASS] C4 ④ VOCA-166：app/src/main/java/com/ispeech/input/MicGrantAction.kt 在出包树里
+         C5 ④b VOCA-233：出包树里 ISPEECH_VERSION 命中 0 处（0 = PR #14 的代码进包）→ 与 dex/README 一起走 G6 异或
+· 门二 包身份
+  [PASS] versionCode=6 / versionName=1.6
+  [PASS] native-code ABI 7 个：arm64-v8a armeabi armeabi-v7a mips mips64 x86 x86_64
+· 门二 dex 字节断言
+         sha256 b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce / 139299145 字节 / 3 个 dex
+  [PASS] Lcom/ispeech/engine/AssociationCommit; → 23
+  [PASS] textToCommit → 6
+  [PASS] suffixPrefixOverlap → 3
+  [PASS] ASSOCIATION_ANCHOR_CHARS → 1
+  [PASS] FUNASR → 12
+  [PASS] delivery-service-smzk → 2（默认模型源 = OSS）
+  [PASS] cvm.agentai0.com → 0（旧源没回潮）
+         G6 字节半：dex 里「版本 v1.5」0 处（const 内联产物；0 = 硬编码已从字节里消失）
+· 交付文档（dist/README.md @ b6df1b6）
+         判据对象已确认：标题「# 智语 iSpeech 1.6 — 内测安装包（Android）」/ 全文提 1.6 共 36 处
+  [PASS] 配方句：说明里已无「git checkout a9d1dae」（0 命中）
+  [PASS] 已证伪断言：说明里无「装机后可凭版本号区分」
+         G6 文档半：口径句没写（0 命中，匹配式 应用内[^。]*v1\.5|versionName=1\.6[^。]*为准|VOCA-233（PR #14））
+· G6（VOCA-233 应用内版本显示）闭合判定
+  [PASS] G6 闭合①：PR #14 生效（app 里 ISPEECH_VERSION 0 命中 + dex 无「版本 v1.5」）→ 应用内显示 = versionName=1.6，不要求 README 写口径句
+· 非门禁项（判了也不算，明确不进上面的 exit 码）
+         C6 真机四件套 = 11-20 装机专员出证、QA 判读；出包侧唯一义务是把最终包 sha256 写进 dist/SHA256SUMS 交付行（上面 info 已给 sha256）
+         C7 设备接入 / C8 AC-5 真人 10 句时段 = 人类侧场次安排，脚本既不能证真也不能证伪
+         PR #10 由 draft 转 ready = 项目经理动作（runbook §1 第 0 步），不是包检查
+
+门禁 PASS：可以登记 sha256 并交付内测。
+
+## $ assert_apk_fix.sh（probe404 模式）
+== v1.6 出包门禁 ==  模式=probe404  包=/tmp/ispeech-internal-v1.6-ac6-probe404-20261125.apk
+  出包 commit: 84d2a2be3   窗口 HEAD: d9690f9c7
+· 门一 源码基线（C9 + C1 C2 C3 C4 C5代码半，共 6 项）
+  [PASS] C9 窗口 HEAD 是出包 commit 的祖先（①…④ 的 squash 提交与 main 原有提交都在包里）
+  [PASS] C1 ① VOCA-190：出包树里 AsrEngine.FUNASR 命中 14 处（默认引擎有离线链路）
+  [PASS] C2 ② VOCA-170/AC-9：两个声明最大行(:35) 早于 init{ }(:38)，且护栏单测在树
+  [PASS] C3 ③ VOCA-121/AC-10：app/src/main/java/com/ispeech/engine/AssociationCommit.kt 在出包树里
+         C3 附注：e8dc6f1 不在本出包 commit 历史里 → 只说明本包字节不含那个提交（11-15 试包就是这样），squash 后的最终包同样显示这一行；不参与判定
+  [PASS] C4 ④ VOCA-166：app/src/main/java/com/ispeech/input/MicGrantAction.kt 在出包树里
+         C5 ④b VOCA-233：出包树里 ISPEECH_VERSION 命中 0 处（0 = PR #14 的代码进包）→ 与 dex/README 一起走 G6 异或
+· 门二 包身份
+  [PASS] versionCode=6 / versionName=1.6
+  [PASS] native-code ABI 7 个：arm64-v8a armeabi armeabi-v7a mips mips64 x86 x86_64
+· 门二 dex 字节断言
+         sha256 b347a3939d9263e78685b00c4155e1b53dc432271ca45e468fc892b777dedb45 / 139299145 字节 / 3 个 dex
+  [PASS] AC-6 变体：404 探针 URL 在 dex 里（2 处）
+  [PASS] AC-6 变体：正式默认源已被覆盖掉（默认 object key 0 命中；探针与正式源同域，host 子串不作判据）
+
+!! 这是 AC-6 下载失败取证包：模型永远下不下来。禁止进内测通道、禁止覆盖 dist/ispeech-internal-v1.6.apk、
+   禁止写进 dist/SHA256SUMS 的交付行；单独命名 + 单独登记 sha256。本脚本对它 exit 0 只代表「变体构建正确」。
+!! 交付文档门禁（配方句 / G6 文本半）在本模式不判：变体包按 runbook §1 第 8→9→11 步与交付包同一出包
+   commit 构建，那份 README 已在 final 模式那次跑里判过；只跑本模式 = 没跑交付门禁。
+
+## $ 仓库校验套件
+check_dist_manifest.py → SUMMARY: passed=7 failed=0 warned=0
+check_keyboard_ui.py   → SUMMARY: passed=19 failed=0 warned=0
+check_crosscut.py      → SUMMARY: passed=183 failed=0 warned=0
+check_static.py        → SUMMARY: passed=6 failed=0 warned=0
+check_version_display.py -s emulator-5554 → SUMMARY: passed=3 failed=0 warned=0
+
+## $ adb install / dumpsys / 设备侧 base.apk sha256
+Performing Incremental Install / Success
+versionCode=6 minSdk=26 targetSdk=34 / versionName=1.6
+b44c5ec17f5e9470834ace5e796d99a8e8c43b90f2e350d9cffd24244e18bcce  device base.apk
+
+## $ 配置面差异
+(空 = 零配置变化)
+
+## $ 远端发布分支
+84d2a2be348af629eb47d9633f33e90554aa295f	refs/heads/agent/pm/voca-186-build-20261125
+b6df1b6d19d35f27b4b1944cb45dfd981045c885	refs/heads/release/voca-186-v1.6

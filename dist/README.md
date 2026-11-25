@@ -29,7 +29,7 @@
 
 ## 取包方式（产物必须可被他人取到）
 
-**最终包字节既不在 git 树内，也不在 issue 附件**（11-19 三次实测：单包 413、双包 413、278 MB 上传超时未建评论；>139 MB 超平台单请求上限。PM 11-19 05:23 裁定「不裁剪、不分卷」，按交付计划六·四第 5 条走 adb 直传退路）。本批次（11-25）已实测**装机通道成立**：`adb install` 后设备侧 `base.apk` sha256 = 构建侧 `b44c5ec1…8bcce`，逐字节一致（**在模拟器 `emulator-5554` 上取的读数；AC-DIST 要求真机，此项仍未达成**）。字节另存两处：出包机 `~/ispeech-artifacts/`（仓库外，符合 cfg_gate 放行条件 1）+ 本机 git 对象库 ref（未推远端）：
+**最终包字节既不在 git 树内，也不在 issue 附件**（11-19 三次实测：单包 413、双包 413、278 MB 上传超时未建评论；>139 MB 超平台单请求上限。PM 11-19 05:23 裁定「不裁剪、不分卷」，按交付计划六·四第 5 条走 adb 直传退路）。本批次（11-25）已实测**装机通道成立**：`adb install` 后设备侧 `base.apk` sha256 = 构建侧 `b44c5ec1…8bcce`，逐字节一致（**在模拟器 `emulator-5554` 上取的读数；AC-DIST 要求真机，此项仍未达成**）。字节**只在出包机单副本、离机不可核**：下表两处落点（`~/ispeech-artifacts/` 与 `refs/archive/`）都在同一台出包机上，远端 `refs/archive` 实测 0 条 —— 不要读成「另存了两处所以离机也能取」：
 
 | 包 | ref | git blob（40 位 object id） | sha256 | 字节 |
 | --- | --- | --- | --- | --- |
@@ -49,9 +49,10 @@ cd dist && shasum -a 256 -c SHA256SUMS                   # 恢复出的包放进
 - **残余风险（外链 go/no-go 在 VOCA-419 待人类裁决）**：以上两条 ref 仍只存在于出包机本机对象库（`refs/archive` 远端 0 条，未推远端），`~/ispeech-artifacts/` 同在出包机上，仍无他人可独立拉取的离机外链；出包机重装或对象库被清理即彻底丢失。补副本的两条路已排除：本仓为**公开仓**，把 `refs/archive/voca-186/*` 推上远端等于对外发布内测包，且 139,258,185 B 超 GitHub 100,000,000 B 单文件硬限（11-19 该仓 pre-receive 已实测拒绝 139,171,786 B blob）；issue 附件通道 11-19 三次实测被拒（413 两次 + 278 MB 超时）。唯一剩余方案 = OSS 私有读对象 + 在 `SHA256SUMS` 同行登记 URL 与 sha256（花钱 + 对外发布，需人类明确 go）。
 - **为什么不在 git 树内**：窗口后 main 含 Vosk 引擎（`07214d6`），4 ABI `libvosk.so` 使整包从试包 98,416,118 B 增至
   139,258,185 B，超过 GitHub 100,000,000 B 单文件硬限（runbook §6 R1，触发点 = 第 8 步构建后 stat）。
-  按 R1 口径「发布分支只承载元数据」：`SHA256SUMS` 交付行登记期望值，字节按上方 ref / adb 通道取回后放入 `dist/` 再跑 `shasum -a 256 -c SHA256SUMS`。
-- 出包 commit = 发布分支 `release/voca-186-v1.6` 上的交付提交（其父 = merge 提交 `f1d9124`，
-  吸收 main `bb1bf2b2`）；构建基线 = `f1d9124` 树，`git merge-base --is-ancestor bb1bf2b2 f1d9124` = YES（C9）。
+  按 R1 口径「发布分支只承载元数据」：最终包**不入 `dist/SHA256SUMS`**（它是 >100 MB 未跟踪包，按 ADR-0003 §4 三态判 FAIL，登记了反而让 `check_dist_manifest.py` 判孤儿行）；期望值登记见上方取包表，字节按 ref 取回后自行 `shasum -a 256` 对读。口径出处：ADR-0003 §4「最终包不走清单」那一段。
+- 出包 commit = 发布分支 `release/voca-186-v1.6` 上的交付提交 `0be24ba`（其父 = merge 提交 `84d2a2b`，
+  吸收 main `d9690f9`）；构建基线 = `84d2a2b` 树，`git merge-base --is-ancestor d9690f9 84d2a2b` = YES（C9）。
+  门禁命令：`bash tools/deploy/assert_apk_fix.sh <包> 84d2a2b d9690f9` → exit 0（17 项 PASS / 0 FAIL）。
 - **试包**仍可从发布分支取（字节未变）：
 
 ```bash
