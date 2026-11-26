@@ -76,13 +76,15 @@ python3 tools/verify/voca628_ai_one_tap_adb.py --serial emulator-5554 --mock-llm
 
 脚本按截图色块定位输入法窗口（`uiautomator` 导不出 IME 窗口层级），逐条打印 `PASS` / `FAIL` / `SKIP`
 与判定依据（输入框文本 + `ai_adopt` 日志 + IME 窗口高度变化）。`--strict-device` 强制要求
-真机（AC-5a.3 要真机时序，模拟器证据只作补充）。模型模式不用真 Key、不出站访问外部厂商。
+真机（AC-5a.3 要真机时序，模拟器证据只作补充），判定只读设备属性（`ro.kernel.qemu` /
+`ro.hardware` 等），不看 `--serial` 字符串 —— 换名接入的模拟器同样会被拒（返回 2）。
+模型模式不用真 Key、不出站访问外部厂商。
 
 三档读法（`SKIP` 是为了不把「没取证」混进「通过」）：
 
 - `PASS`：拿到了本条 AC 要求的实测证据；
 - `SKIP`：前置不满足，本次没取证。两种情形——快捷短语命中按设计不计采纳率（5a.5 需 `--mock-llm`）；
-  非真机跑 5a.3（issue 明文要求真机，加 `--strict-device` 才算 PASS）。`SKIP` 不算失败，也不算通过；
+  非真机跑 5a.3（issue 明文要求真机；`--strict-device` 且设备属性判定为真机时才判 PASS）。`SKIP` 不算失败，也不算通过；
 - `FAIL`：拿到了证据且不符合 AC。`5a.0`（AI 面板开不出来）是硬门，失败即返回非 0、后续用例不执行。
 
 ## 学习与采纳率

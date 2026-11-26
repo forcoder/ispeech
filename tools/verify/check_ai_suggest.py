@@ -264,9 +264,26 @@ def check_one_tap_fill() -> None:
         "空态面板会被误报成 AI 键定位失败",
     )
     check(
-        "args.strict_device and \"emulator\" in args.serial" in adb,
-        "取证脚本：非真机跑 5a.3 不给 PASS（issue 明文要求真机）",
-        "--strict-device 未拦截模拟器上的 5a.3",
+        "def emulator_reasons(" in adb and "ro.kernel.qemu" in adb
+        and 'args.strict_device and "emulator" in args.serial' not in adb,
+        "取证脚本：--strict-device 按设备属性判真机，不看 serial 字符串",
+        "仍按 serial 子串判真机，换名接入的模拟器可冒充真机把 5a.3 打成 PASS",
+    )
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("voca628_adb", ADB_SCRIPT)
+    adb_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(adb_mod)
+    emu_props = {"ro.kernel.qemu": "1", "ro.boot.qemu": "1", "ro.hardware": "ranchu",
+                 "ro.build.characteristics": "emulator", "ro.product.device": "emu64a",
+                 "ro.product.model": "sdk_gphone64_arm64", "ro.product.manufacturer": "Google"}
+    real_props = {"ro.kernel.qemu": "", "ro.boot.qemu": "", "ro.hardware": "qcom",
+                  "ro.build.characteristics": "nosdcard", "ro.product.device": "raven",
+                  "ro.product.model": "Pixel 6 Pro", "ro.product.manufacturer": "Google"}
+    check(
+        bool(adb_mod.emulator_reasons(emu_props)) and not adb_mod.emulator_reasons(real_props),
+        "取证脚本：emulator_reasons 模拟器拒、真机放",
+        f"模拟器={adb_mod.emulator_reasons(emu_props)} "
+        f"真机={adb_mod.emulator_reasons(real_props)}",
     )
     check(
         "submitAiResults(" in service,

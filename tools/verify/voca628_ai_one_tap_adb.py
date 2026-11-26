@@ -21,6 +21,7 @@
 ----
     python3 tools/verify/voca628_ai_one_tap_adb.py --serial emulator-5554
     python3 tools/verify/voca628_ai_one_tap_adb.py --serial emulator-5554 --mock-llm
+    python3 tools/verify/voca628_ai_one_tap_adb.py --serial <真机序列号> --strict-device --mock-llm
 
 输出
 ----
@@ -29,7 +30,8 @@
 
 - `PASS`：拿到了本条 AC 要求的实测证据；
 - `SKIP`：前置不满足，本次没取证 —— 快捷短语模式下的 5a.5（按设计不计采纳率）、
-  非真机上的 5a.3（issue 明文要求真机，`--strict-device` 下才算 PASS）。
+  非真机上的 5a.3（issue 明文要求真机；`--strict-device` 且设备属性判定为真机时
+  才判 PASS / FAIL）。
   SKIP 不进失败数，也不冒充通过；
 - `FAIL`：拿到了证据但不符合 AC。`5a.0`（AI 面板开不出来）是硬门，失败即返回非 0、
   后续用例一律不执行 —— 否则整批读数都建在一个开不出来的面板上，没有意义。
@@ -39,7 +41,9 @@
 已知限制
 --------
 - 5a.3 的时序证据（生成后用户改输入框）在模拟器上也能跑出读数，但只记作补充证据、
-  判 `SKIP`；真机到位后加 `--strict-device` 才判 `PASS` / `FAIL`。
+  判 `SKIP`；`--strict-device` 只在设备属性（`ro.kernel.qemu` / `ro.hardware` 等）
+  判定为真机时才判 `PASS` / `FAIL`，不看 `--serial` 字符串 —— 否则换个
+  serial 名接进来的模拟器就能把 5a.3 打成假 PASS。
 - 输入法窗口不在 uiautomator 的层级里，键盘 / 面板坐标按截图色块定位，
   依赖 debug 包的配色（#F2F3F5 面板底 / #FFFFFF 行底 / #5B6CFF 主色）。
 - 结果行与行尾「…」每轮重开面板后重新自扫（[Driver.find_result_rows]），不复用别处
@@ -558,6 +562,43 @@ class Driver:
         self.results.append(Case(ac, True, detail, skipped=True))
 
 
+# 真机判定只认设备属性，不看 `--serial` 字符串：模拟器可以用任意名字接入
+# （`adb connect localhost:5555` 指向的仍是 emulator），按 serial 子串判会把
+# 模拟器放行成真机，5a.3 就被一个假 PASS 带过去了。
+EMULATOR_HINTS = ("goldfish", "ranchu", "cuttlefish", "emulator")
+DEVICE_PROP_KEYS = (
+    "ro.kernel.qemu",
+    "ro.boot.qemu",
+    "ro.hardware",
+    "ro.build.characteristics",
+    "ro.product.device",
+    "ro.product.model",
+    "ro.product.manufacturer",
+)
+
+
+def emulator_reasons(props: dict[str, str]) -> list[str]:
+    """从 `getprop` 读数里找模拟器特征；返回空列表才可能是真机。"""
+    reasons: list[str] = []
+    for key in ("ro.kernel.qemu", "ro.boot.qemu"):
+        if str(props.get(key, "")).strip() == "1":
+            reasons.append(f"{key}=1")
+    hay = " ".join(
+        str(props.get(k, ""))
+        for k in ("ro.hardware", "ro.build.characteristics",
+                  "ro.product.device", "ro.product.model")
+    ).lower()
+    for hint in EMULATOR_HINTS:
+        if hint in hay:
+            reasons.append(f"硬件特征含 {hint!r}")
+    return reasons
+
+
+def device_props(d: "Driver") -> dict[str, str]:
+    return {key: d.adb("shell", "getprop", key, timeout=20).strip()
+            for key in DEVICE_PROP_KEYS}
+
+
 def pref_blob(items: dict[str, str]) -> bytes:
     def varint(n: int) -> bytes:
         out = b""
@@ -891,7 +932,9 @@ def main() -> int:
                     help="写入输入框的 ASCII needle；短语模式默认 '1'（命中内置+自建多条），"
                          "mock 模式默认 'zzqa'（确保 0 命中、必走模型）")
     ap.add_argument("--workdir", default="/tmp/voca628-adb")
-    ap.add_argument("--strict-device", action="store_true", help="要求真机（非 emulator）")
+    ap.add_argument("--strict-device", action="store_true",
+                    help="要求真机：按 ro.kernel.qemu / ro.hardware 等设备属性判定，"
+                         "不看 --serial 字符串")
     ap.add_argument("--mock-llm", action="store_true",
                     help="本机起假模型端点并配到设备上，让 5a.5 跑模型分支（无需真 Key）")
     ap.add_argument("--mock-port", type=int, default=18080)
@@ -901,12 +944,22 @@ def main() -> int:
     if args.needle is None:
         args.needle = "zzqa" if args.mock_llm else "1"
 
-    if args.strict_device and "emulator" in args.serial:
-        print(f"--strict-device 要求真机，当前 {args.serial}")
-        return 2
-    import os
     os.makedirs(args.workdir, exist_ok=True)
     driver = Driver(args.serial, args.workdir)
+    if args.strict_device:
+        props = device_props(driver)
+        reasons = emulator_reasons(props)
+        if reasons:
+            print(f"--strict-device 要求真机；{args.serial} 判定为模拟器：{'，'.join(reasons)}"
+                  f"（ro.hardware={props.get('ro.hardware')} "
+                  f"model={props.get('ro.product.model')}）")
+            return 2
+        if not any(props.values()):
+            print(f"--strict-device 读不到 {args.serial} 的设备属性，无法确认真机，拒绝判定")
+            return 2
+        print(f"--strict-device 真机确认：{args.serial} "
+              f"model={props.get('ro.product.model')} "
+              f"manufacturer={props.get('ro.product.manufacturer')}")
     if args.mock_llm:
         # 设备侧地址随 --mock-host 变，seed_ai 里写死 10.0.2.2，这里覆盖一次
         driver.mock_host = args.mock_host
