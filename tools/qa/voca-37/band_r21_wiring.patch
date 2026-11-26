@@ -1,0 +1,63 @@
+--- a/tools/qa/voca-37/band.py
++++ b/tools/qa/voca-37/band.py
+@@ -224,15 +224,48 @@
+ # 档2 面板上「≥3 条」那一档单独打 tier_verdict，并强制 carry R21 未签字，绝不顶替 verdict。
+ TIER_SPLIT_DP = 371.0  # 0e4eeb0:570：逻辑宽度 ≥371dp = 档1（≥4），<371dp = 档2（≥3 + AC-12）
+ TIER_NEED = {1: 4, 2: 3}
++
++# 档2 的 PASS 有两个前置，两处都是**人类/取证状态**，不是代码常量：
++#   · R21 —— 档2 判据让步的签字（PM 风险登记：☐PM ☐洞察BA ☐UI）。agent 不代批，
++#     所以下面这行默认 False 就是「未签」的唯一真值源；签字动作 = 改这一行，不再改判定式。
++#   · AC12 —— 候选溢出可见性达标（规格 AC-12）。出数源是 ac12_overflow.py 的
++#     `verdict=FADE_PRESENT`；在该判据拿到之前这里只能是 False，拿单测/工装存在当达标就是冒充。
++# 两者的翻转都必须让 `tier_verdict` 真的变，否则「签了也得改代码」（04:58Z 实测
++# `flipped=no_effect`）—— 判定式由 `tier_verdict_of()` 单点承载，本函数之外不许再写字面量。
+ R21_SIGNED = False     # PM 风险登记 R21：☐PM ☐洞察BA ☐UI，agent 不代批
++AC12_MEASURED = False  # AC-12 溢出可见性已取证（ac12_overflow.py verdict=FADE_PRESENT）
+ 
+ 
+ def tier_of(screen_w, dpi):
+     """-> (档位 1/2, 逻辑宽 dp)。逻辑宽 = 屏宽 px ÷ (density/160)，与 ac10_budget.py 同式。"""
+     lw = screen_w * 160.0 / dpi
+     return (1 if lw >= TIER_SPLIT_DP else 2), round(lw, 1)
++
++
++def tier_verdict_of(tier, full_count, t_need, r21_signed=None, ac12_measured=None):
++    """档位口径的 verdict。**判定式只有这一份**，勿在调用处再拼字面量。
++
++    · 档1 不受签字/AC-12 影响（规格让步只对 <371dp 的窄面板生效），仍是 ≥4 的硬门限；
++    · 档2 不到 `t_need` 就是 FAIL，签字不能把不足的条数变成够；
++    · 档2 达标后还差两个前置，缺哪个就把哪个写进 `NOT_SIGNED(...)`，
++      缺项顺序固定为 AC12 在前、R21 在后 —— 与 PR #25 已入库证据里的
++      `NOT_SIGNED(AC12_unmeasured+R21_open)` 逐字一致，报告引用不必改写；
++    · 两个前置都满足才落到 PASS。
+ 
++    参数留 None = 取模块级真值，测试用显式值逐格覆盖（不改全局状态）。
++    """
++    if full_count < t_need:
++        return "FAIL"
++    if tier != 2:
++        return "PASS"
++    r21 = R21_SIGNED if r21_signed is None else r21_signed
++    ac12 = AC12_MEASURED if ac12_measured is None else ac12_measured
++    if r21 and ac12:
++        return "PASS"
++    missing = ([] if ac12 else ["AC12_unmeasured"]) + ([] if r21 else ["R21_open"])
++    return "NOT_SIGNED(%s)" % "+".join(missing)
+ 
++
+ def ac10_rows(a, den, need=NEED_FULL):
+     """AC-10a 的 verdict + AC-10b 的逐项记录，两个口径同行出（裁决 §9.2-3 / 风险 3(a)）。
+ 
+@@ -258,10 +291,7 @@
+     scr_w = a.get("screen_w") or W
+     tier, lw = tier_of(scr_w, a.get("dpi") or den * 160.0)
+     t_need = TIER_NEED[tier]
+-    t_verdict = "PASS" if a["full_count"] >= t_need else "FAIL"
+-    if tier == 2 and t_verdict == "PASS":
+-        # 档2 的 PASS 还需要 AC-12 溢出可见性达标（本轮不测），且 R21 未签字
+-        t_verdict = "NOT_SIGNED(AC12_unmeasured+R21_open)"
++    t_verdict = tier_verdict_of(tier, a["full_count"], t_need)
+     ac10 = dict(full_count=a["full_count"], verdict=spec_v, need=need,
+                 tier=tier, tier_dp=TIER_SPLIT_DP, logic_w_dp=lw, tier_need=t_need,
+                 tier_verdict=t_verdict, r21_signed=R21_SIGNED,

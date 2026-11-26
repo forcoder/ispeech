@@ -9,6 +9,8 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.view.View.AccessibilityDelegate
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
@@ -26,6 +28,8 @@ import com.ispeech.engine.LookupCandidate
  *   把横向空间全部留给候选词（设置入口在键盘工具栏的齿轮键，见 SoftKeyboardView）
  * - 点击候选回调 [onCandidatePicked]，由服务 pickCandidate 上屏
  * - 长按候选回调 [onCandidateLongPressed]，由服务 rememberCandidate「记住这个词」（自造词）
+ * - 候选溢出时右沿出现 12 dp 渐变遮罩 + 读屏可 `ACTION_SCROLL_FORWARD`（规格 AC-12）：
+ *   线索叠在滚动区上、不参与横向布局，所以不占候选的横向预算
  *
  * 静态骨架在 res/layout/candidate_view.xml 中声明，候选项按查询结果动态创建。
  */
@@ -57,6 +61,9 @@ class CandidateView @JvmOverloads constructor(
     private lateinit var itemContainer: LinearLayout
     private lateinit var micAction: TextView
 
+    /** AC-12 溢出线索：叠在候选区右沿的 12 dp 渐变遮罩（不参与横向布局，不占横向预算） */
+    private lateinit var overflowCue: View
+
     /** 主题色 ispeech_primary */
     private val primaryColor: Int = resolvePrimaryColor()
 
@@ -66,6 +73,17 @@ class CandidateView @JvmOverloads constructor(
         scrollView = findViewById(R.id.candidate_scroll)
         itemContainer = findViewById(R.id.candidate_items)
         micAction = findViewById(R.id.candidate_mic_action)
+        overflowCue = findViewById(R.id.candidate_overflow_cue)
+
+        // AC-12 溢出线索：右沿渐变遮罩。叠在滚动区的右沿、宽 12 dp 但不参与横向布局，
+        // 所以候选的横向预算一分没少（规格「线索不占横向预算」）。
+        // 宽度从令牌取（XML 里的 12dp 只是布局预览值），避免两处各写一个数
+        overflowCue.layoutParams = overflowCue.layoutParams.also { it.width = dp(CandidateOverflowCue.FADE_WIDTH_DP) }
+        overflowCue.background = overflowFade()
+        overflowCue.visibility = View.GONE
+        // 滚动位置变化会改变「后面还有没有」，每次滚完都重判一次
+        scrollView.setOnScrollChangeListener { _, _, _, _, _ -> refreshOverflowCue() }
+        installScrollAccessibility()
 
         // 组合码用主题色高亮，底色是同色低透明度
         codeLabel.setTextColor(primaryColor)
@@ -116,6 +134,87 @@ class CandidateView @JvmOverloads constructor(
         }
 
         renderMicAction(actionLabel, actionEnabled)
+        // 候选换了一批，溢出状态跟着变；等这一帧布局完成再判（canScrollHorizontally 依赖实测宽度）
+        scrollView.post { refreshOverflowCue() }
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        // 面板宽度、字号、候选数任意一项变化都会改变「还能不能往右滚」，布局后重判。
+        // 但改 visibility 会 requestLayout：布局途中直接改会触发
+        // 「requestLayout() improperly called during layout」并多跑一次布局，
+        // 所以推到下一帧再判（这一帧的实测宽度已经可用，不需要再等）。
+        post { refreshOverflowCue() }
+    }
+
+    /**
+     * AC-12：按「视口外是否还有候选」决定右沿线索的显隐。
+     *
+     * 只在有溢出时出现，无溢出必须消失（不许常驻一个假的「更多」）；滚到最右端后
+     * 「后面还有」不再成立，线索同步消失。读屏路径同一真相源：滚动容器的
+     * `ACTION_SCROLL_FORWARD` 可用性直接来自平台的 `canScrollHorizontally`。
+     */
+    private fun refreshOverflowCue() {
+        if (!::overflowCue.isInitialized || !::scrollView.isInitialized) return
+        syncOverflowCueHeight()
+        val state = readOverflowState()
+        val wantVisible = CandidateOverflowCue.shouldShow(state.scrollable, state.canScrollForward)
+        // 只在真的变化时写 visibility：每次刷新都 set 会让 View 走一遍 requestLayout
+        val target = if (wantVisible) View.VISIBLE else View.GONE
+        if (overflowCue.visibility != target) overflowCue.visibility = target
+    }
+
+    /**
+     * 让遮罩高度跟随滚动区的实测高度。
+     *
+     * 布局里给的是 0dp 而不是 match_parent：父 FrameLayout 是 wrap_content，
+     * match_parent 的孩子在 AT_MOST 下会拿到「整块可用高度」并反过来把父撑满，
+     * 键盘被顶出屏幕（2026-11-24 emulator-5554 实测 IME 窗口 [0,158][1260,2720]、
+     * 键面白像素 14855→19）。高度只能等滚动区测量完成后再拷过来。
+     */
+    private fun syncOverflowCueHeight() {
+        val h = scrollView.height
+        if (h <= 0 || overflowCue.layoutParams.height == h) return
+        overflowCue.layoutParams = overflowCue.layoutParams.also { it.height = h }
+    }
+
+    /** 当前溢出事实（供 [refreshOverflowCue] 与单测共用同一份判定输入） */
+    internal fun readOverflowState(): OverflowState = OverflowState(
+        scrollable = scrollView.visibility == View.VISIBLE && itemContainer.childCount > 0,
+        canScrollForward = scrollView.canScrollHorizontally(1),
+    )
+
+    /** 溢出事实：候选区在位 + 右边界外还有内容 */
+    internal data class OverflowState(val scrollable: Boolean, val canScrollForward: Boolean)
+
+    /**
+     * AC-12 的读屏腿：让 `HorizontalScrollView` 的无障碍节点在溢出时报告
+     * `ACTION_SCROLL_FORWARD` 可用，TalkBack 能读到「还有更多候选」。
+     *
+     * 平台 `HorizontalScrollView` 本身支持该 action，缺口是把委托挂在正确的层级上 ——
+     * 挂这里而不是外层 LinearLayout，保证节点就是真正接收滚动的那个 View。
+     */
+    private fun installScrollAccessibility() {
+        scrollView.accessibilityDelegate = object : AccessibilityDelegate() {
+            override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+                super.onInitializeAccessibilityNodeInfo(host, info)
+                if (scrollView.canScrollHorizontally(1)) {
+                    info.addAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                }
+                if (scrollView.canScrollHorizontally(-1)) {
+                    info.addAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                }
+            }
+        }
+    }
+
+    /** 右沿渐变：左透明 → 右候选条底色，盖住被切掉的孩子，形成「还有内容」的静态线索 */
+    private fun overflowFade(): GradientDrawable = GradientDrawable().apply {
+        orientation = GradientDrawable.Orientation.LEFT_RIGHT
+        colors = intArrayOf(
+            Color.argb(CandidateOverflowCue.GRADIENT_HORIZONTAL_START_ALPHA, Color.red(BAR_BG), Color.green(BAR_BG), Color.blue(BAR_BG)),
+            Color.argb(CandidateOverflowCue.GRADIENT_HORIZONTAL_END_ALPHA, Color.red(BAR_BG), Color.green(BAR_BG), Color.blue(BAR_BG)),
+        )
     }
 
     /**
@@ -270,6 +369,9 @@ class CandidateView @JvmOverloads constructor(
         /** 兜底主色（主题未提供 ispeech_primary 时使用） */
         private val FALLBACK_PRIMARY = Color.parseColor("#2F6FED")
         private val TEXT_PRIMARY = Color.parseColor("#222222")
+
+        /** 候选条底色（与 candidate_view.xml 的 background 同值）：渐变遮罩要跟它无缝衔接 */
+        private val BAR_BG = Color.parseColor("#F4F5F7")
 
         /** 动作文字色：候选条底 #F4F5F7 上对比度 15:1（首选橙只有 2.59:1，不达 WCAG AA） */
         private val ACTION_TEXT = Color.parseColor("#1A1A1A")

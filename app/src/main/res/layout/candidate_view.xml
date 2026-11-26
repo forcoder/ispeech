@@ -29,24 +29,51 @@
         android:textStyle="bold"
         android:visibility="gone" />
 
-    <!-- 候选区：横向滚动，候选项动态添加 -->
-    <HorizontalScrollView
-        android:id="@+id/candidate_scroll"
+    <!-- 候选区（含 AC-12 溢出线索）。线索是叠在滚动区右沿的一层遮罩，不参与横向布局，
+         所以不占候选的横向预算（规格 AC-12 实现口径 ①：零宽度成本）。 -->
+    <FrameLayout
+        android:id="@+id/candidate_scroll_frame"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:minHeight="38dp"
-        android:overScrollMode="never"
-        android:scrollbars="none"
-        android:visibility="gone">
+        android:layout_weight="1">
 
-        <LinearLayout
-            android:id="@+id/candidate_items"
-            android:layout_width="wrap_content"
+        <!-- 候选区：横向滚动，候选项动态添加 -->
+        <HorizontalScrollView
+            android:id="@+id/candidate_scroll"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal" />
-    </HorizontalScrollView>
+            android:minHeight="38dp"
+            android:overScrollMode="never"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/candidate_items"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <!-- AC-12 溢出线索：右沿渐变遮罩，只在「还有候选没进视口」时可见。
+             宽度与渐变色在 CandidateView 里按令牌设置（12 dp）。
+             height 不能写 match_parent：父 FrameLayout 是 wrap_content，match_parent 的孩子
+             在 AT_MOST 下会拿到「整块可用高度」并反过来把父撑满，键盘被顶出屏幕
+             （2026-11-24 emulator-5554 实测 IME 窗口被撑到 [0,158][1260,2720]，
+             键面白像素 14855→19）。height 由 CandidateView 按滚动区实测高度补齐，
+             这里给 0dp 表示不参与父的高度测量。
+             importantForAccessibility=no：不新增常驻可聚焦元素，读屏走滚动容器自带的
+             ACTION_SCROLL_FORWARD（见 CandidateView.readOverflowState）。 -->
+        <View
+            android:id="@+id/candidate_overflow_cue"
+            android:layout_width="12dp"
+            android:layout_height="0dp"
+            android:layout_gravity="end"
+            android:clickable="false"
+            android:focusable="false"
+            android:importantForAccessibility="no"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <!-- 麦克风授权入口（VOCA-166）：候选条右侧独立动作按钮，仅未授权提示态可见。
          必须是 candidate_items 之外的兄弟控件——CandidateView.update() 每次刷新只清空候选区，
