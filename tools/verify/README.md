@@ -4,8 +4,13 @@
 对「智语 iSpeech」仓库做一轮可自动化的检查与回归。只用 Python 3 标准库，
 不联网、不 `pip install`、不依赖编译。
 
-> 唯一例外：`check_model_host.py` 需要联网（它探测的是外部模型托管源），
+> 例外一：`check_model_host.py` 需要联网（它探测的是外部模型托管源），
 > 因此**不在离线自查套件里**，单独按需 / 定时运行。
+>
+> 例外二：`voca628_ai_one_tap_adb.py` 需要 **Pillow**（`python3 -m pip install Pillow`）
+> 与 `adb` + 一台装了 debug 包的设备。它靠截图像素定位输入法窗口（IME 窗口不在
+> uiautomator 层级里），标准库解不了 PNG。缺 Pillow 时脚本在连设备前直接退出 `rc=2`，
+> **不会**把「没装工具」记成某条 AC 的 `FAIL`。
 
 ## 运行方式
 
@@ -152,6 +157,7 @@ python3 tools/verify/check_crosscut.py
 在生成后是否仍等于原文、点行后软键盘是否真的回来），JVM 单测覆盖不到。
 
 ```bash
+# 前置：python3 -m pip install Pillow   （缺了直接 rc=2 退出，不产出任何 AC 读数）
 # 短语模式：3 条短语命中，离线可跑（5a.1 / 5a.2 / 5a.3 / 5a.4）
 python3 tools/verify/voca628_ai_one_tap_adb.py --serial emulator-5554
 

@@ -286,6 +286,23 @@ def check_one_tap_fill() -> None:
         f"真机={adb_mod.emulator_reasons(real_props)}",
     )
     check(
+        "def require_pillow(" in adb and "pip install Pillow" in adb
+        and "except ImportError:\n        return []" not in adb,
+        "取证脚本：缺 Pillow 在连设备前硬停（rc=2），不静默吞成「结果行 0 条」",
+        "Pillow 缺失会被记成 AC FAIL —— 工具缺失伪装成产品缺陷（2026-11-26 打回项 1）",
+    )
+    check(
+        "ai_panel_title" in adb and "无结果" in adb,
+        "取证脚本：5a.4 断言空态标题含「无结果」且点空白区后不再变",
+        "5a.4 只判输入框 / 进程，文案没有断言（2026-11-26 打回项 2）",
+    )
+    check(
+        "private fun setTitle(" in panel and "ai_panel_title text=" in panel
+        and "aiReplyPanel?.setStatus(statusText.orEmpty())" not in service,
+        "空态标题只写「无结果」且走唯一可观测入口（AC-5a.4）",
+        "面板标题仍被失败 / 未登录文案覆盖，或绕开了 setTitle 的日志",
+    )
+    check(
         "submitAiResults(" in service,
         "一步填入：结果灌入面板带来源日志（AC-5a.5 可观测）",
         "缺少 submitAiResults 结构化日志",

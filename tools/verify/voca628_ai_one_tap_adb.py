@@ -36,7 +36,12 @@
 - `FAIL`：拿到了证据但不符合 AC。`5a.0`（AI 面板开不出来）是硬门，失败即返回非 0、
   后续用例一律不执行 —— 否则整批读数都建在一个开不出来的面板上，没有意义。
 
-退出码：0 = 无真失败；1 = 有 FAIL；2 = 前置整体不可用（宿主输入框 / AI 面板）。
+退出码：0 = 无真失败；1 = 有 FAIL；2 = 前置整体不可用（缺 Pillow / 宿主输入框 / AI 面板）。
+
+依赖：**Pillow**（`python3 -m pip install Pillow`）。输入法窗口不在 uiautomator 的层级里，
+结果行 / 「…」/ 面板高度只能从截图像素读，标准库解不了 PNG。缺 Pillow 时脚本在连设备前
+就退出（rc=2），不会把「没装工具」记成某条 AC 的 FAIL —— 那是上一轮质检打回的假失败：
+静默返回空行列表后，定位退化成按坐标猜，5a.2 / 5a.3 被记成产品缺陷。
 
 已知限制
 --------
@@ -62,6 +67,23 @@ from dataclasses import dataclass
 
 IME_PKG = "com.ispeech.ime"
 IME_ID = f"{IME_PKG}/com.ispeech.input.IspeechImeService"
+
+
+def require_pillow() -> str | None:
+    """截图色块定位依赖 Pillow；缺了返回一句安装提示，由 main() 硬停。
+
+    以前是 `try: from PIL import Image / except ImportError: return []`：缺 Pillow 时
+    行定位静默返回空，调用方退回按坐标猜，读数全错但汇总只说「5a.2/5a.3 FAIL」——
+    工具缺失被伪装成产品缺陷（2026-11-26 质检打回项 1）。
+    """
+    try:
+        from PIL import Image  # noqa: F401, PLC0415
+    except ImportError:
+        return (
+            "缺少 Pillow：本脚本靠截图像素定位输入法窗口（IME 窗口不在 uiautomator 层级里），"
+            "标准库解不了 PNG。安装后重跑：python3 -m pip install Pillow"
+        )
+    return None
 
 def sh(*args: str, timeout: int = 120) -> str:
     r = subprocess.run(["adb", *args], capture_output=True, text=True, timeout=timeout)
@@ -149,6 +171,17 @@ class Driver:
         except OSError:
             return ""
 
+    def last_panel_title(self) -> str | None:
+        """面板标题的最近一次读数（[AiReplyPanel] 每次改标题都打一行 `ai_panel_title`）。
+
+        输入法窗口读不到文字，但「空态文案是否保持无结果」是 AC-5a.4 的正文要求，
+        靠像素判不了字，所以由面板自己把标题写进日志。取 [logcat_clear] 之后最新的一行。
+        """
+        last = None
+        for last in re.finditer(r"ai_panel_title text=(.*?) items=\d+", self.logcat()):
+            pass
+        return last.group(1).strip() if last else None
+
     def ime_frame(self) -> tuple[int, int] | None:
         """输入法窗口的 frame 顶/底（uiautomator 看不到 IME 窗口）。"""
         out = self.adb("shell", "dumpsys", "window", "windows")
@@ -190,14 +223,6 @@ class Driver:
         )
 
     # ── 输入法几何 ────────────────────────────
-    def _rgb(self, path: str):
-        """读截图；没有 Pillow 时返回 None（调用方给安装提示）。"""
-        try:
-            from PIL import Image  # noqa: PLC0415
-        except ImportError:
-            return None
-        return Image.open(path).convert("RGB")
-
     def density(self) -> float:
         """屏幕缩放比（dp → px）。`wm density` 同样可能打印物理 + 覆盖两行。"""
         out = self.adb("shell", "wm", "density")
@@ -222,8 +247,8 @@ class Driver:
            定位成功。定位与断言是同一条证据，不会自欺。
         第 2 步拿到的那次上屏就是 5a.1 的实测数据，调用方直接复用。
 
-        备选：截图扫描没找到行（面板配色变了 / Pillow 缺失）时，才退到旧的「试几个
-        候选纵坐标」办法，避免整套脚本直接失效。
+        备选：截图扫描没找到行（面板配色变了）时，才退到旧的「试几个候选纵坐标」办法，
+        避免整套脚本直接失效。Pillow 缺失不走这条备选 —— 那是工具缺失，main() 已硬停。
         """
         top = self.panel_top()
         if top is None:
@@ -477,11 +502,7 @@ class Driver:
         frame = self.ime_frame()
         if not frame:
             return {"primary_px": 0, "lower_primary": 0, "white_rows": 0, "h": 0, "path": path}
-        try:
-            from PIL import Image  # noqa: PLC0415
-        except ImportError:
-            return {"primary_px": 0, "lower_primary": 0, "white_rows": 0,
-                    "h": frame[1] - frame[0], "path": path}
+        from PIL import Image  # noqa: PLC0415
         im = Image.open(path).convert("RGB")
         px = im.load()
         w, h = im.size
@@ -515,11 +536,8 @@ class Driver:
         找不到白底行（空态 / 面板没开）时返回空列表，由调用方如实判 FAIL / SKIP。
         """
         path = self.shot(tag)
+        from PIL import Image  # noqa: PLC0415
         frame = self.ime_frame()
-        try:
-            from PIL import Image  # noqa: PLC0415
-        except ImportError:
-            return []
         if not frame:
             return []
         im = Image.open(path).convert("RGB")
@@ -786,9 +804,12 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
             note = "模拟器读数（issue 要求真机，本条不计 PASS）"
             (d.fail if not ok else d.skip)("5a.3", note + "：" + detail)
 
-    # ── AC-5a.4 空态：点面板空白区无上屏无崩溃 ──
+    # ── AC-5a.4 空态：点面板空白区无上屏无崩溃，文案保持「无结果」 ──
     # 两种空态都覆盖：短语模式「生成 0 条」，mock 模式「生成失败」（假端点回 500）。
     # 空态面板没有 ai_results，所以这里用 expect_results=False（只看面板是否展开）。
+    # 文案单独断言：面板打开时标题先写「AI 生成中…」，空态落定后必须是「无结果」，
+    # 点空白区之后不得再变（AC 原文「状态文案保持『无结果』」）。IME 窗口读不到文字，
+    # 证据取面板自己打的 ai_panel_title 日志。
     blank = FAIL_MARKER if mock_llm else "zzzznohit"
     d.open_host_field(blank)
     opened = d.open_ai_panel(expect_results=False)
@@ -797,6 +818,16 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
     if not opened or top2 is None:
         d.fail("5a.4", "空态下没打开面板")
     else:
+        title_before = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            # 要求在 `0.6s` 内两次读数一致：刚打开面板时标题会先闪一下「无结果」
+            # （submit(emptyList) 的中间态），紧接着变「AI 生成中…」，只取一次会抓到闪态。
+            first = d.last_panel_title() or title_before
+            time.sleep(0.6)
+            title_before = d.last_panel_title() or first
+            if title_before and "无结果" in title_before and title_before == first:
+                break
         rows = d.find_result_rows("5a4_rows")
         mid_y = top2 + (d.ime_frame()[1] - top2) // 2
         d.logcat_clear()
@@ -806,12 +837,16 @@ def _run(d: Driver, needle: str, strict_device: bool, mock_llm: int | None = Non
         pid = d.adb("shell", "pidof", IME_PKG).strip()
         crashed = "FATAL EXCEPTION" in d.logcat()
         adopt = "ai_adopt" in d.logcat()
-        ok = text == before and bool(pid) and not crashed and not adopt
+        title_after = d.last_panel_title()
+        copy_kept = title_after is None
+        ok = (text == before and bool(pid) and not crashed and not adopt
+              and "无结果" in (title_before or "") and copy_kept)
         (d.pass_ if ok else d.fail)(
             "5a.4",
             f"空态点击后输入框={text!r}（应不变），白底结果行={len(rows)}（应为 0），"
             f"进程仍在={'是' if pid else '否'}，崩溃={'是' if crashed else '否'}，"
-            f"误上屏={adopt}",
+            f"误上屏={adopt}，标题={title_before!r}（应含「无结果」），"
+            f"点击后标题变更={title_after!r}（应为 None）",
         )
 
     # ── AC-5a.5 一步填入计入采纳率 + few-shot 语料 ──
@@ -943,6 +978,12 @@ def main() -> int:
     args = ap.parse_args()
     if args.needle is None:
         args.needle = "zzqa" if args.mock_llm else "1"
+
+    missing = require_pillow()
+    if missing:
+        print(missing)
+        print("退出码 2 = 前置整体不可用：没有产生任何 AC 读数，也没有把工具缺失记成 FAIL")
+        return 2
 
     os.makedirs(args.workdir, exist_ok=True)
     driver = Driver(args.serial, args.workdir)
