@@ -1740,6 +1740,21 @@ class IspeechImeService : InputMethodService() {
     // ──────────────────────────────────────────────
 
     /**
+     * 前置判定拦下会话时唯一的打点入口：`AsrTrace ev=blocked` + 机器可判的 reason。
+     *
+     * 收在一处，是为了让「点了语音键却没进『识别中』、日志里却什么都查不到」没法再被写出来——
+     * 这种情况在真机上和「查询用错了 action」长得一模一样（VOCA-310 最初的排查困境）。
+     */
+    private fun traceVoiceBlocked(reason: String) {
+        AsrTrace.w(
+            null,
+            AsrTrace.EV_BLOCKED,
+            "reason" to reason,
+            "engine" to asr.engine.name,
+        )
+    }
+
+    /**
      * 点击语音键：未授权则在候选条提示（不跳页）→ 识别中则取消 → 否则开始识别。
      *
      * 识别文本**说完即上屏**（最终结果直接提交到输入框）：语音是一次到位的整句，
@@ -1757,7 +1772,9 @@ class IspeechImeService : InputMethodService() {
             return
         }
         val controller = voiceController
-        if (controller == null || !controller.isAvailable) {
+        if (controller == null) {
+            // 输入法已销毁（onDestroy 置空控制器）后仍有这一按：也不许留静默出口
+            traceVoiceBlocked(RecognitionServices.REASON_NO_RECOGNITION_AVAILABLE)
             statusText = getString(R.string.voice_unavailable)
             renderCandidateView()
             return
@@ -1765,8 +1782,19 @@ class IspeechImeService : InputMethodService() {
         // 有的 ROM 只预置了桩识别服务（华为 ALN-AL00 的 FakeRecognitionService）：
         // isRecognitionAvailable() 为 true 却永远不出结果。这里提前拦截并给出可操作指引，
         // 免得用户反复点麦克风、以为是自己的操作问题。
-        if (!controller.hasUsableService()) {
-            statusText = getString(R.string.voice_service_unavailable)
+        // 判定是纯函数 RecognitionServices.blockedReason（JVM 单测覆盖「可绑定 / 不可绑定」两态），
+        // 探测自带 `AsrTrace ev=bind`（候选数 / 真服务数 / 会用哪个组件）：拦下会话时一条日志就能看出
+        // 「真没服务」「只有桩服务」还是「查询写错了 action」（VOCA-310 验收口径 1(b)）。
+        val blocked = controller.probeBlockedReason(asr)
+        if (blocked != null) {
+            traceVoiceBlocked(blocked)
+            statusText = getString(
+                if (blocked == RecognitionServices.REASON_NO_RECOGNITION_AVAILABLE) {
+                    R.string.voice_unavailable
+                } else {
+                    R.string.voice_service_unavailable
+                },
+            )
             codeOverride = null
             candidates = emptyList()
             renderCandidateView()
