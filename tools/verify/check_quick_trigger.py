@@ -17,15 +17,15 @@
     B. trigger 只能是小写 a-z；> 12 位（拼音态组合串 MAX_PINYIN_LENGTH）直接判死，
        5-12 位且用 prefix / contains 时告警 —— 五笔态组合缓冲区 MAX_CODE_LENGTH=4，
        完整码只能在拼音态敲出，拿不到「精确码优先」的首位加成（exact / regex 不受影响）；
-       编辑器口径与本节同源：2-12 位、>4 位提示可达性（ADR-0002 C1-1 / C1-7），
-       长度判定值从 QuickTrigger.kt 读取，脚本侧不抄第二份常量；
+       编辑器口径与本节同源：VOCA-729 起位数不限制（只校验非空 + 小写 a-z），
+       长度常量退化为可达性提示阈值，脚本侧不抄第二份常量；
     C. trigger 全局唯一（大小写不敏感）；
     D. **1 字母 trigger 必须是 exact / regex 模式**（否则静默失效）；
     E. weight 为整数、kind 为 p/a、mode 为四种之一；
     F. 无重复的 (trigger, content)；
     G. 源码侧的排序契约未被改坏（QUICKAPPLY 在 WUBI 之前 + 精确码优先 + 守卫存在）；
-    H. 用户自定义快捷字母全链路：设置页 2–12 位小写校验（单一来源 QuickTrigger，
-       源码内不得残留 2..4 字面量）/ 中英文案 / 面板角标 / 保存即生效；
+    H. 用户自定义快捷字母全链路：设置页不限位数（只校验非空 + 小写 a-z，单一来源 QuickTrigger，
+       源码内不得残留 2..4 字面量、issue() 不得按长度判死）/ 中英文案 / 面板角标 / 保存即生效；
     I. 需求场景验收：输入 ``ycsf`` 时快捷短语排在候选第 1 位（与 Kotlin 排序同构）；
     J. 远端规则的查看与快捷字母覆盖：远端进列表 / 覆盖写用户文件 / 排序胜出 / 恢复默认；
     M. 回写安全线：映射表是唯一同步身份、冲突不写、conflicts 文案、同 trigger 折叠、迁移不改盘。
@@ -324,17 +324,24 @@ def check_user_trigger_chain() -> None:
         else:
             fail(f"缺少中英文案 {key}（zh={key in zh} en={key in en}）")
 
-    # 设置页：快捷字母校验 2–12 位，口径单一来源 QuickTrigger（ADR-0002 C1-1 / C1-2）
+    # 设置页：快捷字母位数不限制，口径单一来源 QuickTrigger（VOCA-729 / ADR-0002 C1-1 / C1-2）
     screen = read(QUICK_SCREEN) if QUICK_SCREEN.exists() else ""
     if not screen:
         fail(f"文件不存在：{QUICK_SCREEN}")
     else:
         lo, hi, reachable = trigger_limits()
-        # ① 长度常量存在且就是契约值：2–12 位，>4 位的可达性口径另有常量
+        # ① 长度常量仍是可达性提示阈值（2 / 12 / 4），但不再参与合法性判定
         check(
             lo == 2 and hi == 12 and reachable == 4,
-            f"QuickTrigger：MIN/MAX_TRIGGER_LENGTH = {lo}/{hi}、WUBI_REACHABLE_LENGTH = {reachable}（C1-1 的 2–12 位）",
-            f"QuickTrigger 长度常量不是 2 / 12 / 4（实得 min={lo} max={hi} reachable={reachable}），编辑器口径与规则表校验会分裂",
+            f"QuickTrigger：可达性阈值 MIN/MAX_WUBI = {lo}/{hi}/{reachable} 保持不变",
+            f"QuickTrigger 可达性阈值异常（实得 min={lo} max={hi} reachable={reachable}），界面提示会失准",
+        )
+        trigger_src = read(QUICK_TRIGGER) if QUICK_TRIGGER.exists() else ""
+        check(
+            "value.length < MIN_TRIGGER_LENGTH" not in trigger_src
+            and "value.length > MAX_TRIGGER_LENGTH" not in trigger_src,
+            "QuickTrigger.issue() 不按位数判死（VOCA-729：只校验非空 + 小写 a-z）",
+            "QuickTrigger.issue() 仍在按长度返回 TOO_SHORT / TOO_LONG，位数限制没有真正放开",
         )
         # ② 旧的 2..4 字面量必须从源码里彻底消失，否则「放宽到 12」只是文档口径
         stale = [

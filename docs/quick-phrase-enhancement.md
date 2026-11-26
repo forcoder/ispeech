@@ -577,9 +577,9 @@ python3 tools/verify/check_static.py           # 括号配平 / 资源引用（�
 | 关注点 | 位置 / 规则 |
 | --- | --- |
 | 数据 | `QuickEntry.trigger` 就是快捷字母；用户规则文件 `filesDir/quick_phrases_user.txt` 第一列 |
-| 录入 | 设置页「快捷短语」新增 / 编辑弹窗（本地规则、云端简写、覆盖快捷字母三处同一套校验）：只保留小写字母，2–12 位（校验单一来源 `QuickTrigger.isValidShortcutTrigger`，ADR-0002 C1-1 / C1-2） |
-| 为什么限 **12** 位 | 拼音态组合串上限 `MAX_PINYIN_LENGTH = 12`，超过就永远敲不完整条（与 `check_quick_trigger.py` 的规则表判死同源，两边都从 `QuickTrigger.MIN/MAX_TRIGGER_LENGTH` 取值） |
-| 为什么 **>4 位要提示** | 五笔态组合缓冲上限 `MAX_CODE_LENGTH = 4`，第 5 个字母会先把当前首选上屏再重新起码，>4 位的简写在五笔态敲不全；编辑器因此给非阻断提示「走短语面板点选，或切拼音态敲全」（C1-7），不禁止录入 |
+| 录入 | 设置页「快捷短语」新增 / 编辑弹窗（本地规则、云端简写、覆盖快捷字母三处同一套校验）：只保留小写字母，**位数不限制**（VOCA-729 起；校验单一来源 `QuickTrigger.isValidShortcutTrigger`，ADR-0002 C1-1 / C1-2） |
+| 为什么**不再限制**位数 | 产品要求 2–4 位改为不限制（5 位 `ylwsl` 这类业务码必须能存）。校验只拦「空 / 非小写字母」；`MIN/MAX_TRIGGER_LENGTH` 降级为可达性提示阈值，不再禁用 |
+| 为什么仍有**长度提示** | 五笔态缓冲 `MAX_CODE_LENGTH = 4`、拼音态组合串 `MAX_PINYIN_LENGTH = 12`：>4 位五笔态敲不全、>12 位任何输入态都敲不全。编辑器给非阻断提示（C1-7），不禁止保存；1 位字母配前缀 / 包含匹配会被引擎的 `minTriggerLength` 守卫拦下，同样只提示 |
 | 排序 | `CandidateRanking`：精确码优先 → `LookupKind.order`（应用 0 < 短语 1 < 词库 2 …）；`QuickPhraseEngine.lookup` 保证**精确命中不受扫描上限截断**，规则表再大也排第一 |
 | 生效时机 | 保存即 `AppContainer.invalidateEngine()`，输入法无需重启 |
 | 可见性 | 输入法内「短语」面板每行右侧以角标显示快捷字母，用户不必回设置页查 |
