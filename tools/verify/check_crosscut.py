@@ -24,7 +24,7 @@
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
 11. 中文输入法（默认拼音 / 五笔 + 中英切换）：枚举 -> 持久化 -> 设置页 / 内置面板 -> 服务两态切换
-12. 候选条字重（VOCA-56）：候选词常规字重、首选靠颜色 / 底色区分、类注释口径一致
+12. 候选条字重（VOCA-56）：候选词与组合码常规字重、首选靠颜色 / 底色区分、类注释口径一致
 13. 远端规则刷新链（VOCA-293）：拉取写盘 -> 变更信号 -> 快捷短语页重新读盘，顺序与文档口径锁定
 14. 联想词上屏去重（VOCA-121）：AssociationCommit 规则 -> 服务 pickCandidate 联想分支接线 ->
     规则本身用 Python 复刻跑用例（「你」+「你好」不能变「你你好」；
@@ -1874,7 +1874,7 @@ def check_chinese_input_method() -> None:
 
 
 # ═════════════════════════════════════════════════════════════
-# 12. 候选条字重（VOCA-56）：候选词不加粗
+# 12. 候选条字重（VOCA-56）：候选条整体不加粗
 # ═════════════════════════════════════════════════════════════
 
 def check_candidate_style() -> None:
@@ -1910,6 +1910,20 @@ def check_candidate_style() -> None:
         not bold_claims,
         "CandidateView 类注释已去掉「加粗」口径",
         f"{rel(CANDIDATE_VIEW)} 类注释仍声明候选「加粗」，与实现不符：{bold_claims}",
+    )
+
+    # 11.4 组合码（candidate_code）同样常规字重：候选条上不允许任何文字用 bold（VOCA-56 返工）
+    bar_xml = read(CANDIDATE_VIEW_XML)
+    code_start = bar_xml.find('android:id="@+id/candidate_code"')
+    code_end = bar_xml.find("/>", code_start)
+    code_block = bar_xml[code_start:code_end]
+    check(
+        code_start != -1
+        and 'android:textStyle="bold"' not in code_block
+        and 'android:textSize="16sp"' in code_block,
+        "组合码常规字重且字号不变（candidate_code 未设 bold，16sp）",
+        f"{rel(CANDIDATE_VIEW_XML)} candidate_code 仍为粗体或字号被改动"
+        "（VOCA-56 返工要求候选条整体不加粗、保留字号）",
     )
 
 
