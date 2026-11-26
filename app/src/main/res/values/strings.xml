@@ -101,10 +101,10 @@
     <!-- ADR-0002 C1-7 / C1-9 / C2-5 / C3-3：禁用原因、可达性提示、冲突动作与文案 -->
     <string name="quick_trigger_invalid">快捷字母不可用：%1$s</string>
     <string name="quick_trigger_reason_empty">还没输入简写</string>
-    <string name="quick_trigger_reason_short">至少 2 位</string>
-    <string name="quick_trigger_reason_long">最多 12 位，超出任何输入态都敲不出来</string>
     <string name="quick_trigger_reason_letters">只能用小写英文字母 a–z</string>
     <string name="quick_trigger_reachable_hint">超过 4 位：五笔态敲不全，可在短语面板筛选后点选，或切到拼音态敲完整简写</string>
+    <string name="quick_trigger_single_letter_warn">1 位字母只在「精确匹配 / 正则匹配」下生效；前缀或包含匹配会被单字母防误触守卫拦下</string>
+    <string name="quick_trigger_unreachable_hint">超过 12 位：任何输入态都敲不出完整简写，建议精简</string>
     <string name="quick_trigger_prefix_long_content_warn">该简写超过 4 位且使用前缀/包含匹配：候选第一位可能是这条长正文，按空格会整段上屏</string>
     <string name="quick_source_remote_overridden">远端 · 已覆盖</string>
     <string name="quick_conflict_badge">冲突</string>

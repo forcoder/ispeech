@@ -101,10 +101,10 @@
     <!-- ADR-0002 C1-7 / C1-9 / C2-5 / C3-3 -->
     <string name="quick_trigger_invalid">Shortcut letters not usable: %1$s</string>
     <string name="quick_trigger_reason_empty">nothing typed yet</string>
-    <string name="quick_trigger_reason_short">at least 2 letters</string>
-    <string name="quick_trigger_reason_long">at most 12 letters — longer cannot be typed in any mode</string>
     <string name="quick_trigger_reason_letters">lowercase a–z only</string>
     <string name="quick_trigger_reachable_hint">Longer than 4 letters: Wubi cannot type it fully — pick it from the phrase panel filter, or switch to pinyin and type the whole shortcut</string>
+    <string name="quick_trigger_single_letter_warn">A single letter only works with exact/regex matching; prefix or contains matching is blocked by the single-letter anti-misfire guard</string>
+    <string name="quick_trigger_unreachable_hint">Longer than 12 letters: no input mode can type it fully — consider shortening it</string>
     <string name="quick_trigger_prefix_long_content_warn">This shortcut is longer than 4 letters and uses prefix/contains matching: the long text can become the top candidate, and space commits all of it</string>
     <string name="quick_source_remote_overridden">Remote · overridden</string>
     <string name="quick_conflict_badge">Conflict</string>

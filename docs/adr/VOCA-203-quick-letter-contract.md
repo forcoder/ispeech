@@ -529,3 +529,25 @@ F 节的自我声明正是决策 1 要废止的那条不变量。漏改它，`to
 6. C1-9 的误弹警示是否在 mode 与 trigger 长度都变化时实时重算？（是，纯计算，不读盘）
 7. `UNGUARDED_MODES`（脚本 `:70`）与 Kotlin 侧 C1-6 的判定，谁是权威？（Kotlin 侧 `QuickTrigger` 为权威，脚本断言与之对齐，不得反向让脚本定义语义）
 8. 映射指向的 id 已从远端消失、**且**同码被别的规则占用时怎么判？（2026-11-15 裁决：判冲突、不上传、不新建同码重复规则 —— 见 §3 修订节与 C3-5′。原 C3-5 的「→ create」只覆盖「该码无人占用」）
+
+---
+
+## 修订（2026-11-26，VOCA-729）：C1-1 由「2–12 位」放开为「不限位数」
+
+**背景**：产品方在真机上复现「新增快捷短语」输入 5 位 `ylwsl` 被拦（当时发布包仍是 2–4 位旧口径），
+随后明确要求「快捷字母字数限制由 2–4 字母改为不限制」，不再接受任何位数上下限。
+
+**决策**：
+- `QuickTrigger.issue()` 只保留两条判据：非空（否则 `EMPTY`）、全小写 a–z（否则 `NOT_LETTERS`）；
+  **不再**返回 `TOO_SHORT` / `TOO_LONG`，枚举同步删除这两态。
+- `MIN_TRIGGER_LENGTH = 2` / `MAX_TRIGGER_LENGTH = 12` **保留为可达性提示阈值**，不再参与合法性判定：
+  >4 位提示五笔态敲不全、>12 位提示任何输入态都敲不全（非阻断）。
+- 单字母允许录入；`QuickTrigger.overrideMode()` 对单字母与 >4 位一律给 `EXACT`（单字母配
+  `PREFIX` / `CONTAINS` 会被引擎 `minTriggerLength` 守卫拦下，界面同步给出非阻断提示）。
+- `check_quick_trigger.py` 增加断言：`issue()` 内不得出现按长度判死的分支；内置资产
+  `assets/quick_phrases.txt` 仍按 4 / 12 位给 warn / fail 的**数据质量**检查（与录入侧解耦）。
+
+**影响**：原有的 C1-1「2–12 位契约」、`QuickTriggerIssue` 四态、`quick_trigger_reason_short/long`
+文案废止；`QuickTriggerTest` 改断言「1 位、13 位、64 位均合法」。
+
+**回滚**：把两条长度判据加回 `issue()`、恢复枚举与两条文案即可；无数据迁移。

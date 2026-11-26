@@ -77,7 +77,7 @@ import com.ispeech.settings.quick.RemoteRuleInfo
 
 /**
  * 快捷字母校验只有 [QuickTrigger.isValidShortcutTrigger] 一个实现（ADR-0002 C1-2）：
- * 本文件不再写第二份长度判定，上限与输入法缓冲区口径都由它给出。
+ * 本文件不再写第二份长度判定。VOCA-729 起位数不限制，长度只用于可达性提示。
  *
  * 这里只保留「还差什么」到文案资源的映射，供禁用原因与错误提示共用（C1-7），
  * ViewModel 与界面同一个来源，避免同一问题两处不同说法。
@@ -85,16 +85,14 @@ import com.ispeech.settings.quick.RemoteRuleInfo
 @StringRes
 internal fun triggerIssueRes(issue: QuickTriggerIssue): Int = when (issue) {
     QuickTriggerIssue.EMPTY -> R.string.quick_trigger_reason_empty
-    QuickTriggerIssue.TOO_SHORT -> R.string.quick_trigger_reason_short
-    QuickTriggerIssue.TOO_LONG -> R.string.quick_trigger_reason_long
     QuickTriggerIssue.NOT_LETTERS -> R.string.quick_trigger_reason_letters
 }
 
 /**
  * 快捷字母输入框下方的引导文案（C1-7 禁用原因 + C1-7 可达性提示 + C1-9 误弹警示）。
  *
- * 三条都非阻断：>4 位照样能存，只是五笔态敲不全；选了前缀 / 包含匹配时长正文可能压过
- * 正在输入的词，界面把这件事说出来，而不是靠「不让存」来回避。
+ * 三条都非阻断：>4 位照样能存，只是五笔态敲不全；1 位字母若用前缀 / 包含匹配会被防误触守卫拦下；
+ * 选了前缀 / 包含匹配的长正文可能压过正在输入的词。界面把这件事说出来，而不是靠「不让存」来回避。
  */
 @Composable
 private fun QuickTriggerGuidance(trigger: String, mode: QuickMatchMode? = null) {
@@ -119,6 +117,22 @@ private fun QuickTriggerGuidance(trigger: String, mode: QuickMatchMode? = null) 
         text = stringResource(R.string.quick_trigger_hint),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    if (normalized.length == 1 && mode != null &&
+        mode != QuickMatchMode.EXACT && mode != QuickMatchMode.REGEX
+    ) {
+        Text(
+            text = stringResource(R.string.quick_trigger_single_letter_warn),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (normalized.length > QuickTrigger.MAX_TRIGGER_LENGTH) {
+        Text(
+            text = stringResource(R.string.quick_trigger_unreachable_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
     if (QuickTrigger.isBeyondWubiBuffer(normalized)) {
         Text(
             text = stringResource(R.string.quick_trigger_reachable_hint),

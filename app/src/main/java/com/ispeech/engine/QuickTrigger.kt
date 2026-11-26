@@ -3,17 +3,16 @@ package com.ispeech.engine
 /**
  * 快捷字母（trigger）校验的单一来源（ADR-0002 C1-1 / C1-2）。
  *
- * 为什么要有这个文件：设置页弹窗、`setRemoteShortcut`、同步侧曾经各写一份长度判定，
- * 编辑器限 2–4 位而仓库自己的数据校验器 `check_quick_trigger.py` 允许 2–12 位，
- * 结果是「数据里允许的东西 UI 不让写」（用户 5 位 `dtwsl` 存不进去）。
- * 上限 12 = 拼音态组合串天花板，下限 2 = 单字母留给五笔一级简码。
+ * VOCA-729 起不再限制位数：唯一约束是「非空 + 全小写字母」（用户明确要求 2–4 位限制改为不限制，
+ * 例如 5 位 `ylwsl` 必须能存）。[MIN_TRIGGER_LENGTH] / [MAX_TRIGGER_LENGTH] 只作为可达性提示阈值，
+ * 不再参与合法性判定。
  */
 object QuickTrigger {
 
-    /** 合法快捷字母的下限（单字母不触发快捷规则，留给五笔一级简码）。 */
+    /** 单字母 / 2 位的参考下限，仅用于文案提示；不再禁用单字母（VOCA-729）。 */
     const val MIN_TRIGGER_LENGTH = 2
 
-    /** 合法快捷字母的上限：与拼音态组合串上限 `MAX_PINYIN_LENGTH` 同源，超过即任何输入态都敲不出完整码。 */
+    /** 拼音态组合串上限 `MAX_PINYIN_LENGTH`，仅用于「敲不全」提示；不再禁用更长简写（VOCA-729）。 */
     const val MAX_TRIGGER_LENGTH = 12
 
     /**
@@ -26,13 +25,11 @@ object QuickTrigger {
     /** 归一化：先 trim 再小写；映射表键、覆盖判定、去重全都用它（ADR-0002 附录 1）。 */
     fun normalize(trigger: String): String = trigger.trim().lowercase()
 
-    /** 非法原因；返回 null 表示合法。 */
+    /** 非法原因；返回 null 表示合法。VOCA-729 起不再按位数判死。 */
     fun issue(trigger: String): QuickTriggerIssue? {
         val value = normalize(trigger)
         if (value.isEmpty()) return QuickTriggerIssue.EMPTY
         if (value.any { it !in 'a'..'z' }) return QuickTriggerIssue.NOT_LETTERS
-        if (value.length < MIN_TRIGGER_LENGTH) return QuickTriggerIssue.TOO_SHORT
-        if (value.length > MAX_TRIGGER_LENGTH) return QuickTriggerIssue.TOO_LONG
         return null
     }
 
@@ -43,11 +40,18 @@ object QuickTrigger {
     fun isBeyondWubiBuffer(trigger: String): Boolean = normalize(trigger).length > WUBI_REACHABLE_LENGTH
 
     /**
-     * 覆盖条目的匹配方式（C1-6）：4 位以内用 PREFIX（两态都能敲全），
-     * 超过 4 位一律 EXACT —— 否则五笔态打满 4 位就命中，长正文会压掉用户正要输入的词。
+     * 覆盖条目的匹配方式（C1-6）：2–4 位用 PREFIX（两态都能敲全），
+     * 单字母与超过 4 位一律 EXACT —— 单字母会被引擎的 minTriggerLength 守卫拦下、
+     * 长码在五笔态打满 4 位就前缀命中，长正文会压掉用户正要输入的词。
      */
-    fun overrideMode(trigger: String): QuickMatchMode =
-        if (isBeyondWubiBuffer(trigger)) QuickMatchMode.EXACT else QuickMatchMode.PREFIX
+    fun overrideMode(trigger: String): QuickMatchMode {
+        val length = normalize(trigger).length
+        return if (length <= 1 || length > WUBI_REACHABLE_LENGTH) {
+            QuickMatchMode.EXACT
+        } else {
+            QuickMatchMode.PREFIX
+        }
+    }
 
     /** 长码 + 前缀 / 包含 = 误弹风险（C1-9），与 `check_quick_trigger.py` 的 warn 同口径。 */
     fun mayMisfire(trigger: String, mode: QuickMatchMode): Boolean =
@@ -58,7 +62,5 @@ object QuickTrigger {
 /** 快捷字母非法原因（UI 据此显示「还差什么」，不再让用户自己猜禁用理由）。 */
 enum class QuickTriggerIssue {
     EMPTY,
-    TOO_SHORT,
-    TOO_LONG,
     NOT_LETTERS,
 }
