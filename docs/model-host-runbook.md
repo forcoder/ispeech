@@ -296,6 +296,138 @@ jobs:
 > 未做（属外部资源变更，需人类拍板后由 SRE 执行）：把该 zip 镜像到 `delivery-service-smzk`
 > 以摆脱境外单源；`check_model_host.py` 目前只探测 FunASR 的 `asrModelUrl`，不覆盖本条。
 
+## 11. AVD 实测验证记录（R-1 / R-2 / R-4 / R-5）
+
+> VOCA-476 的取证留痕。**本节全部为 AVD（`emulator-5554`）实测，不是真机**：可作为下载 / 自愈
+> 链路的证据，但不能替代 §3 第 3 步要求的真机验收。
+>
+> **真机项待执行（未做，不得据此判定可发布）**：
+> - **R-3 语音上屏**：需真机麦克风（序列号后 4 位 `2917`），AVD 无音频输入；
+> - §8 检查表第 5 项「真机走通下载 100% → 解压 → 识别一句话」**仍未达成**。
+>
+> 收口口径与到期默认见 **§11.3**。
+
+### 2026-11-24/25 · `main d9690f9` 本树重建 · AVD 覆盖（R-1 / R-2 / R-4 / R-5）
+
+> **为什么不是 dist 里的 v1.6 包**：`dist/ispeech-internal-v1.6.apk` 经独立复核，dex 内无
+> `AsrModelInstall` / `VoskModelStore` / `AsrModelDownloader`，构建窗口落在 11-09~11-14，
+> **不含本单要验的 VOCA-496（零流量自愈）与 VOCA-474（下载加固）**。在它上面跑只会验到旧实现，
+> 故本轮改为按 `main` 重新出包。旧包那轮读数降级为 §11.1「旧实现基线」。
+
+| 项 | 值 |
+|---|---|
+| 源码基线 | `main` @ `d9690f9c7d22141013b904643b83b584c0381799` |
+| 构建 | `./gradlew assembleRelease -x lintVitalAnalyzeRelease -x lintVitalRelease`（lint 需联网拉 kotlin-compiler，本环境超时故跳过，不影响产物） |
+| 包 sha256 | `15541ef73db88d9bab21ec869703a278b70846d0af8ca2162b0b0187ca8c1eb4`（139,229,278 B） |
+| 三方一致 | 本地构建产物 / 设备内 `base.apk` / `adb pull` 后主机侧，**三处 sha256 完全相同** |
+| 应用版本 | `versionName=1.5` / `versionCode=5`（`main` 的 `build.gradle.kts` 未随功能前进，仅版本标签）/ uid `10196` |
+| dex 自证 | `AsrModelInstall` 11 / `AsrModelDownloader` 5 / `funasr category=` 1 / `期望完成标记` 1 / `PREPARE_FAILED` 1 / `VoskModelStore` 9 / `AsrDownloadPolicy` 6 ⇒ **本单要验的代码确在包内** |
+| 设备 | AVD `ispeech_test` / `emulator-5554` / `sdk_gphone64_arm64` / Android 14 |
+
+| 用例 | 结果 | 本轮实测证据 |
+|---|---|---|
+| **R-1** 全新状态（`pm clear`/`rm -rf` 后 `files/funasr` 不存在）触发 | 行为通过、**字面判据不满足** | 第 5 轮实测（`FUNASR` 引擎）：日志 `funasr category=ARCHIVE_MISSING …（预期 77920048 字节）`；`files/funasr/model` 落盘 **8 条目**（含就绪哨兵 `.ready-b77920048-sda92b3db5218`、`model.int8.onnx` 81,828,675 B），完整 `ls -laR` 见 `R1-lsR-full.txt`；`netstats` 本段 **净增 80,777,337 B ≈ 1.037× 整包**（45,567,856 → 126,345,193） |
+| **R-2** 预置坏 `.part`（**33 B** HTML 假包）后重触发 | ✅ 自愈成功，**未卸载重装** | `断点续传：从 0KB 继续，共 76093KB` → `下载失败（第 1/3 次）: DIGEST_MISMATCH: sha256=664f15e169c9…，预期 da92b3db5218…` → 删 `.part` 重下 → `model` 重建 80 MB；`netstats` Δ=**161,538,786 B ≈ 154.06 MB（2.073× 整包）** |
+| **R-5** 断网（飞行模式，`NET_FAIL`）触发 | ✅ 失败可读、不留脏 `.part` | `下载失败（第 1/3 次）: timeout` → `Unable to resolve host "delivery-service-smzk…"` ×2 → `funasr category=PREPARE_FAILED … 期望完成标记=.ready-b77920048-sda92b3db5218`；随后 `files/funasr` 目录为空 |
+
+**日志格式与源码逐字符对账**（这是上一轮被判 FAIL 的要害）：本轮 `PREPARE_FAILED` 实测行
+
+- 有 `funasr category=` 前缀 ✅
+- 有 ` 期望完成标记=` 后缀 ✅
+- 「失败」后字符为 `0xff1a`（**全角冒号**）✅
+
+三项均与 `AsrModelInstall.render` / `ensureModel` 的模板一致。旧包三项全无 —— 证明当时「格式对不上」
+是**包的问题**，不是誊写。
+
+**R-1 判据口径（待人类裁决，不由交付方改写）**：本单原文写「logcat 有 `AsrDownload` 起始终止打点」，
+但全仓 `const val TAG` 中不存在 `AsrDownload` 这个 tag（只有 `FunAsrModelStore` / `VoskModelStore`），
+所以该字面判据在任何构建上都不可满足。本轮实际取到的等价证据是：
+
+| 原文要求的语义 | 本轮实测对应项 |
+|---|---|
+| 「起始」打点 | `funasr category=ARCHIVE_MISSING …（预期 77920048 字节）` |
+| 「终止」打点 | 下载完成后 `files/funasr/model` 80 MB 落盘 + `netstats` Δ≈77.04 MiB |
+| 摘要一致 | `DIGEST_MISMATCH` 用例证明 sha256 校验真实生效（`664f15e1…` vs `da92b3db…`） |
+
+⇒ 语义已覆盖，**字面 tag 名不成立**。是把判据改成按 `FunAsrModelStore` 取，还是要求后端新增
+`AsrDownload` tag，需人类/后端定；**在裁决前本表 R-1 记「行为通过、字面判据不满足」**。
+
+**R-2 的 Δ 为何是 2.073×（按代码归因，两次传输都属 R-2 自身）**
+
+坏 `.part` 只有 33 B，续传请求是 `Range: bytes=33-`，但响应的 33 字节内容其实是 HTML 拦截页，
+摘要校验必然失败（`DIGEST_MISMATCH`）→ 触发 `RETRY_FROM_START` 整包重下。所以 R-2 一次用例里
+有**两次完整量级的传输**：
+
+| 段 | 字节 | 说明 |
+|---|---|---|
+| ① 续传残段 | 77,920,015 | `77,920,048 − 33`，服务端回剩余部分 |
+| ② 整包重下 | 77,920,048 | 摘要失配后 `RETRY_FROM_START` |
+| 合计 payload | 155,840,063（148.62 MiB） | |
+| 实测 Δ | 161,538,786（154.06 MiB） | |
+| 差额 | 5,698,723（**+3.66%**） | TCP/IP + TLS/HTTP 头 + 重传 |
+
+⇒ **不是来源不明的第二次传输**：`161,538,786` 就是「续传一遍 + 整包一遍」的实测成本，
+`MAX_ATTEMPTS=3` 的失败重试在本例中未触发（日志只出现「第 1/3 次」即成功）。因此该数字
+**可以作为「坏 `.part` 自愈的实际下行成本」结论**：约为单包的 2.07 倍。
+
+**下行字节口径与留档实况（按证据包逐项核对）**：统一用 `dumpsys netstats --uid 10196`
+在触发前后各取一次 `rb` 原始读数，差值即该用例的实际下行。
+
+| 用例 | 留档文件 | 状态 |
+|---|---|---|
+| **R-1**（第 5 轮） | `R1-netstats-before.txt`(261 B, `rb=45,567,856`) / `R1-netstats-after.txt`(`rb=126,345,193`) | **两份均非空，随 round5 包提交**；净增 80,777,337 B |
+| **R-4**（第 5 轮） | `R4-netstats-before.txt` / `R4-netstats-after.txt` | 两份均非空，随 round5 包提交；`rb` 45,567,856 |
+| **R-2**（第 3 轮） | `R2-netstats-before.txt`(`rb=80,777,445`) / `R2-netstats-after.txt`(`rb=242,316,231`)，随 `voca476-round3-evidence.tar.gz` 提交 | **不在 round5 包内**——R-2 第 5 轮未重跑；Δ=161,538,786 B 已按该两文件复算核对一致 |
+
+> 更正说明：本段曾写「`R1-netstats-before.txt` 本轮为空」与「R2 netstats 已随包提交」，
+> 与 round5 包实际内容不符（前者 261 B 非空、后者根本不在该包内），已按上表订正。
+
+### 11.1 旧实现基线（`dist/ispeech-internal-v1.6.apk`，11-09~11-14 构建）——**不构成本单验收证据**
+
+该包 `sha256 9cddcec5…`（98,416,118 B），dex 内 `AsrModelInstall` / `PREPARE_FAILED` /
+`funasr category=` / `期望完成标记` **均为 0 命中**，而 `断点续传` 1、`FunAsrModelStore` 18、
+`AsrDownloadPolicy` 6 ⇒ 它接的是 VOCA-34 时期的旧实现。
+
+同一批用例在它上面的读数（保留作对照，**不得当作「修复后行为」引用**）：
+
+| 用例 | 旧包读数 |
+|---|---|
+| R-1 | `model` 80 MB / 8 文件，无 `.part`；日志无 `funasr category=` |
+| R-2 | `DIGEST_MISMATCH: sha256=664f15e1…`；`netstats` Δ=161,538,010 B |
+| R-5 | `FunASR 模型准备失败: Unable to resolve host…`（**无前缀、无后缀、半角冒号**） |
+
+**未解决（转 VOCA-186 线，不在本单闭合）**：谁用哪棵树构建了 `dist/ispeech-internal-v1.6.apk`、
+为何与 `release/voca-186-v1.6` 源码不一致。`origin/agent/sre/voca-186-rebuild` 仍把它登记为 v1.6 出包。
+
+### 2026-11-24 · `main d9690f9` 同一被测包 · AVD 覆盖（R-4）
+
+> 上一版此处记的是 `bb1bf2b` 构建的 `ba37b578…`，但该 apk **未留原件、任何分支与证据包里都不存在**，
+> 第三方无法复算（第 4 次质检打回项 4）。本轮改为在**上面那张同一被测包**上重跑，原件可复算。
+
+| 项 | 值 |
+|---|---|
+| 源码基线 | `main` @ `d9690f9c7d22141013b904643b83b584c0381799`（同 §11 首节） |
+| 被测包 | **同一棵 `d9690f9` 的另一次构建**（非 §11 首节那个产物）。第 5 轮重建 sha256 `41f0659435fad741fb21cd0a1a6339ae161e9420382b42a2900857dc983e079a`（139,229,278 B）；第 4 轮为 `f02f3eeb…`、第 3 轮为 `15541ef7…` |
+| **为何不登记进 `dist/SHA256SUMS`** | 该 apk **139,229,278 B > GitHub 单文件 100 MB 硬限**，未跟踪时仓库自带门禁 `tools/verify/check_dist_manifest.py` 直接判 **FAIL**（原话「先进不了仓库，清单记了就是假答案」）。故不写入清单，改用下方 dex 口径复算 |
+| **可复算性口径（dex）** | `classes.dex` sha256 `199ffc59ff365d48abbc101915992f971ca62c86a28a6a2939118ca08ccc611d`(30,886,992 B) / `classes2.dex` `630bc14d8bde5d84a6fae615eb401f65e9ba52c2521f7651df3c61fb110e28ad`(7,906,032 B) / `classes3.dex` `d276f6188ec900ab6f0ac168d3415317776acd28be8a51fe205fdd0a60f432d1`(8,420,872 B)。按 `d9690f9` 重跑同一命令后比这三个 sha，即知是否同一份被测代码 |
+| **可复算性说明** | 同一棵树三次 `assembleRelease` 得到**三个不同 sha256**（`15541ef7…` / `f02f3eeb…` / `41f0659…`），但每次 **`classes*.dex` 逐字节相同**（47,213,896 B，符号计数 11/5/1/1/1/9/6 全同）⇒ APK 整体**不可**字节级复现（签名/zip 元数据带时间），**dex 可复现**。复核口径：`d9690f9` 重跑同一命令后比 dex 计数，不要追 apk sha |
+| 包内取证 | `VoskModelStore` 9 / `AsrModelDownloader` 5 / `AsrModelInstall` 11 / `AsrDownloadPolicy` 6 ⇒ 加固代码确在包内 |
+| 设备 | AVD `emulator-5554` / Android 14 / `sdk_gphone64_arm64` / uid `10196`；`versionName=1.5`（`main` 的 `build.gradle.kts` 未前进，仅版本标签） |
+| 引擎 | `asr_engine=VOSK`（写入 `files/datastore/ispeech_settings.preferences_pb`，因 ASR 设置页在 UI 上无入口） |
+
+| 用例 | 结果 | 关键证据 |
+|---|---|---|
+| **R-4** 切到 VOSK 引擎，走 `VoskModelStore` 下载 | ✅ 通过 | 第 5 轮实测：触发 16:03:57 → `model.zip.part` 出现（2,277,123 B@20s）→ 16:04:55 落成 `model`，**耗时 ≈58 s**；完整 `ls -laR` 见 `R4-vosk-lsR-full.txt`（54 行、14 个常规文件、**逐项求和 68,292,271 B**，与 `du -sb` 68,320,943 B 一致）；含 `model/am/final.mdl`(15,901,896)、`model/graph/Gr.fst`(26,082,259)、`graph/phones/word_boundary.int`(7,161)、`model/ivector/`（`final.dubm`/`final.ie`/`final.mat`/`global_cmvn.stats`/`online_cmvn.conf`）、`model/conf/model.conf`(289 B，就绪哨兵)；**无 `model.zip`、无 `.part` 残留**。`netstats` 本 bucket `rb` 45,567,856 ≈ 1.038× `EXPECTED_BYTES`(43,898,754) |
+
+**R-4 的判据已知差异**：§10 记载该源在「断点恰在整包长度处」会回 `416` + `text/html`，走
+`RETRY_FROM_START` 自愈。本轮是全新下载（无历史 `.part`），未复现该分支；该分支由
+`VoskModelStoreTest` 单测覆盖，不在本轮 AVD 证据内。
+
+**未覆盖（如实声明）**：
+- **R-3 语音上屏**：需真机麦克风（AVD 无音频输入），本轮未跑，**不得据此判定语音链路可用**。
+- **R-5 的 UI 文案**：仅取到 logcat 与文件系统证据，候选条提示文案未截图取证。
+- **VOSK 下载耗时**：第 5 轮实测 **≈58 s**（43.9 MB，境外单源；从触发到 `model` 落成）。早前版本写的「约 6 分钟」属 `bb1bf2b` 那轮，**不是本轮**，已更正。未做带宽归因。
+
 ## 变更记录
 
 | 日期 | 变更 | 证据 |
@@ -303,3 +435,37 @@ jobs:
 | 2026-11-09 | 新建；实测 `cvm` 被备案拦截、官方源可用、探测脚本上线 | 见 §1 与 issue VOCA-35 评论 |
 | 2026-11-09 | **默认源切到阿里云 OSS**；§1 复测 `cvm`（302 → dnspod 拦截页后 502 / 166 B）；新增 §5.1 落地配置、§6 OSS 行为差异、§7 成本与恢复、§8 检查表 OSS 项 | `check_model_host.py --sha256` 9/9 全绿、无参数探测 7/7 全绿、`check_static` 6/6、`check_crosscut` 138/138；见 VOCA-35 评论 |
 | 2026-11-18 | 新增 §10：Vosk 活链路（`voskModelUrl`）成为第二个模型源，客户端下载器与 FunASR 合一 | VOCA-474：`./gradlew :app:testDebugUnitTest --tests "com.ispeech.data.*"` 69/69（AsrModelInstall 19 + FunAsr 16 + PhraseCsvImport 13 + Vosk 21）、`check_crosscut` 183/183、`check_static` 6/6（2026-11-23 复跑） |
+| 2026-11-24 | 新增 §11 实测验证记录：v1.6 在 AVD 跑通 R-1/R-2/R-5；main `bb1bf2b`（PR #31）在 AVD 跑通 **R-4**（VOSK 43.9 MB 下载 → 65 MB `model` 目录）。R-3 需真机麦克风，仍未覆盖 | 见 §11 与 VOCA-476 评论 |
+| 2026-11-24 | **§11 换包重记**：原 `dist/ispeech-internal-v1.6.apk` 经复核 dex 无 `AsrModelInstall`/`VoskModelStore`（11-09~11-14 旧构建），降级为 §11.1 基线；改用 `main d9690f9` 重建包（`15541ef7…`，三方 sha 一致）重跑 R-1/R-2/R-5，日志出现 `funasr category=` 成对打点、全角冒号与 `期望完成标记=` 后缀，与源码一致 | 见 §11 与 VOCA-476 评论 |
+| 2026-11-25 | 新增 §11.3 收口口径与 §11.2 交付状态：PR #45（`99a10e5`，open/clean）；明确 R-3 为**唯一人类门**并给两条走法（真机窗口 / 书面豁免）与 11-27 12:00Z 到期默认（降范围，R-3 移交 VOCA-33 人类门） | 见 §11.2/§11.3 与 VOCA-476 评论 |
+### 11.2 交付与合并状态
+
+- **PR：[#45](https://github.com/forcoder/ispeech/pull/45)**，base `main`、head `agent/voca-476-r4` @ `99a10e5`，
+  `state=open` / `mergeable_state=clean` / `changed_files=1`（仅本文件）。由督导员于 2026-11-24 16:30Z 代建
+  （本 test-engineer 运行时无 gh 凭据，`~/.config/gh` 与 keychain 均无，匿名 `POST /pulls` 401）。
+- **合并窗口只取 `agent/voca-476-r4`**。`origin/agent/voca-476`（`7c58832`）作废：它新增的是
+  `## 10. 实测验证记录`，与本文件 §10（Vosk 源）编号冲突；两分支同时合入 `git merge-tree` rc=1。
+- **合入 `main` 属生产写入**，按项目规则 §二/§五 由人类在统一合并窗口执行，本单不自行合并。
+
+### 11.3 收口口径（2026-11-25 定，督导员 13:20Z 派）
+
+本单**除 R-3 外全部按 AVD 收口**，证据见 §11 首节与 §11.1 基线对照：
+
+| 项 | 状态 | 依据 |
+|---|---|---|
+| R-1 下载 + 产品落盘 | 行为通过（字面判据见下） | `funasr category=ARCHIVE_MISSING`、`model` 8 条目含就绪哨兵、`netstats` 净增 80,777,337 B |
+| R-2 坏 `.part` 自愈 | 通过 | `DIGEST_MISMATCH` → `RETRY_FROM_START` 整包重下；Δ=161,538,786 B（=续传 77,920,015 + 整包 77,920,048，+3.66% 协议开销） |
+| R-4 VOSK 下载 | 通过 | 65 MB `model`、`conf/model.conf` 就绪哨兵、`ls -laR` 54 行原件 |
+| R-5 断网失败可读 | 通过 | `funasr category=PREPARE_FAILED … 期望完成标记=…`，无脏 `.part` |
+| **R-3 语音上屏** | **未做 —— 唯一人类门** | AVD 无音频输入 |
+
+**R-1 字面判据**：原文要求 logcat 有 `AsrDownload` 起始终止打点，但全仓 `const val TAG` 中**不存在**
+该 tag（只有 `FunAsrModelStore` / `VoskModelStore`），任何构建都无法满足。本单按等价语义取证并如实
+标注「行为通过、字面判据不满足」，**未自行改写判据**。
+
+**唯一的未闭环项：R-3**。需人类提供以下任一：
+1. **真机窗口**：序列号后 4 位 `2917` 那台接入 runtime（或由持有者在真机上点一次麦克风说一句话，录屏 + logcat）；
+2. **书面豁免**：明确接受「R-3 留作残余风险」，本单按 AVD 收口。
+
+**到期默认（11-27 12:00Z）**：无真机窗口即按第 2 项降范围——R-3 单列移交 VOCA-33 的人类门，
+本单以 AVD 证据收口，PR #45 由人类在统一合并窗口合入。
