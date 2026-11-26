@@ -11,6 +11,9 @@ app/build/
 # 本机 Android SDK 配置（从 local.properties.example 复制）
 local.properties
 
+# 签名凭据不入库（VOCA-477）：从 keystore/keystore.properties.example 复制填写，或走环境变量
+keystore/keystore.properties
+
 # Native build
 .cxx/
 .externalNativeBuild/
