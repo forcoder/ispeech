@@ -272,6 +272,9 @@ def check_one_tap_fill() -> None:
     import importlib.util
     spec = importlib.util.spec_from_file_location("voca628_adb", ADB_SCRIPT)
     adb_mod = importlib.util.module_from_spec(spec)
+    # 动态加载的模块必须先注册进 sys.modules：取证脚本带 `from __future__ import annotations`，
+    # @dataclass 解析字符串注解时会走 sys.modules.get(cls.__module__)，未注册即返回 None 并崩溃。
+    sys.modules["voca628_adb"] = adb_mod
     spec.loader.exec_module(adb_mod)
     emu_props = {"ro.kernel.qemu": "1", "ro.boot.qemu": "1", "ro.hardware": "ranchu",
                  "ro.build.characteristics": "emulator", "ro.product.device": "emu64a",
