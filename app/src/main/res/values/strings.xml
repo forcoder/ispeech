@@ -247,6 +247,7 @@
     <string name="quick_cloud_login_required">请先登录 csBaby 账号</string>
     <string name="quick_cloud_added_success">云端简写「%1$s」已添加成功</string>
     <string name="quick_cloud_added_failed">云端简写「%1$s」添加失败：%2$s</string>
+    <string name="quick_cloud_refresh_failed">云端简写已添加，但刷新列表失败：%1$s；可到「csBaby 同步」页手动同步</string>
     <string name="sync_upload_partial">云端生效：新增 %1$d · 修改 %2$d · 删除 %3$d；%4$d 条未生效（后端不支持修改 / 删除）</string>
 <string name="asr_engine_vosk">离线识别（内置）</string>
 <string name="asr_engine_vosk_desc">内置 Vosk 中文模型，完全离线、不联网；首次使用需下载约 42MB 模型</string>
