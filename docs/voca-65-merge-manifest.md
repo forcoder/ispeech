@@ -11,7 +11,7 @@
 > | 文档段 | 三条取件（验收 `36403e6` / UX `9801d7f` / UI `02b7cee`） | **不变，仍三条**；本轮实测两份规格在 `origin/main` 上仍 MISSING、验收文件 main 版 532 行 vs v1.1.3 969 行 | 见 §2 |
 > | 代码段-1 | 合 PR #4 | **PR #4 不存在了**（CLOSED，`0168e59` 已入库）——**本节删除** | — |
 > | 代码段-2 | （无） | **PR #41**（VOCA-631 条目 1 本体，head `7fb70fd`，16 文件）——**它已完整包含 PR #39**，合它即覆盖 #39 | `gh pr merge` 或 squash cherry-pick |
-> | 代码段-3 | （无） | **PR #40**（VOCA-628 条目 5a，head **`5138ca9`**，8 文件 +1504/−37，质检已 `PASS-WITH-CAVEAT`、打回项 0；v4.2 已登记入窗，见 §6-c） | 同上 |
+> | 代码段-3 | （无） | **PR #40**（VOCA-628 条目 5a，head **`383d702`**（= `5138ca9` + R37 一行修复，见 §6-d），8 文件 +1507/−37，质检已 `PASS-WITH-CAVEAT`、打回项 0；v4.2 已登记入窗，见 §6-c） | 同上 |
 > | 代码段-4 | （无） | **PR #39**（VOCA-627 D-2，head `1870849`）**不再单独合**：`git diff --stat 1870849 7fb70fd` 对它的 5 个产品文件全部为净增，说明 #41 含 #39 的子集 | 不合，跳过 |
 >
 > **三条硬前提（v4 新增，缺一不可）**：
@@ -112,7 +112,7 @@ gh pr view 4 --repo forcoder/ispeech --json state,mergeable,mergeStateStatus,hea
 | 序 | 取件 | head | 文件数 | 前置于 | 状态 |
 |---|---|---|---|---|---|
 | 1 | **PR #41**（条目 1 本体 VOCA-631） | `7fb70fd` | 16 | 无 | `OPEN` / `base=bb1bf2b`（须 rebase）/ 质检 `PASS-WITH-CAVEAT` |
-| 2 | **PR #40**（条目 5a VOCA-628） | **`5138ca9`** | 8 | 无 | `OPEN` / `base=bb1bf2b`（须 rebase）/ 质检 `PASS-WITH-CAVEAT`、打回项 0 / **v4.2 已登记入窗 §6-c** |
+| 2 | **PR #40**（条目 5a VOCA-628） | **`383d702`** | 8 | 无 | `OPEN` / `base=bb1bf2b`（须 rebase）/ 质检 `PASS-WITH-CAVEAT`、打回项 0 / **v4.2 已登记入窗 §6-c；v4.3 已带 R37 一行修复** |
 | — | ~~PR #39（D-2 VOCA-627）~~ | `1870849` | 7 | — | **合并时跳过**：#41 已完整包含它的 5 个产品文件（`git diff --stat 1870849 7fb70fd` 全净增） |
 
 **顺序**：#41 → #40，理由 = #41 改 `IspeechImeService.kt` +127/-18（面板搜索状态），#40 同文件 +77/-9（AI 上屏分支），两者区域不重叠（实测 `git merge-file` 三方合并 **0 冲突**）；#41 先进 main，#40 后合时按「后合入者适配先合入者」rebase 一次即可。反过来也可，代价一样。
@@ -121,7 +121,7 @@ gh pr view 4 --repo forcoder/ispeech --json state,mergeable,mergeStateStatus,hea
 
 1. **rebase 到 `main@fd1d686` 或更新**（R32）：两条 base 都停在 `bb1bf2b`。v4.2 已补文件级冲突结论：`IspeechImeService.kt` 是 #40 与 main / #40 与 #41 的唯一重叠文件，三方合并 0 冲突（详见 §6-c 第 2 条）；全树级 `git merge-tree` 仍受沙箱限制未做。
 2. **`docs/quick-phrase-enhancement.md` 冲突**（只影响 #41）：main 的 §12.7 与 #41 的 §12.7 撞名，实测 1 处冲突块。**两节都保留**，#41 侧顺延为 §12.8/§12.9/§12.10 并改 3 处内部引用（`:766`/`:771`/`:830`）。
-3. **门禁复跑**：#41 侧 `tools/verify/check_*.py` 全绿（质检 11 只已复跑 `failed=0`）、`./gradlew :app:testDebugUnitTest` 与 main 基线对比零新增失败（`AgentDispatcherTest` 在 main 上即失败，不计回归）；#40 侧 **12/13 绿，`check_ai_suggest.py` 待修（R37）**——原写「13 只全绿」已撤回，见 §6-d 第 3 条。
+3. **门禁复跑**：#41 侧 `tools/verify/check_*.py` 全绿（质检 11 只已复跑 `failed=0`）、`./gradlew :app:testDebugUnitTest` 与 main 基线对比零新增失败（`AgentDispatcherTest` 在 main 上即失败，不计回归）；**#40 侧 13/13 绿（`383d702`，`/usr/bin/python3` = 3.9.6 下实测）**——R37 已在 v4.3 修掉，原「12/13」与更早的「13 只全绿」两版表述均以此为准，见 §6-d 第 2/3 条。
 4. **人类给一次 go**（合并 + 出包同一次答复）：见计划 §10 v3.14。合并本身可自主（工作区铁律 (a)~(d) 满足时），**出包与装真机仍等人类**。
 
 **回滚**：两条都是独立 PR，`git revert <squash sha>` 各自回退；#41 回退影响条目 1（搜索框中间编辑）与 D-2 渲染面，#40 回退影响条目 5a（AI 一步填入），互不牵连。回退后 `main` 的 `docs/quick-phrase-enhancement.md` 需确认回退没带走 VOCA-293 的 §12.7。
@@ -163,6 +163,8 @@ $ git merge-file … 7fb70fd + #40 → rc=0 / 冲突块 0
 
 **3. 门禁复跑（在 `5138ca9` 的干净导出树上跑，不在含 `ce8fb5f` 产物的工作区）**
 
+> **v4.3 加注**：本节读数是 `5138ca9` 在 **Python 3.15.2** 下的真实输出，但 `check_ai_suggest.py` 在 3.9.6 / 3.12.15 下会崩（R37，根因见下条）。R37 已由 `383d702` 修掉，**合并窗口请以 §6-d 第 3 条 `383d702` 的 13/13 读数为准**，本节保留供追溯。
+
 ```text
 $ git archive 5138ca9 | tar -x -C .verify && cd .verify
 $ for f in tools/verify/check_*.py; do /opt/homebrew/bin/python3.15 "$f" | tail -1; done
@@ -185,7 +187,7 @@ check_t9.py: passed=87 failed=0 warned=1
     spec.loader.exec_module(adb_mod)
 ```
 
-改后 3.9.6 与 3.12.15 均出 `SUMMARY: passed=60 failed=0`；同一棵树上补丁生效后，13 只脚本在 3.9.6 下 `failed=0`（见 §6-d 第 3 条）。**脚本归前端**（PR #40 作者），单轮可完，不阻塞本窗口；修复落地前窗口登记一律不得写「13 只全绿」。
+改后 3.9.6 与 3.12.15 均出 `SUMMARY: passed=60 failed=0`；同一棵树上补丁生效后，13 只脚本在 3.9.6 下 `failed=0`（见 §6-d 第 3 条）。**该修复已由 v4.3 落到 PR #40 分支 `383d702`**（PM 代为提交，作者仍是前端，见 §6-d 第 2 条），所以合并窗口取件用 `383d702` 即可，无需再等一轮前端返工。
 
 **4. AC-5a.3 的处置（本单唯一的实质性遗留）**
 
@@ -206,7 +208,7 @@ $ ioreg -p IOUSB -w0 -l | grep -A… 'MRR-W29@'   # USB 已枚举 HUAWEI MRR-W29
 | 序 | 取件 | head | 前置 | 谁执行 |
 |---|---|---|---|---|
 | 1 | PR #41（VOCA-631） | `7fb70fd` | rebase 到 `main@fd1d686` + `docs/quick-phrase-enhancement.md` 1 处冲突手工保留两节 | PM 出命令 · **人类 go** |
-| 2 | PR #40（VOCA-628） | **`5138ca9`** | rebase 到「#41 合入后的 main」；冲突按本次实测预期 0 | 同上 |
+| 2 | PR #40（VOCA-628） | **`383d702`** | rebase 到「#41 合入后的 main」；冲突按本次实测预期 0 | 同上 |
 
 出包与装真机仍属生产操作，**agent 不执行**；AC-5a.3 与 VOCA-127 六项一并进发布后真机回归。
 
@@ -226,7 +228,15 @@ remote: error: File dist/ispeech-release-1.5-20261119-1557.apk is 132.75 MB;
 ```
 
 - 根因：本任务分支的基线提交 `ce8fb5f`（"baseline — uncommitted work from the local directory"）把 `dist/` 下的 **132.75 MB release APK** 一起提交了，GitHub 单文件上限 100 MB 直接拒收**整条分支**（不是拒某个文件）。这正是仓库硬规则严禁提交大文件的那一条，属基线提交的既存问题，不是本轮引入。
-- 整改：v4.3 起，本清单**改为随 VOCA-65 附件交付**（沿用 v1–v4.1 全部 15 次的历史惯例：`docs/voca-65-merge-manifest.md` 与该文件本体同源），不再依赖一条推不上去的分支作为唯一送达路径。分支侧的 `dist/` 大文件清理另开 chore 单处理，不占用本单窗口。
+- 整改（两条路径都做了）：① 本清单**随 VOCA-65 附件交付**（沿用 v1–v4.1 全部 15 次的历史惯例）；② 另从 `origin/main` 切一条只含本文件的干净分支 **`pyt/docs/voca-65-merge-manifest-v4.3` = `91a4fbf`** 并推上 origin，质检与人类可直接 `git fetch` 取件：
+
+  ```text
+  $ git fetch origin pyt/docs/voca-65-merge-manifest-v4.3
+  $ git show FETCH_HEAD:docs/voca-65-merge-manifest.md | sed -n '/^## 6-d\./,/^## 6-b\./p'
+  $ git ls-remote origin | grep voca-65-merge-manifest      # → 91a4fbf… refs/heads/pyt/docs/voca-65-…
+  ```
+
+  该分支 `git diff --stat origin/main` **只含这一个文件（+297）**，不含 `dist/` 任何产物。任务分支上那个 132 MB blob 的清理另开 chore 单，不占用本单窗口。
 - 该文件在 `origin/main` 上**不存在**（`git ls-tree origin/main docs/voca-65-merge-manifest.md` 空）——它是 PM 工作产物，随 VOCA-65 附件流转，不进 main。
 
 **2. 打回项 ②：R37 根因订正（已回写 §6-c 第 3 条）**
@@ -244,12 +254,12 @@ $ /opt/homebrew/bin/python3.12 tools/verify/check_ai_suggest.py → SUMMARY: pas
 ```
 
 - 3.15 之所以能跑通，是它 `dataclasses` 用了 `getattr(root, …, None)` 吞掉 `None`（`inspect.getsource(dataclasses)` 实测），**不是版本门槛**，所以「换 3.10+ 解释器」这条处置建议是错的，已在 §6-c 撤回。
-- 修复归**前端工程师**（PR #40 的作者），一行改动；落地前本窗口一切复跑必须用 3.15 并注明解释器，不得再写「13 只全绿」。
+- **已落地**：修复以 `383d702` 提交并**快进推上 PR #40 分支 `feat/voca-628-ai-one-tap`**（`5138ca9..383d702`，`gh pr view 40` 复核 head / 8 文件 +1507−37 / `MERGEABLE`+`CLEAN`；对它单独 `gh api compare` 只有 `tools/verify/check_ai_suggest.py +3 −0`）。PM 代为提交是为了不再多耗一轮，脚本归属不变，前端可在后续 PR 上继续改。
 
-**3. 打回项 ③：「ai_suggest 60/0、13 只全绿」表述撤回（已回写 §6 表第 3 行）**
+**3. 打回项 ③：「ai_suggest 60/0、13 只全绿」表述撤回 → 现已重新成立（带前提）**
 
-- 撤回范围：§6 表「共同前置 3」已改写为 **12/13 绿，`check_ai_suggest.py` 待修（R37）**；§6-c 第 3 条的 13 行读数**保留原文本但加注**——它是 3.15.2 下的真实输出，不删；删的是「13 只全绿」这个未经解释器标注就下的结论。
-- §6-c 第 3 条的读数本身可复核：同一棵 `5138ca9` 导出树，在 3.9.6 下把上面那一行补丁打上后，13 只脚本**全部** `failed=0`（`check_quick_trigger` warned=1、`check_t9` warned=1 与 3.15 一致），说明补丁是充分条件、且没有掩盖其他失败。
+- 撤回与恢复是两件事，都已做：**撤回**的是「未经解释器标注的 13 只全绿」；**恢复**的是 `383d702` 树上、`/usr/bin/python3`（3.9.6）实跑的 13/13 `failed=0`——12 只原样通过，`check_ai_suggest.py` 是修好后通过（`passed=60 failed=0`，与 3.15.2 的结果一致）。§6 表「共同前置 3」据此改为 **13/13 绿（`383d702`）**。
+- §6-c 第 3 条的 13 行读数**保留原文本并加注**——它是 `5138ca9` 在 3.15.2 下的真实输出，不删，只标清解释器与已过期状态。
 
 **4. 未整改项与理由（诚实声明）**
 
