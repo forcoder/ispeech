@@ -784,6 +784,24 @@ python3 tools/verify/check_crosscut.py            # 13 节：三环齐全 + 先�
 ./gradlew :app:testDebugUnitTest --tests '*RemoteRulesChangesTest*'
 ```
 
+### 12.8 编辑替换与云端新增后的可见性（VOCA-74，2026-11-26 追加）
+
+两个「保存了但结果不对」的静默缺陷，均在 latest main 上复现后才修：
+
+| 缺陷 | 原实现 | 现实现 |
+| --- | --- | --- |
+| 编辑时改快捷字母留下孤儿条目 | `upsert` 只按**新** trigger 查找替换：把 `thx` 改成 `thks` 会追加一条，旧 `thx` 留在用户文件里——列表多一条、输入法两个字母都能命中 | 编辑弹窗记住 `originalTrigger`，确认时交给 `QuickPhraseEdits.upsert` 先按旧 trigger 移除再落位；纯列表逻辑抽成 `settings/quick/QuickPhraseEdits.kt`，可单测 |
+| 云端新增成功后列表不刷新 | `addCloudShortcut` 成功后只弹「已添加成功」，既不写盘也不 reload，新规则要等下次「从远程同步」才可见、才对输入法生效 | 成功后走 `refreshRemoteRulesAfterCloudAdd()`：`SyncRepository.pullAndWriteRemoteRules` 拉回远端规则（内部 publish `RemoteRulesChanges`，见 12.7）→ `AppContainer.invalidateEngine()` → `load()`。拉取失败如实提示（`quick_cloud_refresh_failed`），不回滚「已添加成功」 |
+
+快捷字母长度仍按 12.4 / `QuickTrigger` 的 2–12 位执行（ADR-0002 C1-1/C1-2）：单字母留给五笔一级简码，
+上限 12 取拼音态组合串天花板。VOCA-74 原文写的 1–8 位与 ADR-0002 冲突，未按原文放宽，
+需要改口径请走架构评审。
+
+```bash
+./gradlew :app:testDebugUnitTest --tests '*QuickPhraseEditsTest*'
+python3 tools/verify/check_quick_trigger.py   # check_add_edit_chain()
+```
+
 ## 13. 导入「通用短语.csv」（2026-11-09 追加）
 
 来源：产品给的搜狗 / csBaby 导出文件 `通用短语.csv`（235 行、GBK、61 KB）。目标是「导进常用语，

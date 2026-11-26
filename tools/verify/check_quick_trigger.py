@@ -706,6 +706,52 @@ def check_conflict_safety() -> None:
 
 
 
+def check_add_edit_chain() -> None:
+    """新增 / 编辑本地规则与云端新增后的可见性（VOCA-74）。
+
+    两条都是「保存了但看不到 / 旧条目没清掉」的静默缺陷：
+    编辑改快捷字母只按新 trigger 查找会留下孤儿；云端新增成功后不刷新，
+    新规则要等下次「从远程同步」才出现在列表、才对输入法生效。
+    """
+    screen = read(QUICK_SCREEN) if QUICK_SCREEN.exists() else ""
+    vm = read(QUICK_VM) if QUICK_VM.exists() else ""
+    doc = read(DOC) if DOC.exists() else ""
+
+    check(
+        "viewModel.upsert(current.toEntry(), current.originalTrigger)" in screen
+        and "originalTrigger = entry.trigger" in screen,
+        "编辑本地规则：确认时把旧快捷字母交给 upsert，改字母不留孤儿条目（VOCA-74）",
+        "QuickPhrasesScreen 编辑确认未传 originalTrigger：改快捷字母会追加新规则、旧条目残留",
+    )
+
+    upsert_body = vm.split("fun upsert(", 1)[1].split("\n    /**", 1)[0] if "fun upsert(" in vm else ""
+    check(
+        "QuickPhraseEdits.upsert(state.entries, entry, originalTrigger)" in upsert_body,
+        "QuickPhrasesViewModel.upsert 走 QuickPhraseEdits.upsert（编辑按旧触发词替换）",
+        "QuickPhrasesViewModel.upsert 未走 QuickPhraseEdits.upsert，编辑改字母会残留旧条目",
+    )
+
+    add_body = vm.split("fun addCloudShortcut(", 1)[1].split("\n    /**", 1)[0] if "fun addCloudShortcut(" in vm else ""
+    refresh_body = (
+        vm.split("private fun refreshRemoteRulesAfterCloudAdd(", 1)[1].split("\n    }", 1)[0]
+        if "private fun refreshRemoteRulesAfterCloudAdd(" in vm
+        else ""
+    )
+    check(
+        "refreshRemoteRulesAfterCloudAdd()" in add_body
+        and "SyncRepository.pullAndWriteRemoteRules(app)" in refresh_body
+        and "AppContainer.invalidateEngine()" in refresh_body,
+        "云端新增成功后重新拉取远端规则并重建引擎，新规则立刻可见、可命中（VOCA-74）",
+        "addCloudShortcut 成功后没有刷新链路，新规则要等下次「从远程同步」才可见",
+    )
+
+    check(
+        "### 12.8" in doc and "VOCA-74" in doc,
+        "docs/quick-phrase-enhancement.md 12.8：记录编辑替换与云端新增后的刷新链路",
+        "文档缺少 12.8（VOCA-74 编辑 / 云端新增可见性）说明",
+    )
+
+
 def check_cross_script_caliber() -> None:
     """§7.3 跨脚本口径：长度判定值只从 QuickTrigger 取，两个脚本不得各抄一份常量。
 
@@ -743,6 +789,7 @@ def main() -> int:
     check_remote_shortcut_chain()
     check_pinyin_state_quick_chain()
     check_conflict_safety()
+    check_add_edit_chain()
     check_cross_script_caliber()
     check_dtwsl_phrase()
     check_space_long_press_triggers_voice()

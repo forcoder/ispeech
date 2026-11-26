@@ -309,7 +309,7 @@ fun QuickPhrasesScreen(onBack: () -> Unit, onOpenSync: () -> Unit) {
             onChange = { editor = it },
             onDismiss = { editor = null },
             onConfirm = {
-                viewModel.upsert(current.toEntry())
+                viewModel.upsert(current.toEntry(), current.originalTrigger)
                 editor = null
             },
         )
@@ -632,6 +632,8 @@ private fun highlight(text: String, spans: List<IntRange>): androidx.compose.ui.
 /** 编辑弹窗的临时状态（编辑期间不直接改列表，确认后再落列表）。 */
 private data class QuickEditor(
     val isNew: Boolean = true,
+    /** 编辑前的快捷字母：确认时交给 upsert 按旧触发词替换，改字母不留孤儿条目。 */
+    val originalTrigger: String? = null,
     val trigger: String = "",
     val label: String = "",
     val content: String = "",
@@ -657,6 +659,7 @@ private data class QuickEditor(
     companion object {
         fun from(entry: QuickEntry) = QuickEditor(
             isNew = false,
+            originalTrigger = entry.trigger,
             trigger = entry.trigger.lowercase(),
             label = entry.label,
             content = entry.content,

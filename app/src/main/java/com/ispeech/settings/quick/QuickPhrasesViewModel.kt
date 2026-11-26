@@ -273,17 +273,18 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    /** 新增或按触发词覆盖同一规则。 */
-    fun upsert(entry: QuickEntry) {
-        val userEntry = entry.copy(source = QuickSource.USER)
+    /**
+     * 新增或按触发词覆盖同一规则。
+     *
+     * [originalTrigger] 非空表示这是一次编辑：改快捷字母时按旧触发词移除原条目，
+     * 否则旧条目会留在文件里成为孤儿（列表多一条、两个字母都能命中）。
+     */
+    fun upsert(entry: QuickEntry, originalTrigger: String? = null) {
         _uiState.update { state ->
-            val list = state.entries.toMutableList()
-            val index = list.indexOfFirst { it.trigger == userEntry.trigger }
-            if (index >= 0) list[index] = userEntry else list.add(userEntry)
             state.copy(
-                entries = list,
+                entries = QuickPhraseEdits.upsert(state.entries, entry, originalTrigger),
                 dirty = true,
-                tip = "已更新「${userEntry.trigger}」，点击右上角「保存并同步」写入并上传",
+                tip = "已更新「${entry.trigger}」，点击右上角「保存并同步」写入并上传",
             ).withMatches()
         }
     }
@@ -518,13 +519,14 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
                 )
                 client.createRule(auth, request)
             }
-            .onSuccess { rule ->
+            .onSuccess {
                 _uiState.update {
                     it.copy(
                         saving = false,
                         tip = app.getString(R.string.quick_cloud_added_success, keyword)
                     )
                 }
+                refreshRemoteRulesAfterCloudAdd()
             }
             .onFailure { throwable ->
                 _uiState.update {
@@ -538,6 +540,33 @@ class QuickPhrasesViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * 云端新增成功后把远端规则重新拉回本地并重建引擎。
+     *
+     * 只弹「已添加成功」而不刷新的话，新规则要等下次「从远程同步」才出现在列表、
+     * 才对输入法生效（VOCA-74）。拉取写盘会 publish [RemoteRulesChanges]，页面据此重读；
+     * 拉取失败如实提示，不回滚「已添加成功」这个事实。
+     */
+    private fun refreshRemoteRulesAfterCloudAdd() {
+        viewModelScope.launch {
+            runCatching { SyncRepository.pullAndWriteRemoteRules(app) }
+                .onSuccess {
+                    AppContainer.invalidateEngine()
+                    load()
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            tip = app.getString(
+                                R.string.quick_cloud_refresh_failed,
+                                throwable.message ?: "未知错误"
+                            )
+                        )
+                    }
+                }
         }
     }
 
