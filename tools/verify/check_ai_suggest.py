@@ -28,6 +28,10 @@ AI_SCREEN = ROOT / "app/src/main/java/com/ispeech/settings/ai/AiSettingsScreen.k
 AI_VM = ROOT / "app/src/main/java/com/ispeech/settings/ai/AiSettingsViewModel.kt"
 HOME = ROOT / "app/src/main/java/com/ispeech/settings/HomeScreen.kt"
 NAV = ROOT / "app/src/main/java/com/ispeech/settings/nav/IspeechNavGraph.kt"
+PANEL = ROOT / "app/src/main/java/com/ispeech/input/AiReplyPanel.kt"
+GUARD = ROOT / "app/src/main/java/com/ispeech/input/AiSourceGuard.kt"
+ADB_SCRIPT = ROOT / "tools/verify/voca628_ai_one_tap_adb.py"
+LAYOUT = ROOT / "app/src/main/res/layout/ime_input_view.xml"
 
 _passed = 0
 _failed = 0
@@ -173,6 +177,147 @@ def check_learning_chain() -> None:
     )
 
 
+def check_one_tap_fill() -> None:
+    """VOCA-65 条目 5a（VOCA-628）：一步填入。
+
+    面板必须先真的接上服务（历史缺陷：布局里声明了 AiReplyPanel，服务侧从未
+    findViewById，等于死代码），再满足「点行即上屏 / 长按或…进详情 / 原文校验不复制」。
+    """
+    service = read(SERVICE)
+    panel = read(PANEL)
+    layout = read(LAYOUT)
+
+    check(
+        "com.ispeech.input.AiReplyPanel" in layout and "ai_reply_panel" in layout,
+        "一步填入：布局里声明了 AI 结果面板",
+        "ime_input_view.xml 缺 AiReplyPanel",
+    )
+    check(
+        "findViewById<AiReplyPanel>(R.id.ai_reply_panel)" in service and "aiReplyPanel = replyPanel" in service,
+        "一步填入：服务侧真正接线面板（不是死代码）",
+        "IspeechImeService 未 findViewById / 未保存 aiReplyPanel",
+    )
+    check(
+        "replyPanel.onPick = { index -> commitAiReply(index) }" in service,
+        "一步填入：点行直接走 commitAiReply，不复制上屏路径",
+        "面板 onPick 未接到 commitAiReply(index)",
+    )
+    check(
+        "setOnClickListener { pick(index) }" in panel and "setOnLongClickListener" in panel,
+        "一步填入：点行上屏、长按进详情（AC-5a.1 / 5a.2）",
+        "AiReplyPanel 行点击/长按未分别接 pick / showDetail",
+    )
+    check(
+        "private fun showDetail(" in panel and "more" in panel,
+        "一步填入：详情页入口保留（长按 + 行尾…）",
+        "详情页入口丢失",
+    )
+    # AC-5a.3：替换校验只此一份，面板不得自己删原文
+    check(
+        "AiSourceGuard.shouldReplace(" in service,
+        "一步填入：原文替换校验走共享判定（AC-5a.3）",
+        "commitAiReply 未使用 AiSourceGuard",
+    )
+    check(
+        "deleteSurroundingText" in service and "deleteSurroundingText" not in panel,
+        "一步填入：删除原文只发生在服务侧一条路径",
+        "面板内出现 deleteSurroundingText 副本",
+    )
+    guard = read(GUARD)
+    check(
+        "beforeCursor == sourceText" in guard,
+        "一步填入：校验是「逐字相等」而非仅比长度",
+        "AiSourceGuard 未做逐字比较",
+    )
+    check(
+        "if (panel == Panel.AI_REPLY) closePanel()" in service,
+        "一步填入：上屏后关闭面板（AC-5a.1）",
+        "commitAiReply 未在 AI 面板打开时关闭面板",
+    )
+    check(
+        "aiReplyPanel?.submit(emptyList())" in service,
+        "一步填入：无结果 / 失败时清空面板（AC-5a.4）",
+        "dismissAiState 未清空面板结果",
+    )
+    # ── adb 取证脚本自身的判据（VOCA-628 质检三轮打回的地方）──
+    # 脚本是 AC 的唯一复现入口，它的判据烂了会让「真机上通过」这件事无从核实，
+    # 所以这里把三处已裁决的口径钉成静态断言，避免下一轮又按坐标猜 / 又空断言 PASS。
+    adb = read(ADB_SCRIPT)
+    check(
+        "def find_result_rows(" in adb and "w - 210" in adb,
+        "取证脚本：结果行与「…」按截图自扫定位，不按 W−16dp 猜",
+        "voca628 脚本未自扫白底行带 / 行尾暗列",
+    )
+    check(
+        "skipped: bool = False" in adb and "def skip(" in adb,
+        "取证脚本：区分 PASS / FAIL / SKIP，未取证不冒充通过",
+        "脚本缺 SKIP 档，快捷短语模式会把 5a.5 空断言报成 PASS",
+    )
+    check(
+        "if not d.open_ai_panel():" in adb and "return 2" in adb,
+        "取证脚本：5a.0 前置失败硬停，不继续判后续用例",
+        "open_ai_panel 失败后仍往下执行",
+    )
+    check(
+        "expect_results=False" in adb and "def panel_open(" in adb,
+        "取证脚本：空态面板与「AI 键点不中」分开判",
+        "空态面板会被误报成 AI 键定位失败",
+    )
+    check(
+        "def emulator_reasons(" in adb and "ro.kernel.qemu" in adb
+        and 'args.strict_device and "emulator" in args.serial' not in adb,
+        "取证脚本：--strict-device 按设备属性判真机，不看 serial 字符串",
+        "仍按 serial 子串判真机，换名接入的模拟器可冒充真机把 5a.3 打成 PASS",
+    )
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("voca628_adb", ADB_SCRIPT)
+    adb_mod = importlib.util.module_from_spec(spec)
+    # 动态加载的模块必须先注册进 sys.modules：取证脚本带 `from __future__ import annotations`，
+    # @dataclass 解析字符串注解时会走 sys.modules.get(cls.__module__)，未注册即返回 None 并崩溃。
+    sys.modules["voca628_adb"] = adb_mod
+    spec.loader.exec_module(adb_mod)
+    emu_props = {"ro.kernel.qemu": "1", "ro.boot.qemu": "1", "ro.hardware": "ranchu",
+                 "ro.build.characteristics": "emulator", "ro.product.device": "emu64a",
+                 "ro.product.model": "sdk_gphone64_arm64", "ro.product.manufacturer": "Google"}
+    real_props = {"ro.kernel.qemu": "", "ro.boot.qemu": "", "ro.hardware": "qcom",
+                  "ro.build.characteristics": "nosdcard", "ro.product.device": "raven",
+                  "ro.product.model": "Pixel 6 Pro", "ro.product.manufacturer": "Google"}
+    check(
+        bool(adb_mod.emulator_reasons(emu_props)) and not adb_mod.emulator_reasons(real_props),
+        "取证脚本：emulator_reasons 模拟器拒、真机放",
+        f"模拟器={adb_mod.emulator_reasons(emu_props)} "
+        f"真机={adb_mod.emulator_reasons(real_props)}",
+    )
+    check(
+        "def require_pillow(" in adb and "pip install Pillow" in adb
+        and "except ImportError:\n        return []" not in adb,
+        "取证脚本：缺 Pillow 在连设备前硬停（rc=2），不静默吞成「结果行 0 条」",
+        "Pillow 缺失会被记成 AC FAIL —— 工具缺失伪装成产品缺陷（2026-11-26 打回项 1）",
+    )
+    check(
+        "ai_panel_title" in adb and "无结果" in adb,
+        "取证脚本：5a.4 断言空态标题含「无结果」且点空白区后不再变",
+        "5a.4 只判输入框 / 进程，文案没有断言（2026-11-26 打回项 2）",
+    )
+    check(
+        "private fun setTitle(" in panel and "ai_panel_title text=" in panel
+        and "aiReplyPanel?.setStatus(statusText.orEmpty())" not in service,
+        "空态标题只写「无结果」且走唯一可观测入口（AC-5a.4）",
+        "面板标题仍被失败 / 未登录文案覆盖，或绕开了 setTitle 的日志",
+    )
+    check(
+        "submitAiResults(" in service,
+        "一步填入：结果灌入面板带来源日志（AC-5a.5 可观测）",
+        "缺少 submitAiResults 结构化日志",
+    )
+    test = ROOT / "app/src/test/java/com/ispeech/input/AiSourceGuardTest.kt"
+    check(
+        test.exists() and "shouldReplace" in read(test),
+        "一步填入：替换校验有 JVM 单测覆盖",
+        "缺 AiSourceGuardTest",
+    )
+
+
 def check_settings_ui() -> None:
     screen = read(AI_SCREEN)
     check(
@@ -227,6 +372,7 @@ def main() -> int:
     check_settings_store()
     check_generation_chain()
     check_learning_chain()
+    check_one_tap_fill()
     check_settings_ui()
     print("-" * 62)
     print(f"SUMMARY: passed={_passed} failed={_failed}")

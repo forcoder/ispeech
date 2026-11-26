@@ -4,8 +4,13 @@
 对「智语 iSpeech」仓库做一轮可自动化的检查与回归。只用 Python 3 标准库，
 不联网、不 `pip install`、不依赖编译。
 
-> 唯一例外：`check_model_host.py` 需要联网（它探测的是外部模型托管源），
+> 例外一：`check_model_host.py` 需要联网（它探测的是外部模型托管源），
 > 因此**不在离线自查套件里**，单独按需 / 定时运行。
+>
+> 例外二：`voca628_ai_one_tap_adb.py` 需要 **Pillow**（`python3 -m pip install Pillow`）
+> 与 `adb` + 一台装了 debug 包的设备。它靠截图像素定位输入法窗口（IME 窗口不在
+> uiautomator 层级里），标准库解不了 PNG。缺 Pillow 时脚本在连设备前直接退出 `rc=2`，
+> **不会**把「没装工具」记成某条 AC 的 `FAIL`。
 
 ## 运行方式
 
@@ -143,6 +148,45 @@ manifest 里 `MainActivity` 声明 `singleTask`（否则复用实例时 `onNewIn
 ```bash
 python3 tools/verify/check_crosscut.py
 ```
+
+## voca628_ai_one_tap_adb.py —— AI 结果一步填入的黑盒复现（**需设备**）
+
+上面这些脚本都是纯静态的；这一支不同：它用 `adb` 驱动一台**已装 debug 包**
+的设备（模拟器或真机），按 `docs/requirements/VOCA-65-acceptance.md` AC-5a.1~5a.5
+逐条判定。存在的原因是那 5 条 AC 里有关键的**真实时序**（`getTextBeforeCursor`
+在生成后是否仍等于原文、点行后软键盘是否真的回来），JVM 单测覆盖不到。
+
+```bash
+# 前置：python3 -m pip install Pillow   （缺了直接 rc=2 退出，不产出任何 AC 读数）
+# 短语模式：3 条短语命中，离线可跑（5a.1 / 5a.2 / 5a.3 / 5a.4）
+python3 tools/verify/voca628_ai_one_tap_adb.py --serial emulator-5554
+
+# 模型模式：本机起 OpenAI 兼容假端点 + adb reverse，验 5a.5 的采纳率与 few-shot 落盘
+python3 tools/verify/voca628_ai_one_tap_adb.py --serial emulator-5554 --mock-llm
+
+# 真机门禁：模拟器上的证据不算过（AC-5a.3 要求真机）
+python3 tools/verify/voca628_ai_one_tap_adb.py --serial <真机> --strict-device
+```
+
+实现要点（照抄这些命令时能省掉踩坑）：
+
+- **输入法窗口不在 `uiautomator` 的层级里**，`dump` 只能看到宿主应用。键盘 / 面板的
+  坐标按截图色块推断：工具栏 = IME 窗口自上而下第一处能切成恰好 8 段的等宽行；
+  面板行 = 白色横条；`IME 窗口高度变化` 用来判「面板收起」「详情页展开」。
+- **点 AI 键要看结果再往下走**：坐标是推出来的，落点偶尔偏到相邻键（短语 / 语音），
+  所以每次点完校验「软键盘已隐藏（面板已开）」，没开就重新截图定位重点。
+- **`输入` 的 needle 别用 `1` 这类字符**：内置 `quick_phrases.txt` 里就有包含它的规则，
+  会先命中快捷短语而不是走模型；模型模式默认用 `zzqa`。
+- **模型模式不碰外网也不碰真 Key**：脚本自己起假端点，用 `adb reverse tcp:18080`
+  让设备侧 `127.0.0.1:18080` 指向宿主机（模拟器 / 真机同一条命令都成立）。
+  输入里带 `zzfail` 时假端点回 500，用来构造 5a.4 的「生成失败」空态。
+- **5a.5 的统计窗口要收紧到「点行上屏」这一步**：每打开一次面板都会让「生成次数」+1，
+  所以断言的是「点行前后：生成数不变、采纳数 +1」，再核对 `ai_learning.txt` 多出含本次
+  回复的数据行。
+
+局限：脚本依赖 debug 包的面板 / 键盘配色（`#FFFFFF` 行底、`#E4E7EC` 键间空隙），
+换主题或改配色需要同步这两处常量；宿主应用默认用系统「设置」的搜索框，换宿主需改
+`open_host_field()`。
 
 ## 局限（这些脚本覆盖不到的东西）
 

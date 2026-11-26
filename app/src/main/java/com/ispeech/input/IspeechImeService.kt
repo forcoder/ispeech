@@ -115,6 +115,9 @@ class IspeechImeService : InputMethodService() {
         /** AI 生成时从输入框读取的最大字符数 */
         private const val AI_MAX_MESSAGE_CHARS = 1000
 
+        /** AI 结果面板的生成中占位文案（面板与候选条同一句，避免两处不同步）。 */
+        private const val AI_STATUS_GENERATING = "AI 生成中…"
+
         /** AI 键一次最多给出的快捷短语候选数 */
         private const val QUICK_REPLY_LIMIT = 20
 
@@ -162,7 +165,7 @@ class IspeechImeService : InputMethodService() {
      */
 
     /** 当前展示的辅助面板 */
-    private enum class Panel { NONE, QUICK_PHRASE, CLIPBOARD, SWITCH_IME, SETTINGS }
+    private enum class Panel { NONE, QUICK_PHRASE, CLIPBOARD, SWITCH_IME, SETTINGS, AI_REPLY }
 
     private var engine: CompositeEngine? = null
 
@@ -226,6 +229,15 @@ class IspeechImeService : InputMethodService() {
     private var clipboardPanel: ClipboardPanel? = null
     private var inputMethodPanel: InputMethodPanel? = null
     private var settingsPanel: SettingsPanel? = null
+
+    /**
+     * AI 参考结果面板（VOCA-65 条目 5a）。
+     *
+     * 历史上这块 UI 存在但没接线（`AiReplyPanel` 只在布局里声明、服务侧从未 findViewById），
+     * 所以「一步填入」在接线前不是一个可测的行为：AI 结果只走候选条一条路径。
+     * 现在重新接上：点行 = [commitAiReply]，长按行 / 点行尾「…」= 详情页。
+     */
+    private var aiReplyPanel: AiReplyPanel? = null
 
     /** 输入统计（字数 / 命中率 / Top 词），落盘在 filesDir/input_stats.txt */
     private val stats: InputStats by lazy { InputStats.get(this) }
@@ -401,6 +413,13 @@ class IspeechImeService : InputMethodService() {
         panelSettings.onAsrChange = { next -> applyAsrChange(next) }
         panelSettings.onChineseInputMethodChange = { next -> applyChineseInputMethodChange(next) }
         settingsPanel = panelSettings
+
+        // AI 参考结果面板（VOCA-65 条目 5a）：点行一步上屏，长按行 / 点「…」看全文。
+        // 两个入口都收敛到 commitAiReply —— 生成前原文的替换校验只此一份，不在面板里复制。
+        val replyPanel = root.findViewById<AiReplyPanel>(R.id.ai_reply_panel)
+        replyPanel.onPick = { index -> commitAiReply(index) }
+        replyPanel.onClose = { closePanel() }
+        aiReplyPanel = replyPanel
 
         root.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1473,6 +1492,11 @@ class IspeechImeService : InputMethodService() {
                 statusText = getString(R.string.settings_panel_title)
                 renderCandidateView()
             }
+            Panel.AI_REPLY -> {
+                // 结果由 startAiReply 灌入；这里只清空占位，避免上一轮结果闪一下再被替换
+                aiReplyPanel?.submit(emptyList())
+                aiReplyPanel?.setStatus(AI_STATUS_GENERATING)
+            }
             Panel.NONE -> Unit
         }
     }
@@ -1491,13 +1515,14 @@ class IspeechImeService : InputMethodService() {
     /** 各内容视图显示切换：快捷短语面板与软键盘同屏，其余面板独占内容区 */
     private fun updatePanelVisibility() {
         // 快捷短语面板打开时保持软键盘可见（面板在上、键盘在下），以便用软键盘在面板内搜索；
-        // 剪贴板 / 切换输入法面板打开时隐藏软键盘（维持原行为）。
+        // 剪贴板 / 切换输入法 / AI 结果面板打开时隐藏软键盘（维持原行为）。
         val showKeyboard = panel == Panel.NONE || panel == Panel.QUICK_PHRASE
         softKeyboard?.visibility = if (showKeyboard) View.VISIBLE else View.GONE
         quickPhrasePanel?.visibility = if (panel == Panel.QUICK_PHRASE) View.VISIBLE else View.GONE
         clipboardPanel?.visibility = if (panel == Panel.CLIPBOARD) View.VISIBLE else View.GONE
         inputMethodPanel?.visibility = if (panel == Panel.SWITCH_IME) View.VISIBLE else View.GONE
         settingsPanel?.visibility = if (panel == Panel.SETTINGS) View.VISIBLE else View.GONE
+        aiReplyPanel?.visibility = if (panel == Panel.AI_REPLY) View.VISIBLE else View.GONE
     }
 
     /** 读取全部快捷规则（内置 + csBaby 远端 + 用户），IO 线程解析后交给面板渲染 */
@@ -2102,7 +2127,13 @@ class IspeechImeService : InputMethodService() {
     /** 点击 AI 键：以输入框当前文本为消息，调用后端生成回复候选。 */
     private fun startAiReply() {
         if (aiBusy) return
-        if (panel != Panel.NONE) closePanel()
+        // 参考结果同时进列表面板（一行一条，点行即上屏）与候选条（空格 / 回车仍可上屏首位）：
+        // 候选条是既有入口，保留；面板是「一步填入」的主路径（VOCA-65 条目 5a）。
+        if (panel != Panel.AI_REPLY) openPanel(Panel.AI_REPLY)
+        aiReplyPanel?.submit(emptyList())
+        aiReplyPanel?.setStatus(AI_STATUS_GENERATING)
+        // 空结果 / 失败一律只清列表、不覆盖标题：面板标题留在「无结果」这一档（AC-5a.4），
+        // 具体原因（未登录 / AI失败）继续走 statusText 显示在候选条上，两边各说各的。
         commitPending()
         clearAssociation()
         val message = currentInputConnection
@@ -2111,6 +2142,8 @@ class IspeechImeService : InputMethodService() {
             .orEmpty()
         if (message.isBlank()) {
             statusText = "请先输入要回复的内容"
+            aiReplyPanel?.submit(emptyList())
+            Log.i(TAG, "ai_skip reason=blank_input panelOpen=${panel == Panel.AI_REPLY}")
             candidates = emptyList()
             aiReplyActive = false
             renderCandidateView()
@@ -2136,6 +2169,8 @@ class IspeechImeService : InputMethodService() {
                     statusText = null
                     codeOverride = "快捷短语"
                     candidates = phrases
+                    // 面板与候选条同源：面板一行一条供「点行即上屏」，候选条保留空格 / 回车上屏
+                    submitAiResults(phrases.map { it.insertText }, "quick_phrase")
                     renderCandidateView()
                     return@launch
                 }
@@ -2148,6 +2183,7 @@ class IspeechImeService : InputMethodService() {
                         } else {
                             "未登录：请先在设置页登录 csBaby"
                         }
+                        aiReplyPanel?.submit(emptyList())
                         candidates = emptyList()
                         renderCandidateView()
                     }
@@ -2176,6 +2212,7 @@ class IspeechImeService : InputMethodService() {
                                 kind = LookupKind.QUICKAPPLY,
                             ),
                         )
+                        submitAiResults(listOf(reusable.reply), "learned")
                         renderCandidateView()
                         return@launch
                     }
@@ -2195,6 +2232,7 @@ class IspeechImeService : InputMethodService() {
                     if (auth == null) {
                         if (seq == aiRequestSeq) {
                             statusText = "未登录：请先在设置页登录 csBaby"
+                            aiReplyPanel?.submit(emptyList())
                             candidates = emptyList()
                             renderCandidateView()
                         }
@@ -2221,10 +2259,13 @@ class IspeechImeService : InputMethodService() {
                         kind = LookupKind.QUICKAPPLY,
                     ),
                 )
+                // 面板与候选条同一份结果：点行 = 一步上屏，候选条仍可空格 / 回车
+                submitAiResults(listOf(reply), "model")
                 renderCandidateView()
             } catch (e: Exception) {
                 if (seq == aiRequestSeq) {
                     statusText = "AI失败：" + shortText(e.message ?: "未知错误", 60)
+                    aiReplyPanel?.submit(emptyList())
                     candidates = emptyList()
                     renderCandidateView()
                 }
@@ -2283,18 +2324,26 @@ class IspeechImeService : InputMethodService() {
                 .toList()
         }
 
-    /** 上屏 AI 回复（或第 [index] 条快捷短语候选）；若输入框仍是生成前原文，先删除原文（替换语义）。 */
+    /**
+     * 上屏 AI 回复（或第 [index] 条快捷短语候选）；若输入框仍是生成前原文，先删除原文（替换语义）。
+     *
+     * 全部入口共用这一条路径：面板点行（一步填入，VOCA-65 AC-5a.1）、详情页「上屏」、
+     * 候选条点击 / 空格 / 回车。生成前原文的替换校验走 [AiSourceGuard]（AC-5a.3）：
+     * 用户改过输入框就只插入、不删除，绝不会因为点了 AI 结果而抹掉刚写的字。
+     */
     private fun commitAiReply(index: Int = 0) {
         val candidate = candidates.getOrNull(index) ?: return
         // AI 回复是整段文本上屏，且不经过 [commit]：显式中断，避免它与上一跳单字凑成词
         phraseTracker.onInterrupt()
         markSelfWrite()
         val ic = currentInputConnection
-        if (ic != null && aiSourceLen > 0) {
-            val before = ic.getTextBeforeCursor(aiSourceLen, 0)?.toString().orEmpty()
-            if (before == aiSourceText) {
-                ic.deleteSurroundingText(aiSourceLen, 0)
-            }
+        if (ic != null && AiSourceGuard.shouldReplace(
+                ic.getTextBeforeCursor(aiSourceLen, 0)?.toString(),
+                aiSourceText,
+                aiSourceLen,
+            )
+        ) {
+            ic.deleteSurroundingText(aiSourceLen, 0)
         }
         ic?.commitText(candidate.insertText, 1)
         lastCommit = candidate.insertText
@@ -2306,10 +2355,25 @@ class IspeechImeService : InputMethodService() {
                 runCatching { aiLearning.recordAccepted(source, reply) }
             }
         }
+        // AC-5a.5 的可观测点：采纳与生成走同一对计数，一步填入与详情页「上屏」等价
+        Log.i(TAG, "ai_adopt index=$index fromModel=$aiReplyFromModel len=${candidate.insertText.length}")
         dismissAiState()
         buffer = ""
         candidates = emptyList()
+        // 上屏后收起参考结果面板，回到键盘（AC-5a.1「面板关闭」）
+        if (panel == Panel.AI_REPLY) closePanel()
         renderCandidateView()
+    }
+
+    /**
+     * 把参考结果灌进面板，并留一条结构化日志。
+     *
+     * 面板与候选条是同一份结果的两种呈现，必须同一时刻一起变；日志用来在真机上确认
+     * 「点位到的是哪条路径」（快捷短语 / 学习复用 / 模型），不打印正文——只记条数与来源。
+     */
+    private fun submitAiResults(list: List<String>, source: String) {
+        aiReplyPanel?.submit(list)
+        Log.i(TAG, "ai_results source=$source count=${list.size} panelOpen=${panel == Panel.AI_REPLY}")
     }
 
     /** 清空 AI 提示 / 候选；有请求进行中时使旧结果失效。 */
@@ -2328,6 +2392,8 @@ class IspeechImeService : InputMethodService() {
         aiReplyFromModel = false
         aiSourceText = ""
         aiSourceLen = 0
+        // 面板里的结果与 aiSourceText / candidates 同生命周期：状态一清，旧结果不能再点
+        aiReplyPanel?.submit(emptyList())
     }
 
     // ──────────────────────────────────────────────
