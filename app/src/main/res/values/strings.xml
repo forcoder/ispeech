@@ -190,6 +190,10 @@
     <string name="voice_audio_error">录音失败，请检查麦克风是否被其它应用占用</string>
     <string name="voice_error">语音识别失败，请重试</string>
     <string name="voice_error_code">语音识别失败（错误码 %1$d）</string>
+    <!-- 超时兜底文案：每段「识别中」都有时限，到点必须复位并说清下一步该做什么（见 AsrTiming） -->
+    <string name="voice_timeout_service">识别服务没有响应，已结束本次语音输入；请重试，或在「设置 → 语音识别」更换引擎</string>
+    <string name="voice_timeout_result">等识别结果超时，已结束本次语音输入；请再说一次</string>
+    <string name="voice_timeout_session">说话时间过长，本次语音输入已自动结束；请分短句再说一次</string>
     <string name="voice_panel_listening">正在聆听…</string>
     <string name="voice_panel_hint">松开上屏 · 上滑取消</string>
     <string name="voice_panel_hint_cancel">松开取消</string>

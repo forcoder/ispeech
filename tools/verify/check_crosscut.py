@@ -20,6 +20,8 @@
   8. 语音输入（VOICE / ASR）全链路：KeyDef -> 工具栏 -> 服务状态机 -> VoiceInputController
      -> Manifest 权限 / queries -> AsrSettings -> 设置页 / 输入法内快捷面板 / 麦克风授权提示
      （VOCA-166：未授权跳转只由用户点候选条「去授权」触发，语音键路径不再自动跳页）
+  8b. 语音「识别中」超时收敛（VOCA-231）：时限集中定义 -> 三段兜底 -> 超时必复位 + 可读文案
+     -> 三种引擎（系统 / FunASR / Vosk）都接线 + 服务侧单一收尾出口
  9. 用户词库（模式维度 / 自造词 / 拼音态）：UserDictMode 声明 -> 文件格式兼容 -> 引擎按模式
      过滤 -> 服务长按记词 + 学习分流 -> 拼音态查询含用户词库 -> 短语不污染编码空间
 10. 分类词库（细胞词库）：存储 / 索引解析 / 稳定 id / 分类头 / 引擎接线 / 设置页安装启停
@@ -92,6 +94,11 @@ INPUT_MODE_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "
 ASSOCIATION_COMMIT = JAVA / "engine" / "AssociationCommit.kt"
 
 VOICE_CONTROLLER = JAVA / "input" / "VoiceInputController.kt"
+ASR_TIMING = JAVA / "input" / "AsrTiming.kt"
+ASR_TRACE = JAVA / "input" / "AsrTrace.kt"
+VOSK_ENGINE = JAVA / "input" / "VoskSpeechEngine.kt"
+FUNASR_ENGINE = JAVA / "input" / "FunAsrSpeechEngine.kt"
+ASR_TIMING_TEST = ROOT / "app" / "src" / "test" / "java" / "com" / "ispeech" / "input" / "AsrTimingTest.kt"
 SETTINGS_PANEL = JAVA / "input" / "SettingsPanel.kt"
 ASR_SETTINGS = JAVA / "settings" / "store" / "AsrSettings.kt"
 ASR_SCREEN = JAVA / "settings" / "asr" / "AsrSettingsScreen.kt"
@@ -946,7 +953,7 @@ def check_voice_chain() -> None:
         "voiceController?.destroy()",
         "voiceActive",
         "private fun commitVoice()",
-        "private fun cancelVoice()",
+        "private fun cancelVoice(",
         'codeOverride = "语音"',
     )
     missing = [t for t in service_tokens if t not in service]
@@ -1196,6 +1203,123 @@ def check_voice_chain() -> None:
         f"语音 / ASR 文案中英键名一致（{len(zh_pairs)} 项）",
         f"中英键名不一致：仅中文 {sorted(zh_pairs - en_pairs)}，仅英文 {sorted(en_pairs - zh_pairs)}",
     )
+
+
+# ═════════════════════════════════════════════════════════════
+# 8b. 语音「识别中」超时收敛（VOCA-231）
+# ═════════════════════════════════════════════════════════════
+
+
+def check_voice_timeouts() -> None:  # noqa: C901 - 一节内做完全部断言，便于整段回滚
+    """卡住的判据：每个阶段都有时限、时限只有一处定义、到点必须复位且给出可读文案。"""
+    timing = read(ASR_TIMING)
+    controller = read(VOICE_CONTROLLER)
+    service = read(SERVICE)
+
+    # 8b.1 集中定义：不允许再出现第二个写超时的地方（共享规程 §7 禁散落魔法值）
+    consts = {"FIRST_CALLBACK_TIMEOUT_MS", "FINISH_TIMEOUT_MS", "SESSION_TIMEOUT_MS",
+              "UI_SESSION_TIMEOUT_MS", "NO_AUDIO_TIMEOUT_MS"}
+    missing = [c for c in sorted(consts) if not re.search(rf"\bconst val {c}\b", timing)]
+    check(not missing, f"AsrTiming 集中声明 {len(consts)} 条时限常量", f"AsrTiming 缺常量：{missing}")
+
+    # 时限只许在 AsrTiming 定义：范围是 ASR 链路这几个文件（网络客户端自己的连接超时不在此列）
+    chain = [VOICE_CONTROLLER, VOSK_ENGINE, FUNASR_ENGINE, SERVICE, ASR_TRACE]
+    strays = []
+    for path in chain:
+        body = strip_comments(read(path))
+        hits = re.findall(r"\b[A-Z][A-Z0-9_]*TIMEOUT[A-Z0-9_]*\s*=\s*[0-9]", body)
+        if hits:
+            strays.append(f"{rel(path)} {sorted(set(hits))}")
+    check(not strays, "ASR 链路时限只在 AsrTiming 定义（无第二处魔法值）",
+          f"另有文件写死了超时数值，请并入 AsrTiming：{strays}")
+
+    check("UI_SESSION_TIMEOUT_MS = SESSION_TIMEOUT_MS + FINISH_TIMEOUT_MS" in timing,
+          "UI 侧兜底 = 会话上限 + 收尾窗口（引擎自动收尾先走完，UI 才掐）",
+          f"{rel(ASR_TIMING)} 的 UI_SESSION_TIMEOUT_MS 不再是 SESSION+FINISH")
+
+    # 8b.2 三个「识别中」来源都必须挂表，且到点必须复位 + 给文案
+    sys_watchdogs = all(t in controller for t in (
+        "postDelayed(startWatchdog, AsrTiming.FIRST_CALLBACK_TIMEOUT_MS)",
+        "postDelayed(sessionWatchdog, AsrTiming.SESSION_TIMEOUT_MS)",
+        "postDelayed(finishWatchdog, AsrTiming.FINISH_TIMEOUT_MS)",
+        "private fun resetOnTimeout(stage: String)",
+        "AsrTiming.messageFor(stage)",
+    ))
+    check(sys_watchdogs, "系统识别链路三段都有兜底时限，且超时统一走 resetOnTimeout（复位 + 文案）",
+          f"{rel(VOICE_CONTROLLER)} 系统识别超时接线缺项")
+    check('"watchdog" to "none"' not in controller + read(VOSK_ENGINE) + read(FUNASR_ENGINE),
+          "没有任何一条 start 埋点再报告 watchdog=none（= 该阶段无时限）",
+          "仍存在 watchdog=none 的开始收音打点")
+
+    for name in ("VoskSpeechEngine", "FunAsrSpeechEngine"):
+        body = read(JAVA / "input" / f"{name}.kt")
+        offline_ok = all(t in body for t in (
+            "postDelayed(startWatchdog, AsrTiming.FIRST_CALLBACK_TIMEOUT_MS)",
+            "postDelayed(finishWatchdog, AsrTiming.FINISH_TIMEOUT_MS)",
+            "AsrTiming.NO_AUDIO_TIMEOUT_MS",
+            "private fun resetOnTimeout(stage: String)",
+        ))
+        check(offline_ok, f"{name} 离线引擎有开始 / 收尾 / 无音频三类兜底",
+              f"{rel(JAVA / 'input' / (name + '.kt'))} 离线引擎超时接线缺项")
+        # 工作线程可能永远不返回（卡在 read()），复位不能只等它自己收尾
+        leaks = [fn for fn in ("cancel", "destroy")
+                 if "isListening = false" not in function_region(body, rf"fun {fn}\(\)")]
+        check(not leaks, f"{name} 的 cancel / destroy 就地复位 isListening（卡死也能再按响）",
+              f"{name} 复位仍依赖工作线程收尾：{leaks}")
+
+    # 8b.3 服务侧最后一道：每次开始都挂、每条收尾都走**同一个出口**
+    # 判据按「结构 + 行为面」两头守：只数 disarm 出现几次，守不住「漏了停识别器」这种出口
+    # （旧实现点候选条上屏走 commit()，只清 voiceActive，66 秒后兜底表照样打进已上屏的会话）。
+    arm_calls = len(re.findall(r"\barmVoiceSessionGuard\(\)", service))
+    check(arm_calls >= 2, "两条开始路径（系统 / 离线）都挂了 UI 侧会话兜底",
+          f"{rel(SERVICE)} armVoiceSessionGuard 只出现 {arm_calls} 次，未覆盖两种引擎")
+
+    exit_body = function_region(service, r"private fun endVoiceSession\(")
+    check(bool(exit_body), "语音会话有单一出口 endVoiceSession（收尾状态只在一处定义）",
+          f"{rel(SERVICE)} 缺 private fun endVoiceSession(...)")
+    for step, why in (
+        ("voiceController?.stop()", "出口停系统识别器（不停则 isListening 恒真，兜底表照样触发）"),
+        ("voskVoice?.cancel()", "出口停离线引擎"),
+        ("voiceActive = false", "出口清 UI 语音标志"),
+        ("disarmVoiceSessionGuard()", "出口摘兜底表"),
+        ("traceVoiceUiReset(reason", "出口打 ev=ui_reset（谁结束的会话必须能从日志判读）"),
+    ):
+        check(step in exit_body, why, f"{rel(SERVICE)} endVoiceSession 缺 {step}")
+
+    # 单一出口的「单一」：语音状态不许在别处散落改写（去注释，免得注释里提到状态就误判）
+    code = strip_comments(service)
+    code_exit = strip_comments(exit_body)
+    strays = re.findall(r"(?<!var )voiceActive = false\b", code.replace(code_exit, ""))
+    check(not strays, "voiceActive 只在出口处复位（没有第二条没收尾的出口）",
+          f"{rel(SERVICE)} 另有 {len(strays)} 处直接写 voiceActive = false，请改走 endVoiceSession")
+    check(not re.findall(r"\bcancelVoice\(\)", code),
+          "每条取消路径都带 reason（ev=ui_reset 能区分 超时 / 退格 / ESC / 再按一次语音键）",
+          f"{rel(SERVICE)} 存在不带 reason 的 cancelVoice() 调用")
+
+    # 回归钉：候选条点选上屏（commit）必须结束语音会话——这条漏掉就是架构复审 §一 的行为回归
+    commit_body = function_region(service, r"private fun commit\(")
+    check("endVoiceSession(" in commit_body,
+          "点候选条上屏这条必经路会结束语音会话（已上屏的会话不再被兜底表清空）",
+          f"{rel(SERVICE)} commit() 未调用 endVoiceSession")
+    for fn in ("cancelVoice", "commitVoice", "commitVoiceText"):
+        body = function_region(service, rf"private fun {fn}\(")
+        check("endVoiceSession(" in body, f"{fn} 收尾走单一出口",
+              f"{rel(SERVICE)} {fn}() 未调用 endVoiceSession")
+
+    # 8b.4 文案：超时三类必须中英齐全，且不许复用「语音识别失败」这种无处置信息的兜底
+    zh = _named_strings(STRINGS)
+    en = _named_strings(STRINGS_EN)
+    need = {"voice_timeout_service", "voice_timeout_result", "voice_timeout_session"}
+    check(need <= zh and need <= en, "超时可读文案中英各齐 3 类（服务无响应 / 收尾超时 / 会话过长）",
+          f"中英 strings.xml 缺超时文案：{sorted(need - zh)} / {sorted(need - en)}")
+
+    # 8b.5 契约有单测守着（时限层级、文案不落到兜底）
+    check(ASR_TIMING_TEST.exists() and "class AsrTimingTest" in read(ASR_TIMING_TEST),
+          "AsrTimingTest 守着时限层级与超时文案（改坏会红）",
+          f"缺 {rel(ASR_TIMING_TEST)}")
+    check("AsrTrace" in read(ASR_TRACE) and "EV_TIMEOUT" in read(ASR_TRACE),
+          "超时事件有统一埋点常量（ev=timeout + stage=），真机可一条命令判读",
+          f"{rel(ASR_TRACE)} 缺 EV_TIMEOUT 事件")
 
 
 # ═════════════════════════════════════════════════════════════
@@ -2179,6 +2303,8 @@ def main() -> int:
     check_consistency()
     print("-- 8. 语音输入（VOICE / ASR）全链路 --")
     check_voice_chain()
+    print("-- 8b. 语音「识别中」超时收敛（VOCA-231）--")
+    check_voice_timeouts()
     print("-- 9. 用户词库（模式 / 自造词 / 拼音态）--")
     check_user_dict_chain()
     print("-- 10. 分类词库（细胞词库）--")
