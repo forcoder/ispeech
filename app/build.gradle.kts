@@ -6,14 +6,26 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
-// 发布签名：存在 keystore/keystore.properties 时为 release 启用签名（原型自签测试证书）；
-// 文件缺失时保持未签名构建，未持有证书的协作者不受影响。
+// 发布签名（凭据不入库，VOCA-477）：按优先级读取——
+// 1) 环境变量 ISPEECH_STORE_FILE / ISPEECH_STORE_PASSWORD / ISPEECH_KEY_ALIAS / ISPEECH_KEY_PASSWORD（CI、远端构建机）；
+// 2) 仓库内 keystore/keystore.properties（.gitignore 忽略，从 keystore/keystore.properties.example 复制）；
+// 3) 机器级 ~/.gradle/ispeech-signing.properties（git pull 不删除，适合长期构建机）。
+// 全部缺失时 release 产出未签名 APK 并打印告警，未持有证书的协作者不受影响。
+val envStoreFile = System.getenv("ISPEECH_STORE_FILE")
+val envStorePassword = System.getenv("ISPEECH_STORE_PASSWORD")
+val envKeyAlias = System.getenv("ISPEECH_KEY_ALIAS")
+val envKeyPassword = System.getenv("ISPEECH_KEY_PASSWORD")
+val hasEnvSigning = listOf(envStoreFile, envStorePassword, envKeyAlias, envKeyPassword).all { !it.isNullOrBlank() }
+
+fun loadProps(file: File): Properties? =
+    if (file.exists()) Properties().apply { file.inputStream().use { load(it) } } else null
+
 val keystorePropsFile = rootProject.file("keystore/keystore.properties")
-val keystoreProps = Properties().apply {
-    if (keystorePropsFile.exists()) {
-        keystorePropsFile.inputStream().use { load(it) }
-    }
-}
+val userKeystorePropsFile = File(System.getProperty("user.home"), ".gradle/ispeech-signing.properties")
+val keystoreProps = loadProps(keystorePropsFile) ?: loadProps(userKeystorePropsFile)
+val hasFileSigning = keystoreProps?.let {
+    listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { k -> it.getProperty(k)?.isNotBlank() == true }
+} == true
 
 // 离线语音模型下载地址（配置项）：默认走阿里云 OSS 公共读对象（HTTPS + Range，
 // 默认域名免 ICP 备案，baseline 见 docs/model-host-runbook.md）。
@@ -49,20 +61,30 @@ android {
     }
 
     signingConfigs {
-        if (keystorePropsFile.exists()) {
+        if (hasEnvSigning) {
             create("release") {
-                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
-                storePassword = keystoreProps.getProperty("storePassword")
-                keyAlias = keystoreProps.getProperty("keyAlias")
-                keyPassword = keystoreProps.getProperty("keyPassword")
+                storeFile = rootProject.file(checkNotNull(envStoreFile))
+                storePassword = envStorePassword
+                keyAlias = envKeyAlias
+                keyPassword = envKeyPassword
+            }
+        } else if (hasFileSigning) {
+            val props = keystoreProps!!
+            create("release") {
+                storeFile = rootProject.file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
             }
         }
     }
 
     buildTypes {
         release {
-            if (keystorePropsFile.exists()) {
+            if (hasEnvSigning || hasFileSigning) {
                 signingConfig = signingConfigs.getByName("release")
+            } else {
+                logger.warn("release 未找到签名凭据：将产出未签名 APK。按 keystore/README.md 配置环境变量或本地属性文件。")
             }
             isMinifyEnabled = false
             proguardFiles(

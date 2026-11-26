@@ -11,6 +11,9 @@ app/build/
 # 本机 Android SDK 配置（从 local.properties.example 复制）
 local.properties
 
+# 签名凭据不入库（VOCA-477）：从 keystore/keystore.properties.example 复制填写，或走环境变量
+keystore/keystore.properties
+
 # Native build
 .cxx/
 .externalNativeBuild/
@@ -45,6 +48,7 @@ dist/ispeech-debug-*.apk
 dist/app-debug.apk
 # 133 MB，超过 GitHub 单文件 100 MB 硬限制，推上去会被 pre-receive 拒（GH001）
 dist/ispeech-release-1.5-20261115-1004.apk
+dist/ispeech-release-1.5-20261119-1557.apk
 
 # 短语数据导出
 通用短语.csv

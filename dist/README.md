@@ -66,6 +66,9 @@ scp -P 10010 cookie@43.136.44.72:~/workspace/iSpeech/app/build/outputs/apk/relea
 python3 tools/verify/check_dist_manifest.py --regen   # 整份按当前字节重写；禁止 `>> SHA256SUMS` 追加
 ```
 
+release 签名凭据自 VOCA-477 起不再入库：远端构建机已配置机器级 `~/.gradle/ispeech-signing.properties`；
+本机打包需按 `keystore/README.md` 配置环境变量或本地属性文件，否则产出未签名 APK（构建日志会有告警）。
+
 ## 校验
 
 **问「我手上这包是不是仓库那包」，只用这一条命令：**

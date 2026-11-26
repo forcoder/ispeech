@@ -141,7 +141,7 @@ app/src/main/java/com/ispeech/
 ```bash
 export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # Temurin 17.0.20.1
 ./gradlew assembleDebug      # → app/build/outputs/apk/debug/app-debug.apk
-./gradlew assembleRelease    # 检测到 keystore/keystore.properties 时自动签名
+./gradlew assembleRelease    # 检测到签名凭据（环境变量或本地配置，见 keystore/README.md）时自动签名
 ```
 
 ### 远端构建机（本机缺 Android SDK 时）
