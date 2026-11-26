@@ -45,6 +45,12 @@ dist/ispeech-debug-*.apk
 dist/app-debug.apk
 # 133 MB，超过 GitHub 单文件 100 MB 硬限制，推上去会被 pre-receive 拒（GH001）
 dist/ispeech-release-1.5-20261115-1004.apk
+# 139 MB，同上；VOCA-650 推分支被拒就是它（被基线快照带进了历史）
+dist/ispeech-release-1.5-20261119-1557.apk
+# 模拟器现场日志与 Python 字节码缓存：本地排查产物，不该进基线快照
+dist/emulator-*.log
+__pycache__/
+*.pyc
 
 # 短语数据导出
 通用短语.csv
