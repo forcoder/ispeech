@@ -51,6 +51,12 @@ internal object CandidateRanking {
         else -> TIER_PHRASE
     }
 
+    /** 是否为「快捷短语」分组：格位兜底（[CompositeEngine] VOCA-651）按它判。 */
+    fun isQuickPhrase(candidate: LookupCandidate): Boolean = tier(candidate) == TIER_QUICK_PHRASE
+
+    /** 是否为「单字」分组：快捷短语挤满首屏时，要给这一组留格位。 */
+    fun isSingle(candidate: LookupCandidate): Boolean = tier(candidate) == TIER_SINGLE
+
     fun comparator(input: String): Comparator<LookupCandidate> = Comparator { a, b ->
         val byTier = tier(a).compareTo(tier(b))
         if (byTier != 0) return@Comparator byTier

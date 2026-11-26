@@ -1274,6 +1274,19 @@ class IspeechImeService : InputMethodService() {
         return if (hasDict) lookup else engine
     }
 
+    /**
+     * 查询候选条内容。
+     *
+     * 复合引擎要知道「首屏几格」才能做单字格位兜底（VOCA-651）：导入大批快捷短语后，
+     * 2 码触发码会占满首屏，把同码单字（`hx`→此 / `yp`→这 / `dt`→帮）挤出可见区。
+     */
+    private fun lookupCandidates(source: LookupEngine, code: String, limit: Int): List<LookupCandidate> =
+        if (source is CompositeEngine) {
+            source.lookup(code, limit, settings.candidatePageSize)
+        } else {
+            source.lookup(code, limit)
+        }
+
     /** 组合码 / 联想文本变化后重新查询候选 */
     private fun refreshCandidates() {
         // 设置页 / 同步页改动引擎相关项后，下一次候选刷新即重建引擎，无需重启输入法
@@ -1297,7 +1310,12 @@ class IspeechImeService : InputMethodService() {
             return
         }
         val limit = candidatePoolLimit
-        candidates = lookupSource()?.lookup(buffer, limit).orEmpty().withoutTofu()
+        val source = lookupSource()
+        candidates = if (source != null) {
+            lookupCandidates(source, buffer, limit)
+        } else {
+            emptyList()
+        }.withoutTofu()
         recordQuery()
         associationActive = false
         codeOverride = null
