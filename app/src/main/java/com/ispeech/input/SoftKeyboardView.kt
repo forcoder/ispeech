@@ -8,6 +8,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.os.Handler
+import android.os.SystemClock
 import android.os.Looper
 import android.text.SpannableString
 import android.text.Spanned
@@ -26,6 +27,7 @@ import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
 import com.ispeech.R
+import com.ispeech.input.keyboard.AltPopupEntries
 import com.ispeech.input.keyboard.KeyAction
 import com.ispeech.input.keyboard.KeyDef
 import com.ispeech.input.keyboard.KeyStyle
@@ -41,7 +43,8 @@ import com.ispeech.input.keyboard.KeyboardPage
  * 2. 页码条：仅当当前布局多于 1 页时显示（如「符号 1/2」），点按翻页
  * 3. 布局行：由 [KeyboardLayouts] 提供，按键按 weight 分配宽度
  *
- * 交互：按键按下显示放大预览；长按带 alt 的键弹出候选气泡；长按退格连删；
+ * 交互：按键按下显示放大预览；长按字母键弹出「小写 / 大写 / 角标」浮层、长按其它带 alt 的键
+ * 弹出候选条目（两者都是两步式：抬手不选，点条目才上屏）；长按退格连删；
  * 字母页 Shift 键单击切一次大写、双击锁定大写（中英切换由底行「中/英」键承担）。
  * 视图不解释按键语义，
  * 一律通过 [onKey] 回调交给 IspeechImeService。
@@ -54,6 +57,15 @@ class SoftKeyboardView @JvmOverloads constructor(
 
     /** 按键回调：只上报按键定义，语义由服务决定 */
     var onKey: ((KeyDef) -> Unit)? = null
+
+    /**
+     * 字母浮层条目被点选：把「选中的那个字符」原样交给服务，不包装成按键。
+     *
+     * 浮层是「精确取字符」而不是「按了一下这个键」（VOCA-65 条目 2 / R2-13~R2-20）：
+     * 走 [onKey] 会落进 [KeyAction.CHAR]，中文态字母进编码缓冲、字符再过全角转换，
+     * 两条都不符合规格，所以这里单开一条通道，由服务侧直接上屏。
+     */
+    var onAltPick: ((String) -> Unit)? = null
 
     /** 键盘高度（dp），由设置页控制 */
     var keyHeightDp: Int = DEFAULT_KEY_HEIGHT_DP
@@ -111,6 +123,12 @@ class SoftKeyboardView @JvmOverloads constructor(
     private var previewPopup: PopupWindow? = null
     private var altPopup: PopupWindow? = null
 
+    /** 浮层弹出时刻（uptimeMillis）：外部关层时要认的穿透手势区间起点。 */
+    private var altShownAt = 0L
+
+    /** 空区间 = 没有待吃掉的穿透。 */
+    private val noPassthrough = 1L..0L
+
     private val repeatHandler = Handler(Looper.getMainLooper())
     private var repeatRunnable: Runnable? = null
 
@@ -133,6 +151,13 @@ class SoftKeyboardView @JvmOverloads constructor(
     private val spaceTextColor = Color.parseColor("#7C838D")
     private val pageBarBg = Color.parseColor("#D5D9E0")
     private val toolbarPressedBg = Color.parseColor("#E1E5EC")
+
+    /**
+     * 长按浮层条底（UI 规格 D 组 `color.bubble.strip` 浅色值）。旧值 `Color.WHITE` 让白条目
+     * 叠在白条上（对比度 1.00:1，边界不可辨）。规格的深色配对值本批不接：键面颜色整套是浅色
+     * 硬编码、没有任何主题分支，单独给浮层开深色判断只会做出半深色的键盘。
+     */
+    private val bubbleStripBg = Color.parseColor("#E3E6EC")
 
     // 键盘底色：搜狗默认皮肤是一条自上而下的浅灰渐变（同一台真机上实测 #F2F3F6 → #D6D8E0），
     // 这里取同向但更柔和的渐变：保留「白键浮在浅灰上」的层次，又不至于在底部压暗。
@@ -252,6 +277,10 @@ class SoftKeyboardView @JvmOverloads constructor(
         // 重建会移除所有按键 View：此时触摸中的退格键收不到 ACTION_UP/CANCEL，
         // 必须先停掉连删回调，否则重复删除会一直跑下去（多指触摸时尤其危险）。
         stopRepeatDelete()
+        // 预览气泡与长按浮层都锚在本页的按键上，而切页 / 翻页 / 切中英 / 切面板都会走到这里：
+        // 不收掉就留下一层指向已被移除按键的浮层（R2-23 / AC-2.10）。
+        dismissPreview()
+        dismissAltPopup()
         removeAllViews()
         shiftKey = null
 
@@ -656,10 +685,20 @@ class SoftKeyboardView @JvmOverloads constructor(
             false
         }
 
-        if (effectiveKey.alt.isNotEmpty()) {
+        // 长按浮层：字母键的条目由键面本身推导（小写 / 大写 / 角标），其余键沿用键位自带的 alt。
+        // 两类浮层的上屏语义不同，见下方 pick 的分支。
+        val popupEntries = AltPopupEntries.build(effectiveKey)
+        if (popupEntries.isNotEmpty()) {
+            val letterPopup = AltPopupEntries.isLetterKey(effectiveKey)
             targetView.setOnLongClickListener { v ->
                 haptic(v)
-                showAltPopup(v, effectiveKey.alt)
+                val pick: (String) -> Unit = if (letterPopup) {
+                    { entry -> onAltPick?.invoke(entry) }
+                } else {
+                    { entry -> onKey?.invoke(KeyDef.char(entry)) }
+                }
+                // 返回 true：View 消费本次手势，抬手不再走 OnClickListener —— R2-3「当次抬起不上屏」
+                showAltPopup(v, popupEntries, pick)
                 true
             }
         }
@@ -870,32 +909,41 @@ class SoftKeyboardView @JvmOverloads constructor(
         previewPopup = null
     }
 
-    // ── 长按候选气泡（alt） ──
+    // ── 长按浮层（alt） ──
 
-    private fun showAltPopup(anchor: View, alternatives: List<String>) {
+    /**
+     * 弹出长按浮层：两步式（抬手不选，点条目才上屏），锚在按键正上方并夹紧在屏内。
+     *
+     * 到阈值弹层时顺手收掉预览气泡 —— 规格 §4.7 的「浮层态」明写「无按下态」，
+     * 两个层都画在键上方，留着会糊在一起。
+     */
+    private fun showAltPopup(anchor: View, entries: List<String>, onPick: (String) -> Unit) {
         dismissAltPopup()
+        dismissPreview()
         val strip = LinearLayout(context).apply {
             orientation = HORIZONTAL
-            setPadding(dpInt(4), dpInt(4), dpInt(4), dpInt(4))
-            background = roundedRect(Color.WHITE, keyRadius)
+            val inset = dpInt(ALT_STRIP_INSET_DP)
+            setPadding(inset, inset, inset, inset)
+            background = roundedRect(bubbleStripBg, keyRadius)
         }
-        for (alt in alternatives) {
+        for (alt in entries) {
             strip.addView(
                 TextView(context).apply {
                     text = alt
-                    textSize = 18f
+                    textSize = ALT_ENTRY_TEXT_SIZE
                     setTextColor(textColor)
                     gravity = Gravity.CENTER
                     isClickable = true
                     isFocusable = true
                     background = keySelector(accentBg, accentBgPressed)
                     layoutParams = LayoutParams(dpInt(ALT_KEY_WIDTH_DP), dpInt(ALT_KEY_HEIGHT_DP)).apply {
-                        setMargins(dpInt(2), dpInt(2), dpInt(2), dpInt(2))
+                        val gap = dpInt(ALT_ENTRY_GAP_DP)
+                        setMargins(gap, gap, gap, gap)
                     }
                     setOnClickListener { v ->
                         haptic(v)
                         dismissAltPopup()
-                        onKey?.invoke(KeyDef.char(alt))
+                        onPick(alt)
                     }
                 },
             )
@@ -904,24 +952,83 @@ class SoftKeyboardView @JvmOverloads constructor(
             strip,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
-            true,
+            // R2-26 硬约束：不可聚焦。焦点浮层会抢走 IME 的输入焦点，复发「按键被吞 /
+            // 打着打着跳页面」的旧故障；返回键因此到不了浮层，改由键盘侧消费（见 IspeechImeService.onKeyDown）。
+            false,
         ).apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            // 只负责「点浮层外把层关掉」；穿透问题在键盘侧解决，见 [onInterceptTouchEvent]
             isOutsideTouchable = true
+            elevation = dp(ALT_POPUP_ELEVATION_DP)
         }
-        popup.setOnDismissListener { altPopup = null }
+        popup.setOnDismissListener {
+            // 不是自己关的 = 用户点了浮层外，系统先关层再把同一次按下发给按键，标记这次手势待吃掉
+            if (!altSelfDismiss) {
+                pendingPassthrough = altShownAt..SystemClock.uptimeMillis()
+            }
+            altSelfDismiss = false
+            altPopup = null
+        }
         altPopup = popup
         val location = IntArray(2)
         anchor.getLocationInWindow(location)
-        val y = (location[1] - dpInt(ALT_KEY_HEIGHT_DP + 10)).coerceAtLeast(0)
-        runCatching { popup.showAtLocation(anchor, Gravity.NO_GRAVITY, location[0], y) }
+        strip.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val maxX = (resources.displayMetrics.widthPixels - strip.measuredWidth).coerceAtLeast(0)
+        val y = (location[1] - strip.measuredHeight - dpInt(ALT_ENTRY_GAP_DP)).coerceAtLeast(0)
+        altShownAt = SystemClock.uptimeMillis()
+        pendingPassthrough = noPassthrough
+        runCatching { popup.showAtLocation(anchor, Gravity.NO_GRAVITY, location[0].coerceIn(0, maxX), y) }
             .onFailure { altPopup = null }
     }
 
-    private fun dismissAltPopup() {
-        altPopup?.let { runCatching { it.dismiss() } }
-        altPopup = null
+    /** 关掉长按浮层；返回是否确实有浮层在显示（服务侧据此决定返回键要不要消费掉）。 */
+    fun dismissAltPopup(): Boolean {
+        val showing = altPopup != null
+        if (showing) {
+            altSelfDismiss = true
+            altPopup?.let { runCatching { it.dismiss() } }
+            altPopup = null
+        }
+        return showing
     }
+
+    /**
+     * 浮层已弹出时，键盘上的下一次按下只用来关层，不交给任何按键（R2-21 / AC-2.6「不穿透」）。
+     *
+     * 拦在键盘侧而不是指望浮层自己吃掉：`isOutsideTouchable=true` 会让浮层带上
+     * FLAG_NOT_TOUCH_MODAL，浮层外的 DOWN 仍会照常发给底下的按键（模拟器实测：点浮层外的 w
+     * 直接进了编码缓冲）。而「不抢 IME 焦点」是 R2-26 的硬约束，浮层不能改成可聚焦模态窗口，
+     * 所以这次按下只能由按键的共同父容器拦下来 —— 工具栏和四行键位都是本容器的子视图，一并覆盖。
+     *
+     * 关层比键盘事件先处理（同一个 input cycle 里浮层在栈顶），拦到时 `altPopup` 已经是 null，
+     * 所以改按「手势归属」认这次按下：[pendingPassthrough] 记下外部关层那一刻的时间区间，
+     * 落在区间内的手势就是同一根手指的穿透，吃掉；换个手指再按（downTime 更新）照常上屏。
+     */
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            val passthrough = ev.downTime in pendingPassthrough
+            if (altPopup != null || passthrough) {
+                pendingPassthrough = noPassthrough
+                dismissAltPopup()
+                return true
+            }
+        }
+        return super.onInterceptTouchEvent(ev)
+    }
+
+    /**
+     * 「外部关层那一次手势」的时间区间 [起点, 关层时刻]。
+     *
+     * 只有系统因点浮层外而关掉的层才写这里（自己调 [dismissAltPopup] 关的不算穿透）；
+     * 落在区间内的 DOWN 是同一根手指的穿透，要吃掉，之后新起的手势 downTime 更大，不受影响。
+     */
+    private var pendingPassthrough: LongRange = noPassthrough
+
+    /** 自己调 [dismissAltPopup] 关层时置位，用来把「外部关层」和「主动关层」区分开。 */
+    private var altSelfDismiss = false
 
     // ── 视觉 ──
 
@@ -1049,6 +1156,12 @@ class SoftKeyboardView @JvmOverloads constructor(
         const val PREVIEW_HEIGHT_DP = 40
         const val ALT_KEY_WIDTH_DP = 40
         const val ALT_KEY_HEIGHT_DP = 40
+
+        /** 长按浮层（UI 规格 §4.4）：条内边距 `bubble.inset`、条目单边距 `bubble.gap`、字号、层级 `z.alt`。 */
+        const val ALT_STRIP_INSET_DP = 4
+        const val ALT_ENTRY_GAP_DP = 2
+        const val ALT_ENTRY_TEXT_SIZE = 18f
+        const val ALT_POPUP_ELEVATION_DP = 6
 
         /** 「换行」键图标边长 / 图标与文字的间距（dp）。 */
         const val ENTER_ICON_DP = 15

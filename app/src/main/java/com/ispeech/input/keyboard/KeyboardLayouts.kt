@@ -23,7 +23,13 @@ object KeyboardLayouts {
 
     private fun row(vararg keys: KeyDef): List<KeyDef> = keys.toList()
 
-    /** 字母键：output 为小写字母，键面用大写；[hints] 为键面顶部的数字 / 符号提示（搜狗风格）。 */
+    /**
+     * 字母键：output 为小写字母，键面用大写；[hints] 为键面顶部的数字 / 符号提示（搜狗风格）。
+     *
+     * [hints] 可以比 [letters] 短：缺尾一位就是「该键无角标」，不是漏配。第 3 行 `zxcvbnm`
+     * 只给 6 个角标，`m` 的角标按 VOCA-65 条目 2 的裁决**明确为空**（R2-11 / AC-2.8）——
+     * 补一个角标要新增一套字符集并动视觉，归产品与 UI 另议。
+     */
     private fun letterKeys(letters: String, hints: String = ""): List<KeyDef> =
         letters.mapIndexed { index, c ->
             KeyDef.char(
