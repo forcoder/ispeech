@@ -7,10 +7,16 @@
     <!-- 语音输入需要录音权限（系统 SpeechRecognizer） -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- targetSdk 34 下 SpeechRecognizer 需要声明语音识别服务的包可见性 -->
+    <!-- 包可见性声明（Android 11+ / targetSdk 30+）：
+         1) RecognitionService —— 语音输入枚举系统识别服务（VOCA-310 依赖，勿动）；
+         2) InputMethod —— 让「已启用的其他输入法」出现在 enabledInputMethodList，
+            否则切换输入法面板会漏列（ADR-0003 / VOCA-167 缺陷 D）。 -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.view.InputMethod" />
         </intent>
     </queries>
 
