@@ -2114,6 +2114,8 @@ class IspeechImeService : InputMethodService() {
         if (panel != Panel.AI_REPLY) openPanel(Panel.AI_REPLY)
         aiReplyPanel?.submit(emptyList())
         aiReplyPanel?.setStatus(AI_STATUS_GENERATING)
+        // 空结果 / 失败一律只清列表、不覆盖标题：面板标题留在「无结果」这一档（AC-5a.4），
+        // 具体原因（未登录 / AI失败）继续走 statusText 显示在候选条上，两边各说各的。
         commitPending()
         clearAssociation()
         val message = currentInputConnection
@@ -2122,7 +2124,6 @@ class IspeechImeService : InputMethodService() {
             .orEmpty()
         if (message.isBlank()) {
             statusText = "请先输入要回复的内容"
-            aiReplyPanel?.setStatus(statusText.orEmpty())
             aiReplyPanel?.submit(emptyList())
             Log.i(TAG, "ai_skip reason=blank_input panelOpen=${panel == Panel.AI_REPLY}")
             candidates = emptyList()
@@ -2165,7 +2166,6 @@ class IspeechImeService : InputMethodService() {
                             "未登录：请先在设置页登录 csBaby"
                         }
                         aiReplyPanel?.submit(emptyList())
-                        aiReplyPanel?.setStatus(statusText.orEmpty())
                         candidates = emptyList()
                         renderCandidateView()
                     }
@@ -2215,7 +2215,6 @@ class IspeechImeService : InputMethodService() {
                         if (seq == aiRequestSeq) {
                             statusText = "未登录：请先在设置页登录 csBaby"
                             aiReplyPanel?.submit(emptyList())
-                            aiReplyPanel?.setStatus(statusText.orEmpty())
                             candidates = emptyList()
                             renderCandidateView()
                         }
@@ -2249,7 +2248,6 @@ class IspeechImeService : InputMethodService() {
                 if (seq == aiRequestSeq) {
                     statusText = "AI失败：" + shortText(e.message ?: "未知错误", 60)
                     aiReplyPanel?.submit(emptyList())
-                    aiReplyPanel?.setStatus(statusText.orEmpty())
                     candidates = emptyList()
                     renderCandidateView()
                 }

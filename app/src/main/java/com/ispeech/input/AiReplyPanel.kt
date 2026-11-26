@@ -8,6 +8,7 @@ import android.graphics.drawable.StateListDrawable
 import android.os.Looper
 import android.text.TextUtils
 import android.util.AttributeSet
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -93,7 +94,18 @@ class AiReplyPanel @JvmOverloads constructor(
 
     /** 标题旁的计数 / 状态文案（生成中、出错等）。 */
     fun setStatus(text: String) {
-        runOnMain { titleLabel.text = text }
+        runOnMain { setTitle(text) }
+    }
+
+    /**
+     * 标题的唯一写入口：改文案的同时打一行日志。
+     *
+     * 输入法窗口不在 uiautomator 层级里，adb 读不到面板文字，而 AC-5a.4 要求断言
+     * 空态文案「保持无结果」—— 黑盒取证只能靠这行日志（见 tools/verify/voca628_ai_one_tap_adb.py）。
+     */
+    private fun setTitle(text: String) {
+        titleLabel.text = text
+        Log.i(TAG, "ai_panel_title text=$text items=${items.size}")
     }
 
     private fun runOnMain(block: () -> Unit) {
@@ -219,7 +231,7 @@ class AiReplyPanel @JvmOverloads constructor(
             height = dp(rows * rowHeightDp + 4)
         }
         listScroll.isVerticalScrollBarEnabled = items.size > maxVisibleRows
-        titleLabel.text = if (items.isEmpty()) TITLE_EMPTY else RESULT_COUNT.format(items.size)
+        setTitle(if (items.isEmpty()) TITLE_EMPTY else RESULT_COUNT.format(items.size))
     }
 
     /**
@@ -281,14 +293,14 @@ class AiReplyPanel @JvmOverloads constructor(
         detailContainer.visibility = View.VISIBLE
         pickButton.isEnabled = true
         pickButton.alpha = 1f
-        titleLabel.text = DETAIL_TITLE
+        setTitle(DETAIL_TITLE)
     }
 
     private fun hideDetail() {
         detailIndex = -1
         detailContainer.visibility = View.GONE
         listScroll.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
-        titleLabel.text = if (items.isEmpty()) TITLE_EMPTY else RESULT_COUNT.format(items.size)
+        setTitle(if (items.isEmpty()) TITLE_EMPTY else RESULT_COUNT.format(items.size))
     }
 
     /** 列表行只展示前 [PREVIEW_CHARS] 个字，换行折叠成空格。 */
@@ -336,6 +348,7 @@ class AiReplyPanel @JvmOverloads constructor(
     ).toInt()
 
     private companion object {
+        const val TAG = "AiReplyPanel"
         const val TITLE = "AI 参考回复"
         const val TITLE_EMPTY = "AI 参考回复 · 无结果"
         const val DETAIL_TITLE = "AI 参考回复 · 详情"
