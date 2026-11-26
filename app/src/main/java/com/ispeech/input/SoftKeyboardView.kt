@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.Outline
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
@@ -19,6 +20,7 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -32,6 +34,7 @@ import com.ispeech.input.keyboard.KeyStyle
 import com.ispeech.input.keyboard.KeyboardLayoutKind
 import com.ispeech.input.keyboard.KeyboardLayouts
 import com.ispeech.input.keyboard.KeyboardPage
+import com.ispeech.settings.store.KeyboardSize
 
 /**
  * 软键盘面板：搜狗风格多页键盘（字母 / 数字 / 符号 / 表情 / 九宫格）。
@@ -150,6 +153,8 @@ class SoftKeyboardView @JvmOverloads constructor(
     private val enterAccent = Color.parseColor("#2E5FD8")
 
     // ── 尺寸 ──
+    // keyMargin 是「非字母页」的默认键缝，取值受 tools/verify/check_keyboard_ui.py 断言保护
+    // （VOCA-30 规格 3dp），不要为了 VOCA-184 的加宽去改它；字母页走 KEY_MARGIN_DP=1dp。
     private val keyMargin = 3
     private val keyRadius = 6
 
@@ -263,7 +268,7 @@ class SoftKeyboardView @JvmOverloads constructor(
 
         val page = pages.getOrNull(pageIndex)
         if (page != null) {
-            val rowPadding = dpInt(3)
+            val rowPadding = dpInt(ROW_PADDING_DP)
             for (row in page.rows) {
                 addView(buildRow(row, rowPadding))
             }
@@ -287,6 +292,9 @@ class SoftKeyboardView @JvmOverloads constructor(
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             layoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
+            // 键框底部投影会探出行下沿：放开容器裁剪，否则投影被切掉
+            clipChildren = false
+            clipToPadding = false
         }
         for (key in toolbarKeys()) {
             row.addView(
@@ -410,6 +418,9 @@ class SoftKeyboardView @JvmOverloads constructor(
     private fun buildRow(row: List<KeyDef>, padding: Int): View {
         val line = LinearLayout(context).apply {
             orientation = HORIZONTAL
+            // 键框底部投影会探出键框下沿：放开行容器裁剪，否则投影被切掉
+            clipChildren = false
+            clipToPadding = false
             setPadding(padding, 0, padding, 0)
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
         }
@@ -426,13 +437,81 @@ class SoftKeyboardView @JvmOverloads constructor(
             line.addView(createKey(key, keyTextSize(key), dpInt(keyHeightDp)))
         }
         if (center) line.addView(buildRowSpacer(missing / 2f))
+        // 字母页第 2 行左右各有一个透明补位，子 View 下标与 row 下标会错开：
+        // 必须把「补位个数」传进去，否则缝隙兜底会把事件路由到错误的键。
+        installRowGutterHit(line, row, if (center) 1 else 0)
         return line
     }
 
-    /** 行内补位：透明不可点，只占 weight + 与按键相同的边距（字母页第 2 行居中用）。 */
+    /**
+     * 行级「零死区」兜底：键与键之间的窄缝、行内左右留白（以及圆角外露的角点）没有
+     * 子 View 接收事件，落到本行容器上。这里用 [KeyHitTester]（缝中线归属 + 扩展上限）
+     * 把事件路由到相邻键，模拟一次点击，保证缝隙不出现「点了没反应」。
+     *
+     * 键框内（含四角 / 四边 / hint 小字区）的事件仍由各键自己的触控逻辑处理，
+     * 本监听器只在空隙兜底，不接管键内手势（语音 / 空格长按 / 退格连删 / alt 长按）。
+     *
+     * @param firstKeyIndex 行首键在子 View 里的下标（字母页第 2 行前面有补位，为 1）
+     */
+    private fun installRowGutterHit(row: LinearLayout, keys: List<KeyDef>, firstKeyIndex: Int) {
+        if (keys.isEmpty()) return
+        var pending = -1
+        val rects = ArrayList<KeyHitRect>(keys.size)
+        row.setOnTouchListener { _, event ->
+            rects.clear()
+            for (i in keys.indices) {
+                val c = row.getChildAt(firstKeyIndex + i) ?: continue
+                rects.add(
+                    KeyHitRect(
+                        i.toString(),
+                        c.left.toFloat(),
+                        c.top.toFloat(),
+                        c.right.toFloat(),
+                        c.bottom.toFloat(),
+                    ),
+                )
+            }
+            val maxExpand = dp(KEY_HIT_MAX_EXPAND_DP)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    pending = KeyHitTester.hit(rects, event.x, event.y, maxExpand)
+                    if (pending in keys.indices) {
+                        val k = keys[pending]
+                        if (k.action != KeyAction.SHIFT) {
+                            showPreview(row.getChildAt(firstKeyIndex + pending), keyLabel(k))
+                        }
+                    }
+                    pending >= 0
+                }
+                MotionEvent.ACTION_UP -> {
+                    dismissPreview()
+                    val idx = pending
+                    pending = -1
+                    if (idx >= 0 && KeyHitTester.hit(rects, event.x, event.y, maxExpand) == idx) {
+                        haptic(row.getChildAt(firstKeyIndex + idx))
+                        onKey?.invoke(keys[idx])
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    dismissPreview()
+                    pending = -1
+                    true
+                }
+                else -> pending >= 0
+            }
+        }
+    }
+
+    /**
+     * 行内补位：透明不可点，只占 weight + 与字母键相同的边距（字母页第 2 行居中用）。
+     *
+     * 边距必须跟字母键一样用 KEY_MARGIN_DP：补位只出现在字母页，若它沿默认 keyMargin(3dp)，
+     * 第 2 行的键就会比其它两行多出一圈边距而错位。
+     */
     private fun buildRowSpacer(weight: Float): View = View(context).apply {
         layoutParams = LayoutParams(0, 1, weight).apply {
-            setMargins(dpInt(keyMargin), 0, dpInt(keyMargin), 0)
+            setMargins(dpInt(KEY_MARGIN_DP), 0, dpInt(KEY_MARGIN_DP), 0)
         }
     }
 
@@ -506,6 +585,17 @@ class SoftKeyboardView @JvmOverloads constructor(
         // 三种大写状态（未开 / 单击 / 锁定）在中文态与英文态下外观一致。
         val effectiveKey = key
 
+        // 字母页的字母键横向留白收紧到 KEY_MARGIN_DP(1dp)，键框可见宽度变大（AC1/AC5）；
+        // 其余键与页面（工具栏 / 底行功能键 / 空格 / 数字符号表情）保持 keyMargin(3dp) 的
+        // 既有比例，不动 VOCA-30 规格。
+        val hMarginDp = if (
+            layoutKind == KeyboardLayoutKind.LETTER && effectiveKey.style == KeyStyle.LETTER
+        ) {
+            KEY_MARGIN_DP
+        } else {
+            keyMargin
+        }
+
         // 「换行」键单独画：浅主色胶囊 + ↵ 图标 + 小字标签（见 [buildEnterKey]）
         val enterView: View? = if (effectiveKey.action == KeyAction.ENTER) {
             buildEnterKey(effectiveKey, heightPx)
@@ -546,7 +636,7 @@ class SoftKeyboardView @JvmOverloads constructor(
                         },
                     )
                 }
-                if (fillWidth) elevation = dp(1)
+                applyKeyElevation(this, fillWidth, inToolbar)
                 // 图标键的宽度来自 drawable 固有尺寸（24dp），必须补上最小可点面积，
                 // 否则工具栏图标键会比同排文字键窄一圈，低于 40dp 触控规范。
                 if (minWidthPx > 0) minimumWidth = minWidthPx
@@ -555,7 +645,7 @@ class SoftKeyboardView @JvmOverloads constructor(
                     heightPx,
                     effectiveKey.weight,
                 ).apply {
-                    setMargins(dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin))
+                    setMargins(dpInt(hMarginDp), dpInt(keyMargin), dpInt(hMarginDp), dpInt(keyMargin))
                 }
             }
         } else {
@@ -580,14 +670,14 @@ class SoftKeyboardView @JvmOverloads constructor(
             isFocusable = true
             background = backgroundFor(effectiveKey.style, inToolbar)
             // 布局行按键加一点柔和投影，形成「白键浮在灰底上」的搜狗观感
-            if (fillWidth) elevation = dp(1)
+            applyKeyElevation(this, fillWidth, inToolbar)
             if (minWidthPx > 0) minWidth = minWidthPx
             layoutParams = LayoutParams(
                 if (fillWidth) 0 else LayoutParams.WRAP_CONTENT,
                 heightPx,
                 effectiveKey.weight,
             ).apply {
-                setMargins(dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin))
+                setMargins(dpInt(hMarginDp), dpInt(keyMargin), dpInt(hMarginDp), dpInt(keyMargin))
             }
         }
 
@@ -599,13 +689,13 @@ class SoftKeyboardView @JvmOverloads constructor(
             FrameLayout(context).apply {
                 // elevation 抬「容器」而不是「内层主键」：内层主键若单独带 elevation，
                 // 在 FrameLayout 里按 Z 序会盖住提示小字（hint 的 elevation 为 0），提示就看不见了。
-                if (fillWidth) elevation = dp(1)
+                applyKeyElevation(this, fillWidth, inToolbar)
                 layoutParams = LayoutParams(
                     if (fillWidth) 0 else LayoutParams.WRAP_CONTENT,
                     heightPx,
                     effectiveKey.weight,
                 ).apply {
-                    setMargins(dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin), dpInt(keyMargin))
+                    setMargins(dpInt(hMarginDp), dpInt(keyMargin), dpInt(hMarginDp), dpInt(keyMargin))
                 }
                 view.elevation = 0f
                 addView(
@@ -953,6 +1043,33 @@ class SoftKeyboardView @JvmOverloads constructor(
     }
 
     /**
+     * 键框底部柔和投影（AC2）：有可见键底的键用 elevation 抬出「浮在灰底上」的观感，
+     * 正常态与按下态都在（elevation 与按下态无关，按下只换背景色）。
+     *
+     * 是否算「有可见键底」直接用 [inToolbar] 判断，而不是再按 action / layout 白名单猜一遍：
+     * [backgroundFor] 已经按同一判据决定键底是透明（toolbarKeySelector）还是灰键，
+     * 两处判据必须同源，否则会出现「透明键却带一圈阴影」或反之。
+     *
+     * 轮廓**不使用** `ViewOutlineProvider.BACKGROUND`：带 hint 的字母键把 elevation 抬在外层
+     * FrameLayout 上（内层主键带 elevation 会盖住 hint），而那个容器自己没有 background，
+     * BACKGROUND 轮廓退化为空矩形 → 系统不画任何阴影。这就是 VOCA-184 第一版「AC2 阴影
+     * 量不出来」的根因：字母键全都带 hint，等于全部走容器分支，投影一次都没画出来。
+     * 因此这里显式给一个与键面同圆角的轮廓，两个分支阴影一致。
+     */
+    private fun applyKeyElevation(view: View, fillWidth: Boolean, inToolbar: Boolean) {
+        if (!fillWidth || inToolbar) {
+            view.elevation = 0f
+            return
+        }
+        view.elevation = dp(KEY_ELEVATION_DP)
+        view.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(v: View, outline: Outline) {
+                outline.setRoundRect(0, 0, v.width, v.height, dp(keyRadius))
+            }
+        }
+    }
+
+    /**
      * 按键背景。
      *
      * [inToolbar] 之前的版本靠「action / layout 白名单」猜哪些键在工具栏里，
@@ -1027,7 +1144,14 @@ class SoftKeyboardView @JvmOverloads constructor(
     }
 
     private companion object {
-        const val DEFAULT_KEY_HEIGHT_DP = 52
+        /**
+         * 默认键高（dp）。
+         *
+         * **不写字面量**：引用 [KeyboardSize.DEFAULT_HEIGHT_DP]，与 `KeyboardSettings.keyHeightDp`
+         * 的默认值、`SettingsStore` 的读盘兜底同源。这三处曾经各写一个 `52`，改档位时漏掉一处
+         * 就会出现「设置页显示标准档、键盘实际还是旧高度」（VOCA-184 打回项 1）。
+         */
+        val DEFAULT_KEY_HEIGHT_DP: Int get() = KeyboardSize.DEFAULT_HEIGHT_DP
 
         /** 空格长按进入语音的默认阈值（毫秒）；实际值由服务侧按设置推入 [spaceLongPressMs]。 */
         const val DEFAULT_SPACE_LONG_PRESS_MS = 500L
@@ -1057,6 +1181,25 @@ class SoftKeyboardView @JvmOverloads constructor(
         /** 「换行」键小字字号（sp）/ 九宫格页只有 `↵` 图标时的边长（dp）。 */
         const val ENTER_LABEL_TEXT_SIZE = 11f
         const val ENTER_GLYPH_ICON_DP = 24
+
+        // ── 键框视觉与命中（issue VOCA-184：字母键框加宽 / 底部阴影 / 整框可点） ──
+
+        /**
+         * 字母页字母键的横向留白（dp）：1dp，键框可见宽度变大（相邻键可见缝 = 2dp）。
+         *
+         * 只有字母页的 [KeyStyle.LETTER] 用这个值；其余键仍用 `keyMargin`(3dp)，
+         * 后者受 `tools/verify/check_keyboard_ui.py` 的 VOCA-30 断言保护，不能改。
+         */
+        const val KEY_MARGIN_DP = 1
+
+        /** 布局行左右留白（dp）：1dp，让键面顶到行内可用宽度。 */
+        const val ROW_PADDING_DP = 1
+
+        /** 键框底部投影的抬升高度（dp）：柔和阴影，正常态与按下态都保留。 */
+        const val KEY_ELEVATION_DP = 2
+
+        /** 键缝命中扩展上限（dp）：位于键框外的触点，最远归入该距离内的相邻键。 */
+        const val KEY_HIT_MAX_EXPAND_DP = 6
 
         /** Shift 双击判定窗口（毫秒） */
         const val DOUBLE_TAP_MS = 320L
