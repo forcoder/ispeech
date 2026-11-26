@@ -228,16 +228,16 @@ remote: error: File dist/ispeech-release-1.5-20261119-1557.apk is 132.75 MB;
 ```
 
 - 根因：本任务分支的基线提交 `ce8fb5f`（"baseline — uncommitted work from the local directory"）把 `dist/` 下的 **132.75 MB release APK** 一起提交了，GitHub 单文件上限 100 MB 直接拒收**整条分支**（不是拒某个文件）。这正是仓库硬规则严禁提交大文件的那一条，属基线提交的既存问题，不是本轮引入。
-- 整改（两条路径都做了）：① 本清单**随 VOCA-65 附件交付**（沿用 v1–v4.1 全部 15 次的历史惯例）；② 另从 `origin/main` 切一条只含本文件的干净分支 **`pyt/docs/voca-65-merge-manifest-v4.3`（tip `ec53ff7`，父提交 `91a4fbf`）** 并推上 origin，质检与人类可直接 `git fetch` 取件：
+- 整改（两条路径都做了）：① 本清单**随 VOCA-65 附件交付**（沿用 v1–v4.1 全部 15 次的历史惯例）；② 另从 `origin/main` 切一条只含本文件的干净分支 **`pyt/docs/voca-65-merge-manifest-v4.3`** 并推上 origin（取 branch tip，不写死 SHA——本文档也在该分支上，写死 SHA 会随每次修订自我失效），质检与人类可直接 `git fetch` 取件：
 
   ```text
   $ git fetch origin pyt/docs/voca-65-merge-manifest-v4.3
   $ git show FETCH_HEAD:docs/voca-65-merge-manifest.md | sed -n '/^## 6-d\./,/^## 6-b\./p'
-  $ git ls-remote origin | grep voca-65-merge-manifest      # → ec53ff7… refs/heads/pyt/docs/voca-65-…
-  $ git diff --stat origin/main FETCH_HEAD                  # → 1 file changed, 307 insertions(+)
+  $ git ls-remote origin | grep voca-65-merge-manifest      # → refs/heads/pyt/docs/voca-65-merge-manifest-v4.3
+  $ git diff --stat origin/main FETCH_HEAD                  # → 1 file changed（只有 docs/voca-65-merge-manifest.md）
   ```
 
-  该分支 `git diff --stat origin/main` **只含这一个文件（+307）**，不含 `dist/` 任何产物。任务分支上那个 132 MB blob 的清理另开 chore 单，不占用本单窗口。
+  该分支 `git diff --stat origin/main` **只含这一个文件**，不含 `dist/` 任何产物；内容与本文件当前版本逐字一致。任务分支上那个 132 MB blob 的清理另开 chore 单，不占用本单窗口。
 - 该文件在 `origin/main` 上**不存在**（`git ls-tree origin/main docs/voca-65-merge-manifest.md` 空）——它是 PM 工作产物，随 VOCA-65 附件流转，不进 main。
 
 **2. 打回项 ②：R37 根因订正（已回写 §6-c 第 3 条）**
