@@ -35,8 +35,8 @@ android {
         applicationId = "com.ispeech.ime"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.5"
+        versionCode = 6
+        versionName = "1.6"
 
         // 后端基础地址：与 CsBabyClient.DEFAULT_BASE_URL 保持一致
         buildConfigField("String", "API_BASE_URL", "\"http://api.agentai0.com/\"")
