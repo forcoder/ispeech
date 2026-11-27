@@ -7,3 +7,5 @@
    分支名 `task/<task-id>[-slug]`，worktree 在 `$ISPEECH_WT_ROOT`（默认 `~/workspace/_wt/ispeech`）。
 3. **只从干净的主干 `main` 出包与部署**：先 `tools/dev/worktree.sh land <task-id>` 落地，
    再 `tools/deploy/deploy.sh`；绝不从任务分支或脏工作区打包。
+4. **真机设备不可用时的验收降级口径，唯一出处是 `docs/device-acceptance-degradation.md`**
+   （四级证据 L0/L1/L2/L3 + 离线 24h 默认值）。此处只留指针，不复制条文。
