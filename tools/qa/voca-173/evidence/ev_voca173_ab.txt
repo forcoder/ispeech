@@ -1,0 +1,47 @@
+# VOCA-173 A/B 原始输出（emulator-5554，2026-11-27T18:07Z）
+# 工装: tools/qa/voca-173/ab.py  (python3 ab.py <tag> all)
+# 判定: logcat -s IspeechIme 的 "associate hit chars=N count=M" = 点选后出了联想
+#       "associate miss" = 联想链路被关；两者都没有 = 根本没走到 commit/startAssociation
+
+=== TAG=arm64A ===   # 交付候选包 817b6ad 构建（arm64-v8a only）
+                     # sha256 a719f21ff5cb6d0f6ec30764135b3909b608276fbc49ec8a8e0934c1ab38fc4d
+version=versionName=1.5 sha=package:/data/app/~~_CajQSmU39ZXiAK4ZtX-LQ==/com.ispeech.ime-8TU72SXsJU6QOEXBce6laQ==/base.apk
+[arm64A] case1 zhi→之→空格
+  host_ready=True typed='zhi' pick=(172, 1376) after_pick='之'
+  cand_count=7 highlight={'left': 115, 'right': 229, 'top': 1325, 'bot': 1428, 'n': 9791}
+  logcat_assoc_hit=1 miss=0
+    11-27 18:07:21.487 23044 23044 D IspeechIme: associate hit chars=1 count=25
+  after_space_delta='&#127801;周六及节假日（不含末日），泡池（仅限晴天）…' (len=345)
+  VERDICT PASS(联想存活)
+
+[arm64A] case2 zhidao→指导老师→联想
+  typed='zhidao' pick=(319, 1376) after_pick_tail='指导老师'
+  logcat_assoc_hit=1 miss=0
+    11-27 18:07:45.036 23044 23044 D IspeechIme: associate hit chars=4 count=24
+  assoc_band_cand_count=6 first={'left': 22, 'right': 185, 'top': 1325, 'bot': 1428, 'n': 13823}
+  VERDICT PASS(点选后联想存活)
+
+=== TAG=baseB ===   # 现行 main 出包 ispeech-internal-v1.6-final-20261126.apk
+                     # sha256 02fa7b5de1f98b2e5a8a93b34e8ba1b7d64883168af87d99b4f83285cace907b
+version=versionName=1.6 sha=package:/data/app/~~w5ZS_5EsUXMr7lIG3pu7Fg==/com.ispeech.ime-GceQrgj5RTmX79EUBtIfcg==/base.apk
+[baseB] case1 zhi→之→空格
+  host_ready=True typed='zhi' pick=(172, 1376) after_pick='之'
+  cand_count=7 highlight={'left': 115, 'right': 229, 'top': 1325, 'bot': 1428, 'n': 9791}
+  logcat_assoc_hit=0 miss=0
+  after_space_delta=' ' (len=1)
+  VERDICT FAIL(联想未出)
+[baseB] case2 zhidao→指导老师→联想
+  typed='zhidao' pick=(319, 1376) after_pick_tail='指导老师'
+  logcat_assoc_hit=0 miss=0
+  assoc_band_cand_count=0 first=None
+  VERDICT FAIL(点选后联想未出)
+
+=== AC-1 / AC-2（交付候选包 817b6ad arm64-v8a）===
+AC-1  zhidao→指导老师→点联想首选  assoc_count=6 → AFTER='指导老师专' len=5  repeat(指导老师师)=False  PASS
+AC-2  zhi→之→点联想第 2 项       assoc_count=6 → AFTER='之一'      len=2  dup(之之)=False        PASS
+
+=== 工装口径说明 ===
+- 候选条是 Canvas 自绘，uiautomator 拿不到 IME 节点，故联想是否出现只认 logcat；
+  上屏文本读宿主 focused EditText。
+- ensure_host 必须先点输入框再等键盘：`am start` 后上一轮的 type=ime inset 会残留，
+  只看 frame 非空会过早返回，按键全落空（表现为宿主文本还是占位符「短信」）。

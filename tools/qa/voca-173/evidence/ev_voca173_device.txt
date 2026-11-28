@@ -1,0 +1,33 @@
+# VOCA-173 设备与环境现场读数
+$ adb devices -l
+emulator-5554  device product:sdk_gphone64_arm64 device:emu64a transport_id:2
+# 无真机 serial（ioreg 无 HUAWEI 节点）；下列结论均为模拟器口径，不作真机证据。
+
+$ adb shell getprop ro.build.version.release
+14
+$ adb shell wm size ; adb shell wm density
+Physical size: 1080x2340
+Physical density: 440
+
+# 交付候选包（817b6ad 构建，arm64-v8a only）
+$ shasum -a 256 app/build/outputs/apk/debug/app-debug.apk
+a719f21ff5cb6d0f6ec30764135b3909b608276fbc49ec8a8e0934c1ab38fc4d
+$ ls -l app/build/outputs/apk/debug/app-debug.apk
+-rw-r--r--  1 cookie  staff  55161219 Nov 27 18:04 app-debug.apk
+$ apksigner verify --print-certs app-debug.apk
+Signer #1 certificate DN: C=US, O=Android, CN=Android Debug
+Signer #1 certificate SHA-256 digest: 857ce64eebe7fed7c51596ed057030f70d38102e300116cd5aca8b4f9f66a0ed
+
+$ adb shell dumpsys package com.ispeech.ime | grep -E "versionName|lastUpdateTime"
+    versionName=1.5
+    lastUpdateTime=2026-11-27 18:04:13
+$ APK=$(adb shell pm path com.ispeech.ime | sed 's/package://' | tr -d '\r')
+$ adb shell sha256sum "$APK"
+a719f21ff5cb6d0f6ec30764135b3909b608276fbc49ec8a8e0934c1ab38fc4d  /data/app/~~_CajQSmU39ZXiAK4ZtX-LQ==/com.ispeech.ime-8TU72SXsJU6QOEXBce6laQ==/base.apk
+# 与构建产物一致 → 设备上跑的就是交付的那只包
+
+# B 基线（现行 v1.6）
+$ adb shell dumpsys package com.ispeech.ime | grep versionName
+    versionName=1.6
+$ adb shell sha256sum $(adb shell pm path com.ispeech.ime | sed 's/package://' | tr -d '\r')
+02fa7b5de1f98b2e5a8a93b34e8ba1b7d64883168af87d99b4f83285cace907b

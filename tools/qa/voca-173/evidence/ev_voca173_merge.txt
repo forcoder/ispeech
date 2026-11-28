@@ -1,0 +1,96 @@
+# VOCA-173 合并版（origin/main + PR #48）模拟器复跑原始输出
+
+# 被测包：origin/main `fd1d686` 导出树 + `git diff origin/main...fix/voca-650-pick-association`（PR #48，3 commit）
+#        release 签名（与设备现装 v1.6 release 同证书）、versionCode 7 / versionName 1.6、arm64-v8a
+# APK   ：app-release.apk  48 516 650 B
+# sha256: cdb589cc9fb7826c378d0578d7f06262bde07f620b2b3a358e6342f91f612869
+# 签名  ：CN=iSpeech Prototype，证书 SHA-256 70b4f4a2be35ccd9a673d31d33a1e4bfc16a208e43bdd5d8bf5d1cab10cf2ac7
+# 设备  ：emulator-5554（sdk_gphone64_arm64 / Android 14 / 1080x2340@440），无真机
+# 工装  ：tools/qa/voca-173/{ab,ac}.py；联想是否出现只认 logcat -s IspeechIme 的 associate hit/miss，
+#        上屏文本只读宿主 focused EditText
+
+$ adb devices -l
+emulator-5554          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a
+
+$ adb -s emulator-5554 install -r app-release.apk
+Success
+$ adb -s emulator-5554 shell dumpsys package com.ispeech.ime | grep -E "versionName|versionCode|lastUpdateTime"
+    versionCode=7 minSdk=26 targetSdk=34
+    versionName=1.6
+    lastUpdateTime=2026-11-28 09:23:39
+$ adb -s emulator-5554 pull $(adb ... pm path com.ispeech.ime) /tmp/voca173-dev.apk && shasum -a 256
+cdb589cc9fb7826c378d0578d7f06262bde07f620b2b3a358e6342f91f612869  /tmp/voca173-dev.apk
+# 设备侧 base.apk 与构建产物逐字节一致；同签名 + versionCode 7 > 6 → install -r 直接覆盖，未卸载、未清数据
+
+## 门禁（合并树上实跑）
+
+# 11-28 复跑更正：原记录 183 是 pre-#47 的旧 main 陈旧读数（质检打回项 ①）。以下为按本文件头部
+# 同一被测树口径重建后的实测：origin/main `fd1d686` 导出树 + PR #48 全量 diff，两者均已实跑。
+
+$ python3 tools/verify/check_crosscut.py     # 合并树 = origin/main fd1d686 + PR #48 diff
+SUMMARY: passed=196 failed=0 warned=0            # exit 0
+
+$ python3 tools/verify/check_crosscut.py     # 对照：plain origin/main fd1d686（不含 PR #48）
+SUMMARY: passed=192 failed=0 warned=0            # exit 0
+
+# 差值 4 = PR #48 在 check_crosscut.py 第 13 节新增的 4 条 VOCA-650 断言（allowAssociation 走向、
+# 未硬编码 allowAssociation=false、CandidateCommitPolicy.rule、CandidateCommitPolicyTest 存在）
+
+$ ./gradlew :app:testDebugUnitTest --tests '*AssociationCommitTest*' --tests '*CandidateCommitPolicyTest*'
+BUILD SUCCESSFUL in 28s
+  CandidateCommitPolicyTest  6 tests, 0 failures
+  AssociationCommitTest      8 tests, 0 failures
+ TOTAL 14, FAILED 0
+
+## AC-1 / AC-2（tools/qa/voca-173/ac.py mergeC）
+
+=== TAG=mergeC ===  version=versionName=1.6
+### AC-1 code=zhidao assoc_idx=0 expect='指导老师专'
+  host_ready=True typed='zhidao' pick_first=(319, 1376) after_pick='指导老师'
+  logcat_assoc_hit=1 miss=0
+    11-28 09:29:46.874  3682  3682 D IspeechIme: associate hit chars=4 count=24
+  tap_assoc=(103, 1377) assoc_cand_count=6 after='指导老师专'
+  delta='专'  banned='指导老师师'
+  VERDICT AC-1 PASS
+### AC-2 code=zhi assoc_idx=1 expect='之一'
+  host_ready=True typed='zhi' pick_first=(172, 1376) after_pick='之'
+  logcat_assoc_hit=1 miss=0
+    11-28 09:30:11.528  3682  3682 D IspeechIme: associate hit chars=1 count=25
+  tap_assoc=(373, 1377) assoc_cand_count=6 after='之一'
+  delta='一'  banned='之之'
+  VERDICT AC-2 PASS
+
+## AC-5 回归四条（同一合并包）
+
+### 拼音联想（zhi→之→空格）
+  after_pick='之'  associate hit chars=1 count=25
+  after_space_delta = 「🌹周六及节假日…泡池须知」共 345 字（联想整条上屏，未重复「之」）
+
+### 五笔联想（设置页切「五笔」后，khid→嘴尖）
+  typed='khid' pick=(223, 1376) after_pick='嘴尖'
+  associate hit chars=2 count=25     # 联想 6 项
+  idx1 点击 → after='嘴尖兵'  delta='兵'   # 只补「兵」，不重复「嘴尖」
+
+### 快捷短语联想（ganxie→感谢）
+  after_pick='感谢'  associate hit chars=2 count=25    # 联想 5 项
+  点联想首项 → after='感谢您的支持与理解，祝您生活愉快！'
+  # 整条短语上屏，未重复已上屏的「感谢」
+
+### AC-4（已上屏末字落在候选中间，用户词「包含」关系）—— 未取证
+  尝试路径：向 /data/data/com.ispeech.ime/files/user_dict.txt 注入 `han→含(99,cn)`、`baohan→包含(99,cn)`，
+  重启 IME 后 `han`→点首选`含`→associate hit chars=1 count=25（池里 25 条），但候选带每屏只显 5–6 项，
+  且按 tier 排序把 tier2 的「包含」排到单字之后；`keyevent 70` 翻页与候选带内左滑都没能把「包含」露出来，
+  未点中该项。规则级证据由 AssociationCommitTest 第 4 例
+  `association word without overlap is committed whole`（气→天气 整词上屏）覆盖，8 例 0 失败。
+
+## 与上一轮（817b6ad 单包）的差异
+
+- 上一轮 A 包是 debug 签名 + versionCode 5，模拟器现装 v1.6 release（versionCode 6）→ 必须卸载重装。
+  本轮改用「main + PR #48 + release 签名 + versionCode 7」，`install -r` 同签名升级成功，路径与用户机的升级方式一致。
+- 本轮被测树 = 合并后的 main 树（含 VOCA-651 的 PREFIX 收窄等 main 侧改动），不是 817b6ad 单分支树。
+
+## 环境注记
+
+- 模拟器 app 数据在本轮开始前残留 `input_method_mode=WUBI` 与旧用户词（上一轮遗留），导致 `zhidao` 被打成
+  五笔码、宿主显示「嘴尖ao」。已 `pm clear com.ispeech.ime` 拉平起点后重跑；该清数据只发生在模拟器，不涉及真机。
+- 真机仍缺：`adb devices -l` 只有 `emulator-5554`，本文件全部为模拟器口径，不作登记机型证据。
